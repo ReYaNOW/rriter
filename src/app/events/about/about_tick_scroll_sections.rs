@@ -268,6 +268,11 @@ fn about_to_wait_main_scroll(app: &mut App, dt: f32) -> bool {
         }
         needs_redraw = true;
     }
+    if app.tabs.get(app.active_tab).is_some_and(|tab| tab.kind.is_pdf())
+        && app.active_pdf_tab_mut().is_some_and(|pdf| pdf.scroll.update(dt))
+    {
+        needs_redraw = true;
+    }
     if markdown_read && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated) {
         needs_redraw = true;
     }

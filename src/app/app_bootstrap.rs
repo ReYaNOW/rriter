@@ -315,6 +315,7 @@ impl App {
             pdf_worker: None,
             next_doc_id: 1,
             pdf_textures_to_free: Vec::new(),
+            pdf_dark_pages: config.pdf_dark_pages,
             run_ide_on_startup: options.run_ide_on_startup,
             headless_mode: options.headless,
             ui_waker: options.ui_waker,

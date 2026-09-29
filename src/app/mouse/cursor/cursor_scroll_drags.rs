@@ -11,6 +11,11 @@ impl App {
         px: f32,
         py: f32,
     ) -> bool {
+        if self.active_pdf_tab().is_some_and(|pdf| pdf.scroll.is_dragging) {
+            let _ = self.update_pdf_scrollbar_drag(px, py);
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return true;
+        }
         if self.ide_panel.explorer_scroll.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let geometry = super::explorer_scrollbar_geometry(self, s);

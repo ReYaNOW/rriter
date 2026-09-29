@@ -230,6 +230,7 @@ pub(crate) fn test_app() -> Option<App> {
         pdf_worker: None,
         next_doc_id: 1,
         pdf_textures_to_free: Vec::new(),
+        pdf_dark_pages: true,
         run_ide_on_startup: false,
         headless_mode: false,
         ui_waker: crate::ui_waker::UiWaker::counting(),

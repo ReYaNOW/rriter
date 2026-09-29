@@ -19,27 +19,50 @@ impl Renderer {
         self.push_rect(x, y, w, h, self.theme.bg);
         let offset = tab.scroll.current.round() as i32;
         let clip = UiClipRect { x, y, w, h };
+        ui_registry.push_clip(clip);
         for page in tab.visible_range() {
             let Some((page_y, page_h)) = tab.layout.rows.get(page).copied() else { continue };
             let px = (x + ((w - tab.layout.page_w as f32) * 0.5)).round();
             let py = y + page_y as f32 - offset as f32;
             let page_w = tab.layout.page_w as f32;
             let page_h = page_h as f32;
-            self.push_rect(px, py, page_w, page_h, [0.94, 0.94, 0.91, 1.0]);
-            let caption = format!("стр. {}", page + 1);
-            let caption_scale = (0.9 * scale).max(0.6);
-            let text_w = self.measure_ui_width(&caption, caption_scale);
-            self.draw_string_scaled_pixel_snapped(
-                &caption,
-                (px + (page_w - text_w) * 0.5).round(),
-                (py + page_h * 0.5).round(),
-                [0.24, 0.25, 0.27, 1.0],
-                caption_scale,
-            );
+            if let Some(texture) = tab.textures.get(&page) {
+                self.draw_texture_quad(&texture.tex, px, py.round(), page_w, page_h);
+            } else {
+                let paper = if tab.dark { [0.11, 0.12, 0.13, 1.0] } else { [0.94, 0.94, 0.91, 1.0] };
+                self.push_rect(px, py, page_w, page_h, paper);
+                let caption = format!("стр. {}", page + 1);
+                let caption_scale = (0.9 * scale).max(0.6);
+                let text_w = self.measure_ui_width(&caption, caption_scale);
+                self.draw_string_scaled_pixel_snapped(
+                    &caption,
+                    (px + (page_w - text_w) * 0.5).round(),
+                    (py + page_h * 0.5).round(),
+                    self.theme.fg,
+                    caption_scale,
+                );
+            }
             ui_registry.register_rect_clipped(
                 UiId::PdfPage(page), px, py, page_w, page_h, clip, mx, my,
             );
         }
+        ui_registry.pop_clip();
+        let bar = crate::render_view::scrollbar_widget::Scrollbar {
+            style: crate::render_view::scrollbar_widget::ScrollbarStyle::MARKDOWN_READ,
+            axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+            lane: (x + w - 12.0 * scale, y, 12.0 * scale, h),
+            extent: crate::render_view::scrollbar_widget::ScrollbarExtent::new(
+                h, tab.layout.total_h as f32, tab.scroll.current,
+            ),
+        };
+        self.draw_scrollbar(&bar, scale, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: ui_registry, id: UiId::PdfScrollY, mx, my, blocker: false,
+        }));
+        let toggle = UiClipRect::new(x + w - 170.0 * scale, y + h - 30.0 * scale, 160.0 * scale, 24.0 * scale);
+        let hovered = ui_registry.register_rect_clipped(UiId::PdfDarkToggle, toggle.x, toggle.y, toggle.w, toggle.h, clip, mx, my);
+        self.push_rounded_rect(toggle.x, toggle.y, toggle.w, toggle.h, 4.0 * scale,
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], if hovered { 0.16 } else { 0.09 }]);
+        self.draw_string_scaled_pixel_snapped("Тёмные страницы", toggle.x + 8.0 * scale, (toggle.y + 16.0 * scale).round(), self.theme.fg, (0.78 * scale).max(0.6));
 
         // Engine screens show `PdfEngineState::label`;
         // a tab error set by the engine (already the full sentence) wins over it, so the

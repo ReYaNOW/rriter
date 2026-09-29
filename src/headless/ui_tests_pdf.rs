@@ -22,10 +22,19 @@ fn wait_ready(session: &mut HeadlessSession) {
     });
 }
 
+fn pdf_page_center_pixel(session: &mut HeadlessSession, path: &Path) -> [u8; 4] {
+    let lines = run_script(session, format!("screenshot {}\n", path.display()).as_bytes());
+    assert!(lines[0].starts_with("ok "), "{lines:?}");
+    let (x, y, w, h) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(0)).expect("visible first PDF page");
+    image::open(path).expect("decode PDF screenshot").to_rgba8()
+        .get_pixel((x + w * 0.5).round() as u32, (y + h * 0.5).round() as u32).0
+}
+
 #[test]
-fn pdf_fixture_opens_and_draws_visible_page_placeholders() {
+fn pdf_fixture_opens_and_draws_a_rasterized_page() {
     let (dir, path, mut session) = open_fixture("ui-pdf-open");
     wait_ready(&mut session);
+    wait_until(&mut session, 5000, "first PDF texture", |session| dump(session)["tabs"][0]["pdf"]["textures"].as_u64().unwrap_or(0) >= 1);
     let state = dump(&mut session);
     assert_eq!(state["tabs"][0]["kind"], "pdf");
     assert_eq!(state["tabs"][0]["pdf"]["page_count"], 3);
@@ -33,7 +42,53 @@ fn pdf_fixture_opens_and_draws_visible_page_placeholders() {
     assert!(has_ui(&state, "PdfPage(0)"), "{state}");
     let shot = run_script(&mut session, format!("screenshot {}/pdf.png\n", dir.display()).as_bytes());
     assert!(shot[0].starts_with("ok "), "{shot:?}");
+    let (page_x, page_y, page_w, page_h) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(0)).expect("visible PDF page");
+    let center_x = (page_x + page_w * 0.5).round() as u32;
+    let center_y = (page_y + page_h * 0.5).round() as u32;
+    let center = image::open(dir.join("pdf.png")).expect("decode PDF screenshot").to_rgba8().get_pixel(center_x, center_y).0;
+    assert!(center[..3].iter().all(|channel| *channel < 80), "default dark PDF page center was {center:?}");
+    let background = image::open(dir.join("pdf.png")).expect("decode PDF screenshot").to_rgba8().get_pixel(center_x.saturating_sub((page_w * 0.5) as u32 + 4), center_y).0;
+    assert_ne!(&center[..3], &background[..3], "PDF page center matches the surrounding viewport");
     assert_eq!(state["tabs"][0]["path"], path.display().to_string());
+}
+
+#[test]
+fn pdf_resize_navigation_wheel_and_dark_page_toggle_work() {
+    let (dir, _path, mut session) = open_fixture("ui-pdf-input-render");
+    wait_ready(&mut session);
+    wait_until(&mut session, 5000, "initial PDF texture", |session| dump(session)["tabs"][0]["pdf"]["textures"].as_u64().unwrap_or(0) >= 1);
+    let lines = run_script(&mut session, b"key end\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert_eq!(dump(&mut session)["tabs"][0]["pdf"]["current_page"], 2);
+    let lines = run_script(&mut session, b"key home\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert_eq!(dump(&mut session)["tabs"][0]["pdf"]["current_page"], 0);
+    let lines = run_script(&mut session, b"key pagedown\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 1000, "page-down scroll", |session| dump(session)["tabs"][0]["pdf"]["scroll"].as_f64().unwrap_or(0.0) > 0.0);
+    let before = dump(&mut session)["tabs"][0]["pdf"]["scroll"].as_f64().unwrap_or(0.0);
+    let page_before_resize = dump(&mut session)["tabs"][0]["pdf"]["current_page"].as_u64();
+    let lines = run_script(&mut session, b"wheel 0 -30\nkey a\nresize 800x600\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 5000, "resized PDF texture", |session| dump(session)["tabs"][0]["pdf"]["textures"].as_u64().unwrap_or(0) >= 1 && dump(session)["tabs"][0]["pdf"]["phase"] == "ready");
+    let state = dump(&mut session);
+    assert!(state["tabs"][0]["pdf"]["scroll"].as_f64().unwrap_or(0.0) > before);
+    assert_eq!(state["tabs"][0]["pdf"]["current_page"].as_u64(), page_before_resize);
+    assert_eq!(state["tabs"][0]["modified"], false);
+    click_ui(&mut session, "PdfDarkToggle");
+    let shot_path = dir.join("pdf-light.png");
+    run_script(&mut session, b"key home\n");
+    wait_until(&mut session, 5000, "light PDF raster", |session| {
+        dump(session)["tabs"][0]["pdf"]["scroll"].as_f64().unwrap_or(1.0) == 0.0
+            && pdf_page_center_pixel(session, &shot_path)[..3].iter().all(|channel| *channel > 200)
+    });
+    let px = pdf_page_center_pixel(&mut session, &shot_path);
+    assert!(px[..3].iter().all(|channel| *channel > 200), "light PDF page center was {px:?}");
+    click_ui(&mut session, "PdfDarkToggle");
+    let dark_path = dir.join("pdf-dark-again.png");
+    wait_until(&mut session, 5000, "dark PDF raster", |session| pdf_page_center_pixel(session, &dark_path)[..3].iter().all(|channel| *channel < 80));
+    let dark = pdf_page_center_pixel(&mut session, &dark_path);
+    assert!(dark[..3].iter().all(|channel| *channel < 80), "dark PDF page center was {dark:?}");
 }
 
 #[test]

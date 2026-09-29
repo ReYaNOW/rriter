@@ -451,6 +451,8 @@ pub enum UiId {
     StatusBar,
     StatusDiagnostics,
     MarkdownModeToggle,
+    PdfDarkToggle,
+    PdfScrollY,
     TerminalBody,
     TerminalScrollY,
     TerminalTab(usize),

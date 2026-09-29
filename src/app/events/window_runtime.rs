@@ -359,6 +359,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         ide_ignore_patterns: app.ide_ignore_patterns.clone(),
         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
             .load(std::sync::atomic::Ordering::Relaxed),
+        pdf_dark_pages: app.pdf_dark_pages,
         ctrl_wheel_multiplier: app.ctrl_wheel_multiplier,
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),

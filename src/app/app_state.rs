@@ -1413,6 +1413,7 @@ pub struct App {
     pub pdf_worker: Option<crate::pdf::PdfWorkerHandle>,
     pub next_doc_id: u64,
     pub pdf_textures_to_free: Vec<glow::Texture>,
+    pub pdf_dark_pages: bool,
 
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,

@@ -164,6 +164,7 @@ impl App {
     }
 
     pub fn pdf_prepare_frame(&mut self, renderer: &mut crate::renderer::Renderer) {
+        for texture in self.pdf_textures_to_free.drain(..) { renderer.delete_texture(texture); }
         if !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) { return; }
         let s = renderer.scale_factor;
         let panel_left = self.ide_panel.visible_left_width(s);
@@ -171,10 +172,34 @@ impl App {
         let bottom = self.ide_panel.editor_reserved_bottom_height(s);
         let h = crate::render_view::editor_view_height(renderer.height, top, bottom, self.is_ide_mode, s);
         let (x, y, w, h) = renderer.tab_body_rect(s, panel_left, top, h);
-        if let Some(tab) = self.active_pdf_tab_mut() {
+        let dark_pages = self.pdf_dark_pages;
+        let window = self.window.as_ref();
+        let worker = self.pdf_worker.as_ref();
+        let (tabs, textures_to_free) = (&mut self.tabs, &mut self.pdf_textures_to_free);
+        if let Some(tab) = tabs.get_mut(self.active_tab).and_then(|tab| tab.pdf.as_deref_mut()) {
             tab.set_viewport(w.max(0.0) as u32, h.max(0.0) as u32, s);
-            let requests = tab.take_render_requests(tab.dark);
-            if let Some(worker) = self.pdf_worker.as_ref() {
+            let wanted = tab.wanted_range();
+            tab.textures.retain(|page, texture| {
+                if wanted.contains(page) { true } else { textures_to_free.push(texture.tex); false }
+            });
+            let count = tab.pending_bitmaps.len().min(2);
+            for bitmap in tab.pending_bitmaps.drain(..count) {
+                if !wanted.contains(&bitmap.page)
+                    || bitmap.r#gen != tab.gens.render.load(std::sync::atomic::Ordering::Relaxed)
+                    || (bitmap.width_px as usize).checked_mul(bitmap.height_px as usize).and_then(|size| size.checked_mul(4)) != Some(bitmap.rgba.len()) { continue; }
+                if let Some(tex) = renderer.upload_rgba(bitmap.width_px, bitmap.height_px, &bitmap.rgba) {
+                    if let Some(old) = tab.textures.insert(bitmap.page, super::PageTexture { tex, width_px: bitmap.width_px, height_px: bitmap.height_px, r#gen: bitmap.r#gen }) {
+                        textures_to_free.push(old.tex);
+                    }
+                } else {
+                    tab.requested.insert((bitmap.page, bitmap.r#gen));
+                }
+            }
+            if !tab.pending_bitmaps.is_empty() {
+                if let Some(window) = window { window.request_redraw(); }
+            }
+            let requests = tab.take_render_requests(dark_pages);
+            if let Some(worker) = worker {
                 for request in requests { let _ = worker.tx.send(request); }
             }
         }
@@ -182,6 +207,12 @@ impl App {
     }
 
     pub fn prepare_pdf_tab_close(&mut self, idx: usize) {
+        {
+            let (tabs, textures_to_free) = (&mut self.tabs, &mut self.pdf_textures_to_free);
+            if let Some(pdf) = tabs.get_mut(idx).and_then(|tab| tab.pdf.as_deref_mut()) {
+                textures_to_free.extend(pdf.textures.drain().map(|(_, texture)| texture.tex));
+            }
+        }
         let id = {
             let Some(pdf) = self.pdf_tab_mut(idx) else { return };
             pdf.gens.closed.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -192,14 +223,27 @@ impl App {
     }
 
     pub fn pdf_tab_deactivated(&mut self, idx: usize) {
-        if let Some(pdf) = self.pdf_tab_mut(idx) {
+        let (tabs, textures_to_free) = (&mut self.tabs, &mut self.pdf_textures_to_free);
+        if let Some(pdf) = tabs.get_mut(idx).and_then(|tab| tab.pdf.as_deref_mut()) {
             pdf.pending_bitmaps.clear();
             pdf.requested.clear();
             pdf.gens.clear_wanted();
+            textures_to_free.extend(pdf.textures.drain().map(|(_, texture)| texture.tex));
         }
     }
 
-    pub fn pdf_tab_activated(&mut self, _idx: usize) {}
+    pub fn pdf_tab_activated(&mut self, idx: usize) {
+        if let Some(pdf) = self.pdf_tab_mut(idx) { pdf.layout_dirty = true; }
+    }
+
+    pub fn toggle_pdf_dark_pages(&mut self) {
+        self.pdf_dark_pages = !self.pdf_dark_pages;
+        self.save_current_config();
+        for tab in &self.tabs {
+            if let Some(pdf) = tab.pdf.as_ref() { pdf.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+        }
+        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+    }
 }
 
 fn pdf_event_doc_id(event: &PdfEvent) -> Option<DocId> {

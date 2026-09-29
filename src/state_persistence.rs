@@ -23,6 +23,7 @@ pub struct Config {
     pub ide_workspaces: Vec<std::path::PathBuf>,
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
+    pub pdf_dark_pages: bool,
     pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
@@ -37,6 +38,7 @@ impl Default for Config {
             ide_workspaces: Vec::new(),
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
+            pdf_dark_pages: true,
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
@@ -607,6 +609,7 @@ fn format_config_content(config: &Config) -> String {
         "ide_workspaces": workspaces,
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
+        "pdf_dark_pages": config.pdf_dark_pages,
         "ctrl_wheel_multiplier": normalize_ctrl_wheel_multiplier(config.ctrl_wheel_multiplier),
         "tool_paths": tool_paths,
         "dart": {
@@ -694,6 +697,9 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .and_then(serde_json::Value::as_bool)
     {
         config.enable_telemetry = value;
+    }
+    if let Some(value) = value.get("pdf_dark_pages").and_then(serde_json::Value::as_bool) {
+        config.pdf_dark_pages = value;
     }
     if let Some(value) = value
         .get("ctrl_wheel_multiplier")

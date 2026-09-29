@@ -259,6 +259,11 @@ impl App {
                 my,
             );
             self.handle_ui_click(clicked_id);
+        } else if clicked_id == crate::ui_system::UiId::PdfScrollY {
+            if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+                self.press_pdf_scrollbar(mx, my);
+            }
+            self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::GitLogsScroll {
             if state == ElementState::Pressed
                 && button == winit::event::MouseButton::Left

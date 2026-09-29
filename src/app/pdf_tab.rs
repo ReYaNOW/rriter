@@ -1,4 +1,4 @@
-use crate::pdf::{DocGens, DocId, LinkTarget, PageGeom, PageLink, PageText, PdfEvent, PdfRequest, PtRect};
+use crate::pdf::{DocGens, DocId, PageGeom, PageLink, PageText, PdfEvent, PdfRequest, PtRect};
 use crate::scroll::ScrollState;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod engine;
+mod input;
 
 #[derive(Clone, Debug)]
 pub enum PdfEngineState {
@@ -62,8 +63,13 @@ pub struct PdfSelection {
     pub head: (usize, usize),
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PageTexture;
+#[derive(Clone, Copy, Debug)]
+pub struct PageTexture {
+    pub tex: glow::Texture,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub r#gen: u32,
+}
 
 #[derive(Debug)]
 pub struct PendingBitmap {
@@ -188,7 +194,8 @@ impl PdfTabState {
             PdfEvent::Page { page, r#gen, width_px, height_px, rgba, .. } => {
                 self.requested.remove(&(*page, *r#gen));
                 if *r#gen != self.gens.render.load(std::sync::atomic::Ordering::Relaxed)
-                    || !self.gens.contains(*page) || *page >= self.pages.len() { return PdfEventOutcome::Ignore; }
+                    || !self.gens.contains(*page) || *page >= self.pages.len()
+                    || (*width_px as usize).checked_mul(*height_px as usize).and_then(|size| size.checked_mul(4)) != Some(rgba.len()) { return PdfEventOutcome::Ignore; }
                 self.pending_bitmaps.push(PendingBitmap { page: *page, r#gen: *r#gen, width_px: *width_px, height_px: *height_px, rgba: rgba.clone() });
                 PdfEventOutcome::Bitmap
             }
@@ -272,7 +279,8 @@ impl PdfTabState {
         let wanted = self.wanted_range();
         let mut requests = Vec::new();
         for page in wanted {
-            if self.textures.contains_key(&page) || !self.requested.insert((page, r#gen)) { continue; }
+            if self.textures.get(&page).is_some_and(|texture| texture.r#gen == r#gen)
+                || !self.requested.insert((page, r#gen)) { continue; }
             let Some(geom) = self.pages.get(page) else { continue };
             let (width_px, _) = PdfLayout::raster_size(self.layout.page_w, geom);
             requests.push(PdfRequest::Render { id, page, width_px, r#gen, dark });
@@ -286,13 +294,22 @@ impl PdfTabState {
         let frac = y_pt.map(|value| (value / self.pages[page].height_pt.max(1.0)).clamp(0.0, 1.0)).unwrap_or(0.0);
         self.scroll.animate_to(y as f32 + frac * h as f32); self.clamp_scroll();
     }
+    pub fn scroll_by(&mut self, dy: f32) {
+        self.scroll.anim_speed = 7.0;
+        self.scroll.scroll_by(dy);
+        self.clamp_scroll();
+    }
+    pub fn page_up(&mut self) { self.scroll_by(-(self.viewport.1 as f32)); }
+    pub fn page_down(&mut self) { self.scroll_by(self.viewport.1 as f32); }
+    pub fn home(&mut self) { self.scroll.jump_to(0.0); }
+    pub fn end(&mut self) { self.scroll.jump_to(self.layout.total_h.saturating_sub(self.viewport.1 as i32).max(0) as f32); }
     pub fn page_count(&self) -> usize { self.pages.len() }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PageGeom, PdfLayout, PdfPhase, PdfTabState};
-    use crate::pdf::{DocGens, PdfEvent};
+    use super::{PageGeom, PdfEventOutcome, PdfLayout, PdfPhase, PdfTabState};
+    use crate::pdf::{DocGens, PdfEvent, PdfRequest};
     use std::path::PathBuf;
     use std::sync::Arc;
     #[test]
@@ -308,6 +325,44 @@ mod tests {
         assert_eq!(PdfLayout::raster_size(968, &PageGeom { width_pt: 0.0, height_pt: 0.0 }), (64, 64));
         assert_eq!(PdfLayout::compute(&[letter], 10, 1.0).page_w, 64);
         assert_eq!(PdfLayout::compute(&[], 1000, 1.0).total_h, 32);
+    }
+
+    #[test]
+    fn render_requests_are_deduplicated_and_rejected_by_generation_and_size() {
+        let geom = PageGeom { width_pt: 612.0, height_pt: 792.0 };
+        let pages = vec![geom; 3];
+        let mut tab = PdfTabState::new(PathBuf::from("a.pdf"), Arc::new(DocGens::new()), PdfPhase::Loading);
+        tab.doc = Some(crate::pdf::DocId(1));
+        tab.apply_event(&PdfEvent::Opened { id: crate::pdf::DocId(1), pages });
+        tab.set_viewport(1000, 800, 1.0);
+        let requests = tab.take_render_requests(false);
+        assert_eq!(requests.len(), 3);
+        assert!(requests.iter().all(|request| matches!(request, PdfRequest::Render { width_px: 968, r#gen: 1, .. })));
+        assert!(tab.take_render_requests(false).is_empty());
+        let malformed = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 1, width_px: 2, height_px: 2, rgba: vec![0; 3] };
+        assert_eq!(tab.apply_event(&malformed), PdfEventOutcome::Ignore);
+        assert!(tab.pending_bitmaps.is_empty());
+        tab.set_viewport(900, 800, 1.0);
+        assert_eq!(tab.gens.render.load(std::sync::atomic::Ordering::Relaxed), 2);
+        let stale = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 1, width_px: 2, height_px: 2, rgba: vec![0; 16] };
+        assert_eq!(tab.apply_event(&stale), PdfEventOutcome::Ignore);
+        let current = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 2, width_px: 2, height_px: 2, rgba: vec![0; 16] };
+        assert_eq!(tab.apply_event(&current), PdfEventOutcome::Bitmap);
+        assert_eq!(tab.pending_bitmaps.len(), 1);
+    }
+
+    #[test]
+    fn scroll_navigation_clamps_to_document_bounds() {
+        let geom = PageGeom { width_pt: 612.0, height_pt: 792.0 };
+        let mut tab = PdfTabState::new(PathBuf::from("a.pdf"), Arc::new(DocGens::new()), PdfPhase::Loading);
+        tab.apply_event(&PdfEvent::Opened { id: crate::pdf::DocId(1), pages: vec![geom; 3] });
+        tab.set_viewport(1000, 800, 1.0);
+        tab.scroll_by(f32::MAX);
+        assert_eq!(tab.scroll.target, tab.layout.total_h.saturating_sub(800) as f32);
+        tab.end();
+        assert_eq!(tab.scroll.current, tab.scroll.target);
+        tab.home();
+        assert_eq!(tab.scroll.current, 0.0);
     }
 
     #[test]

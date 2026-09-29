@@ -477,6 +477,10 @@ mod tests {
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
+        self.draw_texture_quad(tex, x, y, w, h);
+    }
+
+    pub fn draw_texture_quad(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
         self.flush();
         unsafe {
             self.gl.active_texture(glow::TEXTURE0);

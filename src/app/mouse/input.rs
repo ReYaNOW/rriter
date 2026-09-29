@@ -330,6 +330,7 @@ impl App {
         self.ide_panel.database.table_modal_input_dragging = false;
 
         self.scroll_y.end_drag();
+        if let Some(pdf) = self.active_pdf_tab_mut() { pdf.scroll.end_drag(); }
         self.markdown.end_code_scroll_drag();
         self.scroll_x.end_drag();
         self.settings_scroll.end_drag();
