@@ -22,7 +22,11 @@ impl App {
         if !matches!(self.pdf_engine, PdfEngineState::NotStarted) {
             return;
         }
-        match crate::pdf::library::locate() {
+        let located = match self.pdf_engine_path_override.clone() {
+            Some(explicit) => crate::pdf::library::locate_with(explicit),
+            None => crate::pdf::library::locate(),
+        };
+        match located {
             crate::pdf::library::LocateResult::Found(path) => {
                 self.pdf_worker = Some(crate::pdf::worker::start(path, &self.ui_waker));
                 self.pdf_engine = PdfEngineState::Starting;
@@ -268,8 +272,8 @@ impl App {
                     tab.requested.insert((bitmap.page, bitmap.r#gen));
                 }
             }
-            if !tab.pending_bitmaps.is_empty() {
-                if let Some(window) = window { window.request_redraw(); }
+            if !tab.pending_bitmaps.is_empty() && let Some(window) = window {
+                window.request_redraw();
             }
             let mut requests = tab.take_render_requests(dark_pages);
             requests.extend(tab.take_text_requests());

@@ -155,12 +155,11 @@ impl App {
         let scale = self.renderer.as_ref()?.scale_factor;
         let lane = self.ui_registry.rect_for(crate::ui_system::UiId::PdfScrollY)?;
         let pdf = self.active_pdf_tab()?;
-        let geometry = crate::render_view::scrollbar_widget::Scrollbar {
+        crate::render_view::scrollbar_widget::Scrollbar {
             style: crate::render_view::scrollbar_widget::ScrollbarStyle::MARKDOWN_READ,
             axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
             lane,
             extent: crate::render_view::scrollbar_widget::ScrollbarExtent::new(pdf.viewport.1 as f32, pdf.layout.total_h as f32, pdf.scroll.current),
-        }.geometry(scale);
-        geometry
+        }.geometry(scale)
     }
 }

@@ -1410,6 +1410,9 @@ pub struct App {
     pub tabs: Vec<EditorTab>,
     pub active_tab: usize,
     pub pdf_engine: super::pdf_tab::PdfEngineState,
+    /// Replaces the `RRITER_PDFIUM_PATH` lookup when `Some` (`Some(None)` = variable absent);
+    /// lets tests pick the engine location without touching the process environment.
+    pub pdf_engine_path_override: Option<Option<std::ffi::OsString>>,
     pub pdf_worker: Option<crate::pdf::PdfWorkerHandle>,
     pub next_doc_id: u64,
     pub pdf_textures_to_free: Vec<glow::Texture>,

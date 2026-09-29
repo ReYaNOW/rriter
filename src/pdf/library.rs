@@ -118,7 +118,12 @@ pub fn candidate_paths(exe_dir: &Path, managed_dir: &Path, name: &str) -> Vec<Pa
 }
 
 pub fn locate() -> LocateResult {
-    if let Some(path) = std::env::var_os("RRITER_PDFIUM_PATH") {
+    locate_with(std::env::var_os("RRITER_PDFIUM_PATH"))
+}
+
+/// `explicit` is the value of `RRITER_PDFIUM_PATH` (`None` when the variable is absent).
+pub fn locate_with(explicit: Option<std::ffi::OsString>) -> LocateResult {
+    if let Some(path) = explicit {
         let path = PathBuf::from(path);
         return if path.is_file() {
             LocateResult::Found(path)
@@ -165,7 +170,7 @@ pub fn locate() -> LocateResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{LocateResult, Manifest, archive_url, candidate_paths, locate, manifest, version_slug};
+    use super::{LocateResult, Manifest, archive_url, candidate_paths, locate_with, manifest, version_slug};
     use std::fs;
     use std::path::PathBuf;
 
@@ -233,8 +238,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rriter_pdf_locate_{}", std::process::id()));
         fs::create_dir_all(&root).expect("temp directory should be created");
         let missing = root.join("nope");
-        unsafe { std::env::set_var("RRITER_PDFIUM_PATH", &missing) };
-        match locate() {
+        match locate_with(Some(missing.clone().into_os_string())) {
             LocateResult::Missing { message, installable } => {
                 assert!(!installable);
                 assert!(message.contains(&missing.to_string_lossy().to_string()));
@@ -244,9 +248,10 @@ mod tests {
 
         let existing = root.join("pdfium");
         fs::write(&existing, b"stub").expect("temp file should be created");
-        unsafe { std::env::set_var("RRITER_PDFIUM_PATH", &existing) };
-        assert!(matches!(locate(), LocateResult::Found(path) if path == existing));
-        unsafe { std::env::remove_var("RRITER_PDFIUM_PATH") };
+        assert!(matches!(
+            locate_with(Some(existing.clone().into_os_string())),
+            LocateResult::Found(path) if path == existing
+        ));
         let _ = fs::remove_file(existing);
         let _ = fs::remove_dir(root);
     }

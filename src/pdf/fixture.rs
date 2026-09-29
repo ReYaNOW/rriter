@@ -39,16 +39,16 @@ fn write_fixture_pdf_with_target_height(
     offsets.push(0usize);
     for (index, object) in objects.iter().enumerate() {
         offsets.push(pdf.len());
-        let _ = write!(pdf, "{} 0 obj\n{}\nendobj\n", index + 1, object);
+        let _ = writeln!(pdf, "{} 0 obj\n{}\nendobj", index + 1, object);
     }
     let xref_offset = pdf.len();
-    let _ = write!(pdf, "xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
+    let _ = writeln!(pdf, "xref\n0 {}\n0000000000 65535 f ", objects.len() + 1);
     for offset in offsets.iter().skip(1) {
-        let _ = write!(pdf, "{offset:010} 00000 n \n");
+        let _ = writeln!(pdf, "{offset:010} 00000 n ");
     }
-    let _ = write!(
+    let _ = writeln!(
         pdf,
-        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF",
         objects.len() + 1
     );
     let _ = fs::create_dir_all(dir);

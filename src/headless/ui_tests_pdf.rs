@@ -25,8 +25,8 @@ fn wait_ready(session: &mut HeadlessSession) {
 fn pdf_page_center_pixel(session: &mut HeadlessSession, path: &Path) -> [u8; 4] {
     let lines = run_script(session, format!("screenshot {}\n", path.display()).as_bytes());
     assert!(lines[0].starts_with("ok "), "{lines:?}");
-    let (x, y, w, h) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(0)).expect("visible first PDF page");
-    image::open(path).expect("decode PDF screenshot").to_rgba8()
+    let (x, y, w, h) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(0)).unwrap_or_else(|| panic!("visible first PDF page"));
+    image::open(path).unwrap_or_else(|error| panic!("decode PDF screenshot: {error}")).to_rgba8()
         .get_pixel((x + w * 0.5).round() as u32, (y + h * 0.5).round() as u32).0
 }
 
@@ -154,10 +154,10 @@ fn closing_a_pdf_before_opened_leaves_the_session_usable() {
 
 #[test]
 fn unavailable_pdfium_shows_engine_message_without_install_button() {
-    unsafe { std::env::set_var("RRITER_PDFIUM_PATH", "/nonexistent/libpdfium.so"); }
     let dir = scratch_dir("ui-pdf-engine-missing");
     let path = crate::pdf::fixture::write_fixture_pdf(&dir);
     let mut session = session_for_test(1280, 720);
+    session.app.pdf_engine_path_override = Some(Some("/nonexistent/libpdfium.so".into()));
     let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = dump(&mut session);
@@ -172,10 +172,10 @@ fn unavailable_pdfium_shows_engine_message_without_install_button() {
 #[test]
 fn missing_pdfium_offers_download_and_returns_to_retry_when_install_fails() {
     // The library is in neither the test binary's directory nor the per-process test profile.
-    unsafe { std::env::remove_var("RRITER_PDFIUM_PATH"); }
     let dir = scratch_dir("ui-pdf-engine-install");
     let path = crate::pdf::fixture::write_fixture_pdf(&dir);
     let mut session = session_for_test(1280, 720);
+    session.app.pdf_engine_path_override = Some(None);
     let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = dump(&mut session);
@@ -208,15 +208,15 @@ fn page_point(session: &HeadlessSession, x_pt: f32, y_pt: f32) -> (f32, f32) {
 
 /// Window point of a page coordinate on a page that is currently visible.
 fn page_point_on(session: &HeadlessSession, page: usize, x_pt: f32, y_pt: f32) -> (f32, f32) {
-    let (x, y, w, _) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(page)).expect("visible PDF page");
+    let (x, y, w, _) = session.app.ui_registry.rect_for(crate::ui_system::UiId::PdfPage(page)).unwrap_or_else(|| panic!("visible PDF page {page}"));
     let k = w / 612.0;
     (x + x_pt * k, y + y_pt * k)
 }
 
 /// Registry name of the first-page link whose target satisfies `want` (index comes from the tab, not from the fixture order).
 fn link_id(session: &HeadlessSession, want: impl Fn(&crate::pdf::LinkTarget) -> bool) -> String {
-    let pdf = session.app.active_pdf_tab().expect("PDF tab");
-    let idx = pdf.links[0].iter().position(|link| want(&link.target)).expect("fixture link on page 0");
+    let pdf = session.app.active_pdf_tab().unwrap_or_else(|| panic!("PDF tab"));
+    let idx = pdf.links[0].iter().position(|link| want(&link.target)).unwrap_or_else(|| panic!("fixture link on page 0"));
     format!("PdfLink(0, {idx})")
 }
 

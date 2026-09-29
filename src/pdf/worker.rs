@@ -202,7 +202,7 @@ fn search_one_page(
     search.next_page += 1;
     let cached = text_cache.entry((search.id, page)).or_insert_with(|| {
         let (text, links) = pdfium_backend::text(doc, page)
-            .map_or_else(|_| (PageText::default(), Vec::new()), |result| result);
+            .unwrap_or_else(|_| (PageText::default(), Vec::new()));
         CachedPage { text: Arc::new(text), links: links.into() }
     });
     let string = cached.text.text();
