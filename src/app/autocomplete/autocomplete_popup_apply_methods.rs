@@ -1299,8 +1299,14 @@ impl App {
                 lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
             }
         }
-        self.highlighter
-            .apply_edits(self.editor.version, edits, None, None);
+        self.highlighter.apply_document_edits(
+            self.editor.version,
+            edits,
+            None,
+            None,
+            self.editor.len(),
+            || self.editor.get_full_text(),
+        );
         self.last_sent_version = self.editor.version;
         if self.active_tab_is_database_query() {
             self.refresh_active_database_query_analysis();

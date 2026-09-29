@@ -84,6 +84,8 @@ impl Highlighter {
                 let mut last_full_spans: Vec<ColorSpan> = Vec::new();
 
                 let mut replica_text = String::new();
+                // Document version `replica_text` holds; `None` once it lost sync.
+                let mut replica_version: Option<u64> = Some(0);
                 let mut current_tree: Option<tree_sitter::Tree> = None;
                 let mut current_ext = String::new();
 
@@ -98,7 +100,6 @@ impl Highlighter {
                 }
                 let batch_count = msgs.len();
 
-                let mut final_version = 0;
                 let mut final_request_id = 0;
                 let mut do_highlight = false;
                 let mut final_edit_start_byte: Option<usize> = None;
@@ -115,11 +116,13 @@ impl Highlighter {
                     match m {
                         HighlighterMessage::Shutdown => return,
                         HighlighterMessage::Restore {
+                            version,
                             text,
                             ext,
                             spans,
                         } => {
                             replica_text = text;
+                            replica_version = Some(version);
                             current_ext = ext;
                             current_tree = None;
                             last_full_spans = spans;
@@ -133,9 +136,9 @@ impl Highlighter {
                         } => {
                             reset_msg_count += 1;
                             final_request_id = request_id;
-                            final_version = version;
                             final_priority_anchor = priority_anchor;
                             replica_text = text;
+                            replica_version = Some(version);
                             current_ext = ext;
                             current_tree = None;
                             do_highlight = true;
@@ -143,6 +146,7 @@ impl Highlighter {
                         }
                         HighlighterMessage::Edits {
                             request_id,
+                            base_version,
                             version,
                             edits,
                             edit_start_byte,
@@ -153,15 +157,22 @@ impl Highlighter {
                             edit_msg_count += 1;
                             edit_op_count += edits.len();
                             final_request_id = request_id;
-                            final_version = version;
                             final_edit_start_byte = edit_start_byte;
                             final_edit_end_byte = edit_end_byte;
                             final_invalidate_start_byte = invalidate_start_byte;
                             final_invalidate_end_byte = invalidate_end_byte;
-                            for edit in edits {
+                            // Edits made against another version would land on the wrong
+                            // bytes: drop the replica until the runtime resets it.
+                            if replica_version != Some(base_version) {
+                                replica_version = None;
+                            }
+                            for edit in &edits {
+                                if replica_version.is_none() {
+                                    break;
+                                }
                                 match edit {
                                     SyncEdit::Insert { offset, text } => {
-                                        let len = text.len();
+                                        let (offset, len) = (*offset, text.len());
                                         for span in &mut last_full_spans {
                                             if span.start >= offset {
                                                 span.start += len;
@@ -170,39 +181,9 @@ impl Highlighter {
                                                 span.end += len;
                                             }
                                         }
-
-                                        let start_byte = offset;
-                                        let old_end_byte = offset;
-                                        let new_end_byte = offset + text.len();
-
-                                        let start_position = get_point(&replica_text, start_byte);
-                                        let old_end_position = start_position;
-
-                                        if offset <= replica_text.len()
-                                            && replica_text.is_char_boundary(offset)
-                                        {
-                                            replica_text.insert_str(offset, &text);
-                                        } else {
-                                            replica_text.push_str(&text);
-                                            current_tree = None;
-                                        }
-
-                                        let new_end_position =
-                                            get_point(&replica_text, new_end_byte);
-
-                                        let input_edit = tree_sitter::InputEdit {
-                                            start_byte,
-                                            old_end_byte,
-                                            new_end_byte,
-                                            start_position,
-                                            old_end_position,
-                                            new_end_position,
-                                        };
-                                        if let Some(tree) = &mut current_tree {
-                                            tree.edit(&input_edit);
-                                        }
                                     }
                                     SyncEdit::Delete { offset, len } => {
+                                        let (offset, len) = (*offset, *len);
                                         for span in &mut last_full_spans {
                                             if span.start >= offset + len {
                                                 span.start -= len;
@@ -215,50 +196,27 @@ impl Highlighter {
                                             }
                                         }
                                         last_full_spans.retain(|s| s.start < s.end);
-
-                                        let start_byte = offset;
-                                        let old_end_byte = offset + len;
-                                        let new_end_byte = offset;
-
-                                        let start_position = get_point(&replica_text, start_byte);
-                                        let old_end_position =
-                                            get_point(&replica_text, old_end_byte);
-
-                                        if offset + len <= replica_text.len()
-                                            && replica_text.is_char_boundary(offset)
-                                            && replica_text.is_char_boundary(offset + len)
-                                        {
-                                            replica_text.replace_range(offset..offset + len, "");
-                                        } else {
-                                            current_tree = None;
-                                        }
-
-                                        let new_end_position = start_position;
-
-                                        let input_edit = tree_sitter::InputEdit {
-                                            start_byte,
-                                            old_end_byte,
-                                            new_end_byte,
-                                            start_position,
-                                            old_end_position,
-                                            new_end_position,
-                                        };
-                                        if let Some(tree) = &mut current_tree {
-                                            tree.edit(&input_edit);
-                                        }
                                     }
                                 }
+                                if !apply_sync_edit_to_replica(
+                                    &mut replica_text,
+                                    current_tree.as_mut(),
+                                    edit,
+                                ) {
+                                    replica_version = None;
+                                }
+                            }
+                            if replica_version.is_some() {
+                                replica_version = Some(version);
                             }
                             do_highlight = true;
                         }
                         HighlighterMessage::Priority {
                             request_id,
-                            version,
                             priority_anchor,
                         } => {
                             priority_msg_count += 1;
                             final_request_id = request_id;
-                            final_version = version;
                             final_priority_anchor = priority_anchor;
                             do_highlight = true;
                         }
@@ -269,9 +227,21 @@ impl Highlighter {
                     break;
                 }
 
+                let Some(highlighted_version) = replica_version else {
+                    // Never highlight (or hand out a tree of) a text the editor does not hold.
+                    current_tree = None;
+                    worker_control_for_thread
+                        .replica_desynced
+                        .store(true, Ordering::Release);
+                    worker_control_for_thread.wake_ui();
+                    continue;
+                };
                 if !do_highlight {
                     continue;
                 }
+                // Replies carry the version of the text they were built from, whatever
+                // version the triggering message named.
+                let final_version = highlighted_version;
 
                 let text = &replica_text;
                 let ext = &current_ext;
@@ -511,7 +481,10 @@ impl Highlighter {
                                                 if node.kind() == "block" {
                                                     while start_byte > 0 {
                                                         start_byte -= 1;
-                                                        let b = text.as_bytes()[start_byte];
+                                                        let Some(&b) = text.as_bytes().get(start_byte)
+                                                        else {
+                                                            break;
+                                                        };
                                                         if b != b' '
                                                             && b != b'\t'
                                                             && b != b'\n'
@@ -586,7 +559,9 @@ impl Highlighter {
                                         || kind == "type_identifier"
                                     {
                                         if let Ok(s) = std::str::from_utf8(
-                                            &text.as_bytes()[node.start_byte()..node.end_byte()],
+                                            text.as_bytes()
+                                                .get(node.start_byte()..node.end_byte())
+                                                .unwrap_or_default(),
                                         ) {
                                             if s.len() > 2 && !s.contains('\n') && !s.contains(' ')
                                             {
@@ -838,8 +813,12 @@ impl Highlighter {
                                             for cap in m.captures {
                                                 if Some(cap.index) == lang_cap_idx {
                                                     if let Ok(s) = std::str::from_utf8(
-                                                        &text.as_bytes()[cap.node.start_byte()
-                                                            ..cap.node.end_byte()],
+                                                        text.as_bytes()
+                                                            .get(
+                                                                cap.node.start_byte()
+                                                                    ..cap.node.end_byte(),
+                                                            )
+                                                            .unwrap_or_default(),
                                                     ) {
                                                         inj_lang = s.to_string();
                                                     }
@@ -935,12 +914,15 @@ impl Highlighter {
                                                                         [cap.index as usize];
                                                                     let node_text =
                                                                         std::str::from_utf8(
-                                                                            &text.as_bytes()[cap
-                                                                                .node
-                                                                                .start_byte()
-                                                                                ..cap
-                                                                                    .node
-                                                                                    .end_byte()],
+                                                                            text.as_bytes()
+                                                                                .get(
+                                                                                    cap.node
+                                                                                        .start_byte()
+                                                                                        ..cap
+                                                                                            .node
+                                                                                            .end_byte(),
+                                                                                )
+                                                                                .unwrap_or_default(),
                                                                         )
                                                                         .unwrap_or("");
 
@@ -1106,6 +1088,7 @@ impl Highlighter {
             is_complete: true,
             current_request_id: 0,
             sync_text: String::new(),
+            sync_version: 0,
             sync_ext: String::new(),
             sync_parser: tree_sitter::Parser::new(),
             sync_tree: None,

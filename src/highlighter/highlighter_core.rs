@@ -2,7 +2,7 @@
 
 #[path = "../highlighter_runtime.rs"]
 mod runtime;
-use runtime::flatten_spans;
+use runtime::{apply_sync_edit_to_replica, flatten_spans};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +98,7 @@ pub enum SyncEdit {
 
 pub enum HighlighterMessage {
     Restore {
+        version: u64,
         text: String,
         ext: String,
         spans: Vec<ColorSpan>,
@@ -109,8 +110,10 @@ pub enum HighlighterMessage {
         ext: String,
         priority_anchor: usize,
     },
+    /// The worker applies `edits` only on top of a replica of exactly `base_version`.
     Edits {
         request_id: u64,
+        base_version: u64,
         version: u64,
         edits: Vec<SyncEdit>,
         edit_start_byte: Option<usize>,
@@ -118,9 +121,9 @@ pub enum HighlighterMessage {
         invalidate_start_byte: Option<usize>,
         invalidate_end_byte: Option<usize>,
     },
+    /// No version: the reply names the version of the replica it highlighted.
     Priority {
         request_id: u64,
-        version: u64,
         priority_anchor: usize,
     },
     Shutdown,
@@ -131,12 +134,16 @@ struct HighlighterWorkerControl {
     /// Bound by the owner after construction (`Highlighter::bind_ui_waker`); synchronous
     /// helpers that wait for the result themselves leave it empty.
     ui_waker: std::sync::OnceLock<crate::ui_waker::UiWaker>,
+    /// Set by the worker when its replica lost sync (version gap or an edit out of bounds);
+    /// the runtime answers with a Reset (`Highlighter::resync_worker_if_desynced`).
+    replica_desynced: AtomicBool,
 }
 
 impl HighlighterWorkerControl {
     fn new() -> Self {
         Self {
             cancelled: AtomicBool::new(false),
+            replica_desynced: AtomicBool::new(false),
             ui_waker: std::sync::OnceLock::new(),
         }
     }
@@ -178,6 +185,8 @@ pub struct Highlighter {
     pub is_complete: bool,
     current_request_id: u64,
     sync_text: String,
+    /// Document version `sync_text` (and the worker replica) currently holds.
+    sync_version: u64,
     sync_ext: String,
     sync_parser: tree_sitter::Parser,
     sync_tree: Option<tree_sitter::Tree>,

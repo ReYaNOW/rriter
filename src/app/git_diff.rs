@@ -1293,12 +1293,15 @@ impl App {
             current_text.len(),
         );
         self.editor.cursor = replace_end;
+        let sync_edits_before = self.editor.sync_edits.len();
         let (offset, len, _) = self
             .editor
             .replace_range(replace_start, replace_end, &old_text);
-        self.highlighter.shift_delete(offset, len);
-        self.highlighter
-            .shift_insert(offset, old_text.len(), Some(&old_text));
+        if self.editor.sync_edits.len() > sync_edits_before {
+            self.highlighter.shift_delete(offset, len);
+            self.highlighter
+                .shift_insert(offset, old_text.len(), Some(&old_text));
+        }
         self.inline_git_popup = None;
         self.inline_git_diff_rx = None;
         if !self.editor.sync_edits.is_empty() {
@@ -1306,8 +1309,14 @@ impl App {
             self.shift_current_python_inlay_hints_for_edits(&edits);
             let (invalidate_start_byte, invalidate_end_byte) =
                 crate::highlighter::sync_edit_invalidation_byte_range(&edits);
-            self.highlighter
-                .apply_edits(self.editor.version, edits, None, None);
+            self.highlighter.apply_document_edits(
+                self.editor.version,
+                edits,
+                None,
+                None,
+                self.editor.len(),
+                || self.editor.get_full_text(),
+            );
             self.highlighter.sync_highlight_after_edit(
                 self.editor.version,
                 None,

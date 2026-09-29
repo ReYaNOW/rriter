@@ -90,6 +90,18 @@ def open_command(target: Path) -> str:
     return f"{'workspace' if target.is_dir() else 'open'} {target}"
 
 
+def click_command(button: str = "left", phase: str | None = None, *, alt: bool = False) -> str:
+    """Encode a backward-compatible protocol click command with an optional Alt modifier."""
+    parts = ["click"]
+    if button != "left":
+        parts.append(button)
+    if phase is not None:
+        parts.append(phase)
+    if alt:
+        parts.append("alt")
+    return " ".join(parts)
+
+
 def shot_commands(target: Path, settle_ms: int, out: Path) -> list[str]:
     return [open_command(target), f"settle {settle_ms}", f"screenshot {out}", "quit"]
 
@@ -202,6 +214,9 @@ def self_test() -> None:
     ns = parse_cli(["shot", "x.rs"])
     assert (ns.settle, ns.out, ns.size) == (500, None, None), ns
     assert headless_args(ns) == ["--headless"], headless_args(ns)
+    assert click_command() == "click"
+    assert click_command("left", "down", alt=True) == "click down alt"
+    assert click_command("right", alt=True) == "click right alt"
     ns = parse_cli(["run", "s.txt", "--hz", "144", "--allow-writes", "--keep-profile", "--profile", "/tmp/p"])
     assert (ns.command, ns.script) == ("run", "s.txt"), ns
     assert headless_args(ns) == ["--headless", "--profile", "/tmp/p", "--hz", "144", "--keep-profile", "--allow-writes"], headless_args(ns)

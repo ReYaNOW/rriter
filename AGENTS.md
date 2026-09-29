@@ -89,6 +89,8 @@ Forbidden unless user explicitly asks:
 
 Only one agent builds or tests at a time, in the main checkout where `target/` is warm. Parallel agents only edit; the integrator builds and runs tests once after integration. A fresh worktree starts with an empty `target/`: the first build takes tens of minutes and gigabytes, and concurrent Cargo processes fight for CPU and for one target directory.
 
+Exception: a subagent in its own worktree may build and test in parallel only when the main session explicitly allowed it in the brief and had it warm the worktree's target first with a btrfs reflink copy (`cp -a --reflink=always <main>/target/x86_64-unknown-linux-gnu <main>/target/debug target/`) — instant, no extra disk; dependencies stay cached and only the `rriter` crate rebuilds once (~1.5 min). Reason: a reflinked worktree agent built in 1m19s, then 25–60 s per run, alongside a builder in the main checkout (29.09).
+
 If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
 Bug fix path: `rg` -> read exact source -> find root cause -> minimal patch -> focused test -> `make codex_test` at the end.

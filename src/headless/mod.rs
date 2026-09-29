@@ -36,6 +36,8 @@ mod ui_tests_database_query;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_multi_cursor;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_completion;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_folding_minimap;
@@ -343,13 +345,19 @@ impl HeadlessSession {
                 self.app.handle_main_cursor_moved(PhysicalPosition::new(x, y));
                 self.frame_ok()
             }
-            Command::Click { button, phase } => {
+            Command::Click { button, phase, alt } => {
                 let button = mouse_button(button);
+                let saved_modifiers = self.app.modifiers;
+                // Held modifiers (e.g. Ctrl for go-to-definition) stay; `alt` only adds Alt.
+                if alt {
+                    self.app.modifiers |= winit::keyboard::ModifiersState::ALT;
+                }
                 match phase {
                     ClickPhase::Both => self.click(button),
                     ClickPhase::Down => self.mouse_event(ElementState::Pressed, button),
                     ClickPhase::Up => self.mouse_event(ElementState::Released, button),
                 }
+                self.app.modifiers = saved_modifiers;
                 Response::Ok(None)
             }
             Command::DblClick { button } => {

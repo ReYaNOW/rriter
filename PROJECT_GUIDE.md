@@ -772,6 +772,7 @@ Use when text mutation, history, line indexing, or buffer invariants change.
 Implementation is split through `include!`:
 
 * `src/editor/editor_core.rs` -> production editor core.
+* `src/editor/editor_multi_cursor.rs` -> editor multi-cursor state, grouped edits, and tests.
 * `src/editor/editor_behavior_tests.rs` -> editor behavior tests.
 
 ### `src/editor_navigation.rs`
