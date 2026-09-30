@@ -25,25 +25,33 @@ OTHER_MODULE = "<other>"
 # A marker with a zero count (or no entry at all) means the group did not reach its code.
 # A marker must be reached only on its own group's path. `move_page_down` (editor PageDown; the
 # pdf viewer handles PageDown itself), `update_terminal_search` (every caller is terminal search,
-# which only `terminal_ops` opens) and `draw_welcome` (headless enters the IDE before the first
-# frame of every scenario but `welcome`) are shared functions that qualify for that reason.
+# which only `terminal_ops` opens) and `rriter::scroll::scrollbar_drag_target` (the training
+# drags only the editor scrollbar, in `input_scroll`) are shared functions that qualify for that
+# reason.
+# A marker must also be a function the instrumented build keeps as its own profile entry: small
+# or single-caller functions (`search_one_page`, `draw_welcome`, `rollback_active_git_diff_hunk`,
+# `undo_with_groups`, `ensure_git_graph_loaded`, `stream_project_search`, the
+# `rollback_database_table_transaction` wrapper, ...) are inlined before the profile counters are
+# placed and never show up in `llvm-profdata show`, so they cannot be markers. `welcome` is
+# marked by its own scenario steps for that reason: `draw_welcome` has no entry at all.
 GROUP_MARKERS: dict[str, list[str]] = {
-    "pdf": ["pdf::worker::search_one_page", "pdf::pdfium_backend::render"],
+    "pdf": ["pdf::worker::handle_request", "pdf::pdfium_backend::render"],
     "api_mock": ["api_mock::server::run_server_thread", "api_mock::server::request_to_mock"],
-    "git_changes": ["rollback_hunk_text", "jump_active_git_diff_hunk", "rollback_active_git_diff_hunk"],
-    "editor_ops": ["toggle_extra_cursor", "apply_at_all_cursors_indexed", "undo_with_groups"],
-    "lsp_nav": ["jump_to_definition_target", "parse_definition_target"],
-    "input_scroll": ["app::mouse::drag_scrollbar", "apply_scrollbar_drag_target", "move_page_down"],
+    "git_changes": ["jump_active_git_diff_hunk", "automation_git_changes::rollback_visible_hunk"],
+    "editor_ops": ["toggle_extra_cursor", "editor::Editor::undo"],
+    "lsp_nav": ["lsp::protocol::definition_position", "parse_definition_target"],
+    "input_scroll": ["rriter::scroll::scrollbar_drag_target", "move_page_down"],
     "terminal_ops": ["close_terminal_tab_at", "update_terminal_search"],
     "startup": ["state_persistence::load_open_tabs"],
-    "welcome": ["draw_welcome", "get_welcome_buttons"],
+    "welcome": ["automation_groups::welcome_steps"],
     "markdown": ["refresh_read_model", "scroll_markdown_read"],
-    "database": ["execute_simple_query", "rollback_database_table_transaction"],
-    "api_client": ["send_api_request_body"],
-    "git_graph": ["ensure_git_graph_loaded", "apply_git_graph_lanes"],
-    "terminal": ["TerminalProcess::write_input"],
+    "database": ["execute_simple_query", "finish_database_table_transaction"],
+    # The training request is a GET, so `send_api_request_body` (POST/PUT/PATCH only) never runs.
+    "api_client": ["api_client::spawn_api_request", "RequestBuilder::send"],
+    "git_graph": ["load_git_graph_for_selected_workspace", "apply_git_graph_lanes"],
+    "terminal": ["terminal::Terminal::write_input", "install_terminal_io_threads"],
     "settings": ["save_current_config"],
-    "project_search": ["stream_project_search", "run_project_search_roots"],
+    "project_search": ["start_project_search_worker_cancellable", "run_project_search_roots"],
 }
 _SCENARIO_ONLY = {"startup", "welcome"}
 

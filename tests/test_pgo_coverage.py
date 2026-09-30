@@ -157,11 +157,81 @@ class MarkerTests(unittest.TestCase):
         self.assertEqual(pgo_coverage.check_markers([], self.markers, {"pdf", "api_mock"}), [])
 
     def test_markers_match_v0_demangled_inherent_methods(self) -> None:
-        functions = [FunctionProfile("<rriter::terminal::TerminalProcess>::write_input", 3)]
-        markers = {"terminal": pgo_coverage.GROUP_MARKERS["terminal"]}
+        # Real `llvm-cxxfilt` output of the `make max` profile: `<Type>::method`.
+        functions = [FunctionProfile("<rriter::app::terminal::Terminal>::write_input", 4)]
+        markers = {"terminal": ["terminal::Terminal::write_input"]}
         self.assertEqual(pgo_coverage.check_markers(functions, markers, set()), [])
-        functions = [FunctionProfile("<rriter::terminal::TerminalProcess>::write_input", 0)]
+        functions = [FunctionProfile("<rriter::app::terminal::Terminal>::write_input", 0)]
         self.assertEqual(len(pgo_coverage.check_markers(functions, markers, set())), 1)
+
+    def test_shipped_markers_match_real_profile_names(self) -> None:
+        # (demangled name, count) pairs copied from `llvm-profdata show --all-functions --counts`
+        # of a full `make max` training run, demangled by `demangled_functions`.
+        real = [
+            ("rriter::pdf::worker::handle_request", 218),
+            ("rriter::pdf::pdfium_backend::render", 11300544),
+            ("<rriter::app::app_state::App>::jump_active_git_diff_hunk", 48),
+            ("rriter::app::automation_git_changes::rollback_visible_hunk", 44),
+            ("<rriter::editor::Editor>::toggle_extra_cursor", 5),
+            ("<rriter::editor::Editor>::undo", 9),
+            ("rriter::lsp::protocol::definition_position", 3),
+            ("rriter::lsp::protocol::parse_definition_target", 6),
+            ("rriter::scroll::scrollbar_drag_target", 40),
+            ("<rriter::editor::Editor>::move_page_down", 20),
+            ("<rriter::app::app_state::App>::close_terminal_tab_at", 1),
+            ("<rriter::app::app_state::App>::update_terminal_search", 570171),
+            ("rriter::state_persistence::load_open_tabs", 4616),
+            (
+                "<rriter::app::automation_groups::welcome_steps::{closure#0} as "
+                "core::ops::function::FnOnce<(&rriter::app::app_state::App,)>>::call_once",
+                1,
+            ),
+            ("<rriter::app::markdown::MarkdownTabState>::refresh_read_model", 1916),
+            ("rriter::app::markdown::scroll_markdown_read", 1196),
+            ("<rriter::app::app_state::App>::finish_database_table_transaction", 1),
+            ("<reqwest::blocking::request::RequestBuilder>::send", 1),
+            ("<rriter::app::app_state::App>::load_git_graph_for_selected_workspace", 82),
+            ("<rriter::app::app_state::App>::save_current_config", 56),
+            ("<rriter::app::terminal::Terminal>::write_input", 4),
+            ("rriter::app::api_client::spawn_api_request", 156),
+            (
+                "std::sys::backtrace::__rust_begin_short_backtrace::<rriter::app::terminal_process::"
+                "install_terminal_io_threads::{closure#2}, ()>",
+                2,
+            ),
+            ("rriter::app::project_search::start_project_search_worker_cancellable", 1),
+            ("rriter::app::project_search::run_project_search_roots::{closure#0}", 944),
+            ("rriter::app::api_mock::server::run_server_thread::{closure#0}", 36),
+            (
+                "std::sys::backtrace::__rust_begin_short_backtrace::<rriter::app::api_mock::server::"
+                "request_to_mock::{closure#1}, ()>",
+                750,
+            ),
+            (
+                "core::ptr::drop_in_place::<rriter::app::database::database_query::"
+                "execute_simple_query::{closure#0}>",
+                2,
+            ),
+            ("rriter::app::git_panel::apply_git_graph_lanes", 12000),
+        ]
+        functions = [FunctionProfile(name, count) for name, count in real]
+        self.assertEqual(pgo_coverage.check_markers(functions, pgo_coverage.GROUP_MARKERS, set()), [])
+
+    def test_inlined_functions_are_not_markers(self) -> None:
+        # None of these has a profile entry in a real `make max` profile (inlined).
+        shipped = {marker for markers in pgo_coverage.GROUP_MARKERS.values() for marker in markers}
+        for gone in (
+            "search_one_page", "rollback_hunk_text", "rollback_active_git_diff_hunk",
+            "apply_at_all_cursors_indexed", "undo_with_groups", "jump_to_definition_target",
+            "apply_scrollbar_drag_target", "draw_welcome", "get_welcome_buttons",
+            "rollback_database_table_transaction", "ensure_git_graph_loaded",
+            "TerminalProcess::write_input", "stream_project_search",
+        ):
+            self.assertFalse(any(gone in marker for marker in shipped), gone)
+
+    def test_real_cgu_prefixed_v0_names_demangle_before_matching(self) -> None:
+        raw = "rriter.5b9d55fe1293a1bc-cgu.0;_RNvMs1_NtNtCs7RF3ZZFCWGC_6rriter3app8terminalNtB5_8Terminal11write_input"
+        self.assertEqual(pgo_coverage.strip_cgu_prefix(raw), raw.split(";", 1)[1])
 
     def test_startup_and_project_search_markers_name_production_functions(self) -> None:
         self.assertEqual(pgo_coverage.GROUP_MARKERS["startup"], ["state_persistence::load_open_tabs"])
