@@ -212,6 +212,18 @@ fn pgo_group_pdf() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+/// `full` reaches the pdf group with the file tree, project search and terminal still focused;
+/// the group must take the keyboard back before its key and text steps.
+#[test]
+fn pgo_group_pdf_after_panels_focused_by_earlier_groups() {
+    let (outcome, _session, report_path) = run_pgo_session("group:test_pdf_after_full_focus", 90_000);
+    assert!(outcome.success, "{outcome:?}");
+    let report = read_report(&report_path);
+    if report["skipped_groups"] == serde_json::json!([]) {
+        assert!(report["completed_steps"].to_string().contains("pdf search done"), "{report}");
+    }
+}
+
 #[test]
 fn pgo_group_api_mock() {
     let outcome = run_pgo_scenario("group:api_mock", 60_000);

@@ -174,7 +174,12 @@ fn scenario_steps(
         PgoScenario::Group(name) => {
             let group = crate::app::automation_groups::group_steps(name, workspace)
                 .ok_or_else(|| format!("unknown PGO group {name:?}"))?;
-            let mut steps = vec![AutomationStep::WaitReady];
+            // Like `full`, a lone group needs the fixture workspace and its git repository.
+            let mut steps = vec![
+                AutomationStep::WaitReady,
+                AutomationStep::ApplyWorkspace,
+                AutomationStep::WaitFileTree,
+            ];
             steps.extend(group);
             steps.push(AutomationStep::Finish);
             Ok(steps)

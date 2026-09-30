@@ -29,11 +29,20 @@ fn requires_with(located: LocateResult) -> Result<(), String> {
 fn write_and_open(app: &mut App, workspace: &Path) -> Result<(), String> {
     let dir = workspace.join("pgo_pdf");
     std::fs::create_dir_all(&dir).map_err(|error| format!("create pgo_pdf: {error}"))?;
-    let path = crate::pdf::fixture::write_fixture_pdf(&dir);
+    let path = crate::pdf::fixture::try_write_fixture_pdf(&dir)
+        .map_err(|error| format!("write fixture pdf into {}: {error}", dir.display()))?;
     if !path.is_file() {
         return Err(format!("fixture pdf was not written: {}", path.display()));
     }
     app.open_file_in_tab(path, false);
+    Ok(())
+}
+
+/// The viewer searches with the editor search panel's case flag, and an earlier `full` step
+/// (`ToggleSearchCase`) leaves it on: the fixture's "Go to second" would no longer match
+/// "second" next to "Second page target", so `search_found_both_matches` would never hold.
+fn reset_search_case(app: &mut App, _workspace: &Path) -> Result<(), String> {
+    app.search_case_sensitive = false;
     Ok(())
 }
 
@@ -50,8 +59,12 @@ fn search_found_both_matches(app: &App) -> bool {
 pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
     use AutomationStep as S;
     let mut steps = vec![
+        S::Call { what: "pdf reset search case", run: reset_search_case },
         S::Call { what: "pdf open", run: write_and_open },
         S::WaitUntil { what: "pdf rasterized", check: rasterized, timeout_ms: 20_000 },
+        // Earlier groups leave the file tree, terminal or project search focused, which would
+        // swallow the paging keys below; hand the keyboard to the document.
+        S::FocusEditor,
     ];
     // A negative wheel delta scrolls the document down.
     steps.extend((0..WHEEL_STEPS).map(|_| S::Wheel {

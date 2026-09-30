@@ -178,7 +178,9 @@ impl HeadlessSession {
     pub(crate) fn run_automation(&mut self, pace: Option<Duration>) -> PgoRunOutcome {
         let start = Instant::now();
         let limit = self.app.automation.as_ref().map(|automation| automation.timeout());
-        let hard_deadline = limit.and_then(|limit| start.checked_add(limit + RUN_TIMEOUT_GRACE));
+        let hard_deadline = limit.and_then(|limit| {
+            limit.checked_add(RUN_TIMEOUT_GRACE).and_then(|total| start.checked_add(total))
+        });
         let mut due = start;
         let mut runner_timed_out = false;
         while !self.loop_state.exit_requested.load(Ordering::Relaxed) {

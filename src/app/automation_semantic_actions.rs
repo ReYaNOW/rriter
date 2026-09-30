@@ -44,7 +44,6 @@ impl App {
 
 fn resolve_target(app: &App, target: AutomationTarget) -> Result<(f32, f32), String> {
     match target {
-        AutomationTarget::Point(x, y) => Ok((x, y)),
         AutomationTarget::Find(find) => {
             find(app).ok_or_else(|| "find target returned no position".to_string())
         }
@@ -64,8 +63,6 @@ fn move_pointer(app: &mut App, (x, y): (f32, f32)) {
 fn winit_button(button: AutomationButton) -> winit::event::MouseButton {
     match button {
         AutomationButton::Left => winit::event::MouseButton::Left,
-        AutomationButton::Right => winit::event::MouseButton::Right,
-        AutomationButton::Middle => winit::event::MouseButton::Middle,
     }
 }
 

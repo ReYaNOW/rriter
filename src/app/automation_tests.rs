@@ -1064,7 +1064,15 @@
         let names: Vec<String> = steps.iter().map(AutomationStep::name).collect();
         assert_eq!(
             names,
-            ["wait-ready", "test_skip", "test-skip-body", "group-end", "finish"]
+            [
+                "wait-ready",
+                "apply-workspace",
+                "wait-file-tree",
+                "test_skip",
+                "test-skip-body",
+                "group-end",
+                "finish"
+            ]
         );
     }
 
