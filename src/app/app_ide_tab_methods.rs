@@ -437,8 +437,253 @@ impl App {
         self.clipboard.as_mut()?.get_file_list().ok()
     }
 
+    /// Enters IDE mode and restores the saved session; everything is loaded on return.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn enter_ide_mode(&mut self) {
+        self.enter_ide_mode_impl(false);
+    }
+
+    /// `--ide` startup: only what the first content frame draws is loaded here (panels, tab
+    /// list, the active tab highlighted). The rest runs in `run_ide_deferred` after that frame.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn enter_ide_mode_deferred(&mut self) {
+        self.enter_ide_mode_impl(true);
+    }
+
+    /// Before the window exists: reads the saved tab list and the active file and sends its
+    /// highlighter `Reset`, so the worker computes it while the window and GL are created.
+    /// `enter_ide_mode` reuses the text and the version. Reading the file extension here is the
+    /// earliest point the active language is known (`ext` below).
+    pub(crate) fn preload_ide_startup(&mut self) {
+        if !self.run_ide_on_startup || self.is_automation_mode() || self.scroll_render_bench.is_some()
+        {
+            return;
+        }
+        let (tabs, active) = crate::load_open_tabs(true);
+        let has_startup_file =
+            self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
+        let mut file = None;
+        if !has_startup_file
+            && let Some(crate::OpenTabSnapshot::File(path)) =
+                tabs.get(active.min(tabs.len().saturating_sub(1)))
+        {
+            let path = crate::platform::canonicalize_or_absolutize(path);
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+            // Compile the language's queries while the file is read and parsed.
+            self.highlighter.prewarm_query(&ext);
+            if let Ok(decoded) = crate::platform::read_text_file(&path) {
+                let version = self.editor.version.max(self.highlighter.current_version) + 1;
+                self.highlighter.reset(version, decoded.text.clone(), ext, 0);
+                file = Some(PreloadedFile {
+                    path,
+                    text: decoded.text,
+                    format: decoded.format,
+                    version,
+                });
+            }
+        }
+        let highlight_version = file.as_ref().map(|file| file.version);
+        self.ide_preload = Some(IdePreload { tabs, active, file, highlight_version });
+    }
+
+    /// A tab restored from the saved session whose file is not read yet: only its identity
+    /// (path, title, extension, icon) is set, so the tab bar is complete. Makes it the active
+    /// tab like `open_new_tab`, but never touches the highlighter.
+    fn open_pending_file_tab(&mut self, path: PathBuf) {
+        let path = crate::platform::canonicalize_or_absolutize(&path);
+        if !self.tabs.is_empty() {
+            self.sync_active_tab();
+        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let mut editor = crate::editor::Editor::new(8192);
+        editor.version = self.next_tab_highlight_version();
+        self.tabs.push(EditorTab {
+            editor,
+            file_key: Some(crate::platform::PathKey::new(&path)),
+            file_path: Some(path.clone()),
+            text_file_format: crate::platform::TextFileFormat::default(),
+            icon_key: crate::app::file_icons::file_icon_key_for_name(&name),
+            file_extension: path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            base_title: name,
+            markdown: Default::default(),
+            pdf: None,
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans: Vec::new(),
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            syntax_errors: Vec::new(),
+            last_sent_version: u64::MAX,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: false,
+            is_highlight_complete: false,
+            closing_hints: Default::default(),
+            deleted: false,
+            kind: EditorTabKind::Normal,
+        });
+        self.active_tab = self.tabs.len() - 1;
+        self.sync_active_tab();
+        self.pending_tab_loads.push(path);
+    }
+
+    fn tab_is_pending_load(&self, idx: usize) -> bool {
+        if self.pending_tab_loads.is_empty() {
+            return false;
+        }
+        let path = if idx == self.active_tab {
+            self.file_path.as_ref()
+        } else {
+            self.tabs.get(idx).and_then(|tab| tab.file_path.as_ref())
+        };
+        path.is_some_and(|path| self.pending_tab_loads.contains(path))
+    }
+
+    /// Reads the file of a placeholder tab (see `open_pending_file_tab`) into its editor.
+    /// `with_git` also loads the git base text for the gutter. Uses the early read of
+    /// `preload_ide_startup` when it is this file. A tab that was edited meanwhile is left alone.
+    pub(crate) fn materialize_pending_tab(&mut self, idx: usize, with_git: bool) {
+        if idx >= self.tabs.len() || !self.tab_is_pending_load(idx) {
+            return;
+        }
+        let is_active = idx == self.active_tab;
+        let (path, ext) = if is_active {
+            (self.file_path.clone(), self.file_extension.clone())
+        } else {
+            (self.tabs[idx].file_path.clone(), self.tabs[idx].file_extension.clone())
+        };
+        let Some(path) = path else { return };
+        self.pending_tab_loads.retain(|pending| *pending != path);
+        let current = if is_active { &self.editor } else { &self.tabs[idx].editor };
+        if current.is_dirty() || current.len() > 0 {
+            return;
+        }
+        let old_version = current.version;
+
+        let preloaded = self
+            .ide_preload
+            .as_mut()
+            .and_then(|preload| preload.file.take_if(|file| file.path == path));
+        // The early version is only valid while its highlighter `Reset` is the latest one.
+        let early_request_alive = self
+            .ide_preload
+            .as_ref()
+            .is_some_and(|preload| preload.highlight_version.is_some());
+        let (text, format, version) = match preloaded {
+            Some(file) if early_request_alive => (file.text, file.format, file.version),
+            Some(file) => (file.text, file.format, old_version + 1),
+            None => match crate::platform::read_text_file(&path) {
+                Ok(decoded) => (decoded.text, decoded.format, old_version + 1),
+                Err(_) => return,
+            },
+        };
+        self.startup_trace.mark("ide-tab-read");
+        let mut editor = crate::editor::Editor::new(text.len() + 8192);
+        editor.version = version;
+        editor.set_clean_text(&text);
+        apply_initial_import_folds(&mut editor, &ext, &text);
+        if with_git {
+            editor.set_git_base_text(self.git_base_text_for_path(&path));
+            self.startup_trace.mark("ide-tab-git");
+        }
+        if self.is_ide_mode
+            && let Some(lsp) = &mut self.lsp
+        {
+            lsp.notify_open(&path, &ext, &text, crate::editor::lsp_document_version(version));
+        }
+        if is_active {
+            self.editor = editor;
+            self.text_file_format = format;
+        } else {
+            let tab = &mut self.tabs[idx];
+            tab.editor = editor;
+            tab.text_file_format = format;
+        }
+    }
+
+    /// First highlight of the tab that just became active without `switch_to_tab` (the last
+    /// opened one): the early `Reset` of `preload_ide_startup` when it is still this text,
+    /// otherwise a fresh version and `Reset`. Blocks until the result is in (bounded).
+    fn begin_initial_tab_highlight(&mut self) {
+        let preloaded = self
+            .ide_preload
+            .as_ref()
+            .is_some_and(|preload| preload.highlight_version == Some(self.editor.version));
+        if preloaded {
+            if let Some(preload) = self.ide_preload.as_mut() {
+                preload.highlight_version = None;
+            }
+            self.editor.sync_edits.clear();
+            self.closing_hint_state.invalidate(self.editor.version);
+        } else {
+            if let Some(preload) = self.ide_preload.as_mut() {
+                // This `Reset` supersedes the early one.
+                preload.highlight_version = None;
+            }
+            self.editor.version = self.next_tab_highlight_version();
+            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
+        }
+        self.wait_for_current_highlight();
+    }
+
+    /// Restore work after the first content frame of `enter_ide_mode_deferred`: LSP, the
+    /// inactive tabs' files and git bases, the active file's git base, the git panel.
+    pub(crate) fn run_ide_deferred(&mut self) {
+        if self.ide_deferred == IdeDeferred::None {
+            return;
+        }
+        self.ide_deferred = IdeDeferred::None;
+        self.ide_preload = None;
+
+        if self.lsp.is_none() {
+            let mut lsp = crate::lsp::LspManager::with_ui_waker(
+                self.ide_workspaces.clone(),
+                self.ui_waker.clone(),
+            );
+            lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
+            if !self.dart_settings.enabled {
+                lsp.set_server_enabled("dart", false);
+            }
+            self.lsp = Some(lsp);
+        }
+        for idx in 0..self.tabs.len() {
+            self.materialize_pending_tab(idx, true);
+        }
+        self.pending_tab_loads.clear();
+
+        if let Some(path) = &self.file_path {
+            if let Some(lsp) = &mut self.lsp {
+                let text = self.editor.get_full_text();
+                lsp.notify_open(
+                    path,
+                    &self.file_extension,
+                    &text,
+                    crate::editor::lsp_document_version(self.editor.version),
+                );
+            }
+            self.refresh_current_editor_git_base();
+        }
+        if self.ide_panel.is_open(PanelId::Git) {
+            self.refresh_git_panel();
+        }
+        if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
+        }
+        self.startup_trace.mark("ide-deferred-done");
+    }
+
+    fn enter_ide_mode_impl(&mut self, defer: bool) {
         self.is_ide_mode = true;
 
         let was_welcome = self.show_welcome;
@@ -471,18 +716,7 @@ impl App {
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
             self.add_terminal();
         }
-
-        if self.lsp.is_none() {
-            let mut lsp = crate::lsp::LspManager::with_ui_waker(
-                self.ide_workspaces.clone(),
-                self.ui_waker.clone(),
-            );
-            lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
-            if !self.dart_settings.enabled {
-                lsp.set_server_enabled("dart", false);
-            }
-            self.lsp = Some(lsp);
-        }
+        self.startup_trace.mark("ide-state");
 
         let has_startup_file =
             self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
@@ -520,6 +754,8 @@ impl App {
             || self.is_automation_mode()
         {
             (Vec::new(), 0)
+        } else if let Some(preload) = self.ide_preload.as_mut() {
+            (std::mem::take(&mut preload.tabs), preload.active)
         } else {
             crate::load_open_tabs(true)
         };
@@ -527,10 +763,17 @@ impl App {
         if !saved_tabs.is_empty() {
             let mut loaded_any = false;
             for saved_tab in saved_tabs {
+                if !matches!(saved_tab, crate::OpenTabSnapshot::File(_)) {
+                    // These openers reset the highlighter, which drops the early `Reset`.
+                    if let Some(preload) = self.ide_preload.as_mut() {
+                        preload.file = None;
+                        preload.highlight_version = None;
+                    }
+                }
                 match saved_tab {
                     crate::OpenTabSnapshot::File(path) => {
                         if path.exists() {
-                            self.open_file_in_tab_bg(path, false);
+                            self.open_pending_file_tab(path);
                             loaded_any = true;
                         }
                     }
@@ -598,7 +841,14 @@ impl App {
                 } else {
                     saved_active.min(self.tabs.len().saturating_sub(1))
                 };
-                self.switch_to_tab(target);
+                if target == self.active_tab && self.tab_is_pending_load(target) {
+                    // The last opened tab is the target: `switch_to_tab` would return early.
+                    self.materialize_pending_tab(target, !defer);
+                    self.begin_initial_tab_highlight();
+                } else {
+                    self.materialize_pending_tab(target, !defer);
+                    self.switch_to_tab(target);
+                }
                 self.save_tabs_state();
                 self.startup_trace.mark("ide-switch");
                 if !self.is_highlighted_once {
@@ -613,30 +863,23 @@ impl App {
                 crate::app::file_icons::file_icon_key_for_name(&title);
         }
 
-        if let Some(path) = &self.file_path {
-            if let Some(lsp) = &mut self.lsp {
-                let text = self.editor.get_full_text();
-                lsp.notify_open(
-                    path,
-                    &self.file_extension,
-                    &text,
-                    crate::editor::lsp_document_version(self.editor.version),
-                );
-            }
-            self.refresh_current_editor_git_base();
-        }
-
         self.refresh_file_tree();
         self.start_file_watcher();
-        if self.ide_panel.is_open(PanelId::Git) {
-            self.refresh_git_panel();
-        }
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
         self.startup_trace.mark("ide-done");
+
+        if let Some(preload) = self.ide_preload.as_mut() {
+            // Taken over by the active tab or superseded by now.
+            preload.highlight_version = None;
+        }
+        self.ide_deferred = IdeDeferred::AwaitFrame;
+        if !defer {
+            self.run_ide_deferred();
+        }
     }
     pub fn save_tabs_state(&mut self) {
         if !self.is_ide_mode || self.is_automation_mode() {
@@ -717,6 +960,7 @@ impl App {
             .unwrap_or(0)
             .max(self.editor.version)
             .max(self.highlighter.current_version)
+            .max(self.ide_preload.as_ref().and_then(|preload| preload.highlight_version).unwrap_or(0))
             .saturating_add(1)
     }
 
@@ -812,6 +1056,8 @@ impl App {
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
+        // A tab restored as a placeholder (`open_pending_file_tab`) is read before it is shown.
+        self.materialize_pending_tab(new_idx, true);
 
         self.cancel_pointer_interactions();
         let previous_tab = self.active_tab;
@@ -859,10 +1105,7 @@ impl App {
                 self.editor.cursor,
             );
         } else {
-            self.editor.version = self.next_tab_highlight_version();
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
-            self.wait_for_current_highlight();
+            self.begin_initial_tab_highlight();
         }
 
         if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() && !self.tabs[self.active_tab].kind.is_pdf() {

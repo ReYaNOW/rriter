@@ -949,9 +949,18 @@ impl App {
         sync_fallback_timeout: std::time::Duration,
     ) {
         let version = self.editor.version;
-        let worker_ready = self
+        let mut worker_ready = self
             .highlighter
             .wait_for_first_result(version, worker_timeout);
+        // A worker that already runs exactly this version will deliver sooner than a cold
+        // sync pass on this thread (which would compile the query again): keep waiting,
+        // within the long budget. A job still queued behind a stale one falls back as before.
+        if !worker_ready && self.highlighter.is_worker_processing(version) {
+            worker_ready = self.highlighter.wait_for_first_result(
+                version,
+                FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT.saturating_sub(worker_timeout),
+            );
+        }
         let sync_ready = !worker_ready
             && self.highlighter.sync_highlight_after_edit(
                 version,

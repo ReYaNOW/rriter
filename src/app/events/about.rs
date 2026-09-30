@@ -125,10 +125,17 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
 
     if app.run_ide_on_startup {
         app.run_ide_on_startup = false;
-        app.enter_ide_mode();
+        app.enter_ide_mode_deferred();
         // This one-shot pass drains nothing: a wake it consumed must come back.
         app.ui_waker.redeliver_pending();
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
+    }
+
+    // The restore work that the first content frame does not need (see `run_ide_deferred`).
+    if app.ide_deferred == crate::app::IdeDeferred::Ready {
+        app.run_ide_deferred();
+        app.ui_waker.redeliver_pending();
+        return;
     }
 
     // `close_tab_at` arms the question without the event loop; the window is created here.

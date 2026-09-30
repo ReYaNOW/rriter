@@ -1424,6 +1424,40 @@ pub struct App {
     /// Startup stage timing (`RRITER_STARTUP_TRACE`); the first content frame is marked on it.
     pub(crate) startup_trace: crate::startup_trace::StartupTrace,
     pub(crate) startup_deferred_pending: bool,
+    /// `--ide` startup: the open-tabs list and the active file, read before the window exists
+    /// (see `App::preload_ide_startup`); consumed by `enter_ide_mode`.
+    pub(crate) ide_preload: Option<IdePreload>,
+    /// Tabs restored as placeholders (path and title only); `materialize_pending_tab` reads them.
+    pub(crate) pending_tab_loads: Vec<PathBuf>,
+    /// Post-first-frame IDE restore work (see `run_ide_deferred`).
+    pub(crate) ide_deferred: IdeDeferred,
+}
+
+/// Stage of the IDE restore work that runs after the first content frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IdeDeferred {
+    None,
+    /// `enter_ide_mode` ran; the first content frame has not been drawn yet.
+    AwaitFrame,
+    /// A content frame was drawn; the next `about_to_wait` runs the work.
+    Ready,
+}
+
+/// Active file of the saved session, read early together with its highlight request.
+pub(crate) struct PreloadedFile {
+    pub path: PathBuf,
+    pub text: String,
+    pub format: crate::platform::TextFileFormat,
+    /// Editor version the highlighter `Reset` was sent for.
+    pub version: u64,
+}
+
+pub(crate) struct IdePreload {
+    pub tabs: Vec<crate::OpenTabSnapshot>,
+    pub active: usize,
+    pub file: Option<PreloadedFile>,
+    /// Version of the early `Reset` still in flight; cleared once the tab took it over.
+    pub highlight_version: Option<u64>,
 }
 
 #[cfg(test)]

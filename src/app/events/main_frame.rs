@@ -56,6 +56,10 @@ impl App {
     }
 
     pub(crate) fn render_main_frame(&mut self) -> FrameOutcome {
+                // The first content frame after `enter_ide_mode_deferred` is being drawn.
+                if self.ide_deferred == crate::app::IdeDeferred::AwaitFrame {
+                    self.ide_deferred = crate::app::IdeDeferred::Ready;
+                }
                 let (autocomplete_frame_start, autocomplete_prev_frame) =
                     autocomplete_frame_start(self.autocomplete_active);
 

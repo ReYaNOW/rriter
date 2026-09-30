@@ -56,6 +56,8 @@ mod ui_tests_editor_sticky;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_deleted_tab;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_ide_startup;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_commit;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_diff;
@@ -489,11 +491,18 @@ impl HeadlessSession {
         }
         // A dropped directory only adds a workspace; the spec's `workspace` also enters IDE mode.
         if !self.app.is_ide_mode {
-            self.app.enter_ide_mode();
+            self.app.enter_ide_mode_deferred();
         }
         // Same call as a dropped directory in `WindowEvent::DroppedFile`.
         self.app.apply_selected_workspace_folder(dir);
-        self.frame_ok()
+        let response = self.frame_ok();
+        if self.drew_last_step {
+            self.app.startup_trace.first_frame();
+        }
+        // The window runs this in the `about_to_wait` after the first content frame; the
+        // command must end in the complete state.
+        self.app.run_ide_deferred();
+        response
     }
 
     fn resize(&mut self, w: u32, h: u32) -> Response {

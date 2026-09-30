@@ -236,6 +236,9 @@ pub(crate) fn test_app() -> Option<App> {
         ui_waker: crate::ui_waker::UiWaker::counting(),
         startup_trace: crate::startup_trace::StartupTrace::disabled(),
         startup_deferred_pending: false,
+        ide_preload: None,
+        pending_tab_loads: Vec::new(),
+        ide_deferred: crate::app::IdeDeferred::None,
     })
 }
 

@@ -1,3 +1,103 @@
+const NO_VERSION_IN_FLIGHT: u64 = u64::MAX;
+
+impl HighlighterWorkerControl {
+    /// Worker side: a job for `version` starts now. The runtime uses this to tell a job
+    /// that already runs from one still queued behind a stale job.
+    fn begin_job(&self, version: u64) -> InFlightGuard<'_> {
+        self.in_flight_version.store(version, Ordering::Release);
+        InFlightGuard(self)
+    }
+
+    fn is_in_flight(&self, version: u64) -> bool {
+        self.in_flight_version.load(Ordering::Acquire) == version
+    }
+}
+
+/// Clears `HighlighterWorkerControl::in_flight_version` on every exit of a worker job
+/// (`continue`, `return`, end of the iteration).
+struct InFlightGuard<'a>(&'a HighlighterWorkerControl);
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.0
+            .in_flight_version
+            .store(NO_VERSION_IN_FLIGHT, Ordering::Release);
+    }
+}
+
+type QueryCacheKey = (&'static str, &'static str);
+
+/// Compiled tree-sitter queries shared by the worker thread, the synchronous fallback on
+/// the main thread and prewarm threads. Owned by `Highlighter` behind an `Arc`.
+/// Every key is compiled exactly once: a thread that needs a query another thread is
+/// compiling blocks on that key's `OnceLock` until it is ready. `QueryCursor`s stay per
+/// call; `tree_sitter::Query` itself is `Send + Sync`.
+pub(crate) struct QueryCache {
+    entries: Mutex<HashMap<QueryCacheKey, Arc<OnceLock<Option<Arc<tree_sitter::Query>>>>>>,
+    compile_count: AtomicUsize,
+}
+
+impl QueryCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            compile_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn slot(&self, key: QueryCacheKey) -> Arc<OnceLock<Option<Arc<tree_sitter::Query>>>> {
+        // The lock guards only the map; compiling happens outside it, on the key's slot.
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(entries.entry(key).or_default())
+    }
+
+    /// The compiled query for `(lang_name, q_str)`, compiling it on first use.
+    /// `None` when the query does not compile (that result is cached too).
+    pub(crate) fn get_or_compile(
+        &self,
+        lang_name: &'static str,
+        q_str: &'static str,
+        lang: &tree_sitter::Language,
+    ) -> Option<Arc<tree_sitter::Query>> {
+        let slot = self.slot((lang_name, q_str));
+        slot.get_or_init(|| {
+            self.compile_count.fetch_add(1, Ordering::AcqRel);
+            tree_sitter::Query::new(lang, q_str).ok().map(Arc::new)
+        })
+        .clone()
+    }
+
+    /// True once `(lang_name, q_str)` finished compiling (successfully or not).
+    pub(crate) fn is_compiled(&self, lang_name: &'static str, q_str: &'static str) -> bool {
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries
+            .get(&(lang_name, q_str))
+            .is_some_and(|slot| slot.get().is_some())
+    }
+
+    /// Number of compilations started so far.
+    pub(crate) fn compile_count(&self) -> usize {
+        self.compile_count.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
+
+/// Every query a full highlight of `lang_name` runs: highlights, params, folding,
+/// injections.
+fn all_query_sources(
+    lang_name: &'static str,
+    highlight_queries: &[&'static str],
+) -> Vec<&'static str> {
+    let mut all: Vec<&'static str> = highlight_queries.to_vec();
+    all.extend(get_params_query(lang_name));
+    all.extend(get_folding_query(lang_name));
+    all.extend(get_injection_query(lang_name));
+    all
+}
+
 const HIGHLIGHT_TRACE_MIN_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
 const HIGHLIGHT_TRACE_SLOW_MS: f64 = 8.0;
 
@@ -57,6 +157,40 @@ impl Highlighter {
         }
     }
 
+    /// True while the worker is highlighting exactly `version` (the job has started; it is
+    /// not merely queued, possibly behind a stale job).
+    pub(crate) fn is_worker_processing(&self, version: u64) -> bool {
+        self._worker.control.is_in_flight(version)
+    }
+
+    /// Compiles the queries for files with extension `ext` into the shared cache on a
+    /// short-lived thread, so the first highlight of such a file finds them ready.
+    /// Never blocks; a no-op for unknown extensions and when everything is compiled already.
+    pub fn prewarm_query(&self, ext: &str) {
+        let lang_name = tree_sitter_lang_name_for_ext(ext);
+        let Some((lang, queries)) = get_ts_config(lang_name) else {
+            return;
+        };
+        let sources = all_query_sources(lang_name, &queries);
+        if sources
+            .iter()
+            .all(|q_str| self.query_cache.is_compiled(lang_name, q_str))
+        {
+            return;
+        }
+        let cache = Arc::clone(&self.query_cache);
+        let spawned = thread::Builder::new()
+            .name("rriter-query-prewarm".to_string())
+            .spawn(move || {
+                for q_str in sources {
+                    cache.get_or_compile(lang_name, q_str, &lang);
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("failed to spawn RRiter query prewarm thread: {error}");
+        }
+    }
+
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
         let (tx_out, rx_out) = mpsc::channel::<(
@@ -72,14 +206,15 @@ impl Highlighter {
 
         let worker_control = Arc::new(HighlighterWorkerControl::new());
         let worker_control_for_thread = Arc::clone(&worker_control);
+        let query_cache = Arc::new(QueryCache::new());
+        let query_cache_for_thread = Arc::clone(&query_cache);
         let spawn_result = thread::Builder::new()
             .name("rriter-highlighter".to_string())
             .spawn(move || {
                 #[cfg(test)]
                 let _active_worker_guard = ActiveHighlighterWorkerGuard::new();
                 let mut parser = tree_sitter::Parser::new();
-                let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
-                    HashMap::new();
+                let query_cache = query_cache_for_thread;
                 let mut byte_colors_buf = Vec::new();
                 let mut last_full_spans: Vec<ColorSpan> = Vec::new();
 
@@ -242,6 +377,7 @@ impl Highlighter {
                 // Replies carry the version of the text they were built from, whatever
                 // version the triggering message named.
                 let final_version = highlighted_version;
+                let _in_flight = worker_control_for_thread.begin_job(final_version);
 
                 let text = &replica_text;
                 let ext = &current_ext;
@@ -356,7 +492,7 @@ impl Highlighter {
                                     &queries,
                                     text,
                                     priority_range.clone(),
-                                    &mut query_cache,
+                                    &query_cache,
                                     &mut byte_colors_buf,
                                     &worker_control_for_thread,
                                 );
@@ -461,8 +597,8 @@ impl Highlighter {
                             if let Some(tree) = parsed_tree {
                                 let fold_start = std::time::Instant::now();
                                 if let Some(fold_query_str) = get_folding_query(lang_name) {
-                                    if let Ok(fold_query) =
-                                        tree_sitter::Query::new(&lang, fold_query_str)
+                                    if let Some(fold_query) =
+                                        query_cache.get_or_compile(lang_name, fold_query_str, &lang)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
                                         let mut matches = cursor.matches(
@@ -761,7 +897,7 @@ impl Highlighter {
                                     &queries,
                                     &tree,
                                     &text,
-                                    &mut query_cache,
+                                    &query_cache,
                                     byte_range,
                                     &mut spans,
                                 );
@@ -774,8 +910,8 @@ impl Highlighter {
                                 let mut injected_regions: HashMap<String, Vec<tree_sitter::Range>> =
                                     HashMap::new();
                                 if let Some(inj_query_str) = get_injection_query(lang_name) {
-                                    if let Ok(inj_query) =
-                                        tree_sitter::Query::new(&lang, inj_query_str)
+                                    if let Some(inj_query) =
+                                        query_cache.get_or_compile(lang_name, inj_query_str, &lang)
                                     {
                                         let mut cursor = tree_sitter::QueryCursor::new();
                                         if let (Some(sb), Some(eb)) =
@@ -885,9 +1021,13 @@ impl Highlighter {
                                                 if let Some(inj_tree) = inj_parser.parse(text, None)
                                                 {
                                                     for q_str in inj_queries {
-                                                        if let Ok(query) = tree_sitter::Query::new(
-                                                            &inj_lang, q_str,
-                                                        ) {
+                                                        if let Some(query) = query_cache
+                                                            .get_or_compile(
+                                                                mapped_lang,
+                                                                q_str,
+                                                                &inj_lang,
+                                                            )
+                                                        {
                                                             let mut cursor =
                                                                 tree_sitter::QueryCursor::new();
                                                             if let (Some(sb), Some(eb)) = (
@@ -1079,6 +1219,7 @@ impl Highlighter {
         Self {
             tx: tx_in,
             _worker: worker,
+            query_cache,
             rx: rx_out,
             spans: vec![],
             completions: vec![],
@@ -1092,7 +1233,6 @@ impl Highlighter {
             sync_ext: String::new(),
             sync_parser: tree_sitter::Parser::new(),
             sync_tree: None,
-            sync_query_cache: HashMap::new(),
             sync_byte_colors_buf: Vec::new(),
             pending_priority_anchor: None,
         }

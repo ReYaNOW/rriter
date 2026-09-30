@@ -304,8 +304,11 @@ impl App {
         self.open_file_in_tab_internal(path, add_to_history, true);
     }
 
+    /// Opens `path` in a tab without making it the tab being highlighted: no highlighter
+    /// `Reset` is sent (it would occupy the worker for a job whose result is discarded); the
+    /// tab is highlighted when it becomes active (`switch_to_tab`).
     pub fn open_file_in_tab_bg(&mut self, path: PathBuf, add_to_history: bool) {
-        self.open_file_in_tab_internal(path, add_to_history, false);
+        self.open_file_in_tab_internal_options(path, add_to_history, false, false);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

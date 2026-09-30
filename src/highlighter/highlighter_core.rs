@@ -5,9 +5,9 @@ mod runtime;
 use runtime::{apply_sync_edit_to_replica, flatten_spans};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use tree_sitter::StreamingIterator;
 
@@ -137,6 +137,8 @@ struct HighlighterWorkerControl {
     /// Set by the worker when its replica lost sync (version gap or an edit out of bounds);
     /// the runtime answers with a Reset (`Highlighter::resync_worker_if_desynced`).
     replica_desynced: AtomicBool,
+    /// Version being highlighted right now, `NO_VERSION_IN_FLIGHT` when idle (`InFlightGuard`).
+    in_flight_version: AtomicU64,
 }
 
 impl HighlighterWorkerControl {
@@ -145,6 +147,7 @@ impl HighlighterWorkerControl {
             cancelled: AtomicBool::new(false),
             replica_desynced: AtomicBool::new(false),
             ui_waker: std::sync::OnceLock::new(),
+            in_flight_version: AtomicU64::new(NO_VERSION_IN_FLIGHT),
         }
     }
 
@@ -190,7 +193,8 @@ pub struct Highlighter {
     sync_ext: String,
     sync_parser: tree_sitter::Parser,
     sync_tree: Option<tree_sitter::Tree>,
-    sync_query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    /// Shared with the worker thread and prewarm threads (see `QueryCache`).
+    query_cache: Arc<QueryCache>,
     sync_byte_colors_buf: Vec<[f32; 4]>,
     pending_priority_anchor: Option<usize>,
 }
@@ -382,12 +386,13 @@ fn collect_param_scopes(
     lang_name: &'static str,
     tree: &tree_sitter::Tree,
     text: &str,
+    query_cache: &QueryCache,
 ) -> Vec<Scope> {
     let mut param_scopes = Vec::new();
     let Some(q_str) = get_params_query(lang_name) else {
         return param_scopes;
     };
-    let Ok(func_query) = tree_sitter::Query::new(lang, q_str) else {
+    let Some(func_query) = query_cache.get_or_compile(lang_name, q_str, lang) else {
         return param_scopes;
     };
 
@@ -471,23 +476,17 @@ fn collect_query_highlight_spans(
     queries: &[&'static str],
     tree: &tree_sitter::Tree,
     text: &str,
-    query_cache: &mut HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    query_cache: &QueryCache,
     byte_range: Option<Range<usize>>,
     spans: &mut Vec<ColorSpan>,
 ) {
-    let param_scopes = collect_param_scopes(lang, lang_name, tree, text);
+    let param_scopes = collect_param_scopes(lang, lang_name, tree, text, query_cache);
 
     for q_str in queries {
-        let cache_key = (lang_name, *q_str);
-        if !query_cache.contains_key(&cache_key) {
-            if let Ok(query) = tree_sitter::Query::new(lang, q_str) {
-                query_cache.insert(cache_key, query);
-            }
-        }
-
-        let Some(query) = query_cache.get(&cache_key) else {
+        let Some(query) = query_cache.get_or_compile(lang_name, q_str, lang) else {
             continue;
         };
+        let query = &*query;
         let mut cursor = tree_sitter::QueryCursor::new();
         if let Some(range) = &byte_range {
             cursor.set_byte_range(range.clone());
@@ -1058,7 +1057,7 @@ fn priority_highlight_spans_from_slice(
     queries: &[&'static str],
     text: &str,
     range: Range<usize>,
-    query_cache: &mut HashMap<(&'static str, &'static str), tree_sitter::Query>,
+    query_cache: &QueryCache,
     byte_colors_buf: &mut Vec<[f32; 4]>,
     worker_control: &HighlighterWorkerControl,
 ) -> Vec<ColorSpan> {
@@ -1511,7 +1510,7 @@ pub fn highlight_sql_text(text: &str) -> Vec<ColorSpan> {
     let Some(tree) = parser.parse(text, None) else {
         return Vec::new();
     };
-    let mut cache = HashMap::new();
+    let cache = QueryCache::new();
     let mut spans = Vec::new();
     collect_query_highlight_spans(
         &lang,
@@ -1519,7 +1518,7 @@ pub fn highlight_sql_text(text: &str) -> Vec<ColorSpan> {
         &queries,
         &tree,
         text,
-        &mut cache,
+        &cache,
         None,
         &mut spans,
     );

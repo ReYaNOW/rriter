@@ -328,8 +328,21 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
 }
 
 #[cfg(test)]
+thread_local! {
+    static TEST_OPEN_TABS: std::cell::RefCell<Option<(Vec<OpenTabSnapshot>, usize)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test seam: what the next `load_open_tabs` on this thread returns (tests otherwise see an
+/// empty session, never the user's `tabs_ide.txt`).
+#[cfg(test)]
+pub fn set_test_open_tabs(tabs: Vec<OpenTabSnapshot>, active: usize) {
+    TEST_OPEN_TABS.with(|slot| *slot.borrow_mut() = Some((tabs, active)));
+}
+
+#[cfg(test)]
 pub fn load_open_tabs(_is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
-    (Vec::new(), 0)
+    TEST_OPEN_TABS.with(|slot| slot.borrow_mut().take()).unwrap_or_default()
 }
 
 #[cfg(not(test))]

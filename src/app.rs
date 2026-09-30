@@ -57,6 +57,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
+// Also the total wait budget for a worker job that already runs the requested version
+// (`wait_for_current_highlight_with_timeouts`).
 const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(1200);
 const FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
