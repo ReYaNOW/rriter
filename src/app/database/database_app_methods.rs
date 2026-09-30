@@ -1322,6 +1322,7 @@ fn database_tab(
         icon_key,
         closing_hints: Default::default(),
         deleted: false,
+        load: crate::app::TabLoad::Loaded,
         kind,
     }
 }

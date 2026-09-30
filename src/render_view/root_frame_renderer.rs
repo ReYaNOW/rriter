@@ -343,6 +343,24 @@ impl Renderer {
         // Открытая нижняя панель завершает empty frame через штатный bottom chrome.
         let empty_ide_bottom_chrome =
             empty_ide_should_continue_bottom_chrome(is_ide_mode, tabs.is_empty(), panel_bottom_h);
+        if is_ide_mode && self.startup_editor_hidden {
+            return self.draw_empty_ide_frame(
+                ide_panel,
+                editor,
+                lsp,
+                ui_registry,
+                has_lsp_diagnostics,
+                mx,
+                my,
+                blink_alpha,
+                panel_left_w,
+                panel_bottom_h,
+                true,
+                modal_overlay_open,
+                s,
+                true,
+            );
+        }
         if is_ide_mode && tabs.is_empty() {
             return self.draw_empty_ide_frame(
                 ide_panel,
@@ -358,6 +376,7 @@ impl Renderer {
                 empty_ide_bottom_chrome,
                 modal_overlay_open,
                 s,
+                false,
             );
         } else {
             self.was_empty_ide = false;

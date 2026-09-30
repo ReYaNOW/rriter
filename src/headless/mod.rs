@@ -56,6 +56,8 @@ mod ui_tests_editor_sticky;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_deleted_tab;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_ide_startup;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_commit;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_diff;
@@ -213,6 +215,7 @@ fn run_prepared(options: &HeadlessOptions, root: &Path, trace: StartupTrace) -> 
         session.open_startup_path(path);
     }
     session.settle(STARTUP_SETTLE);
+    session.finish_startup();
     session.app.startup_trace.mark("settled");
     session.run_loop(input, io::LineWriter::new(protocol));
     session.app.shutdown_background_services();
@@ -489,11 +492,33 @@ impl HeadlessSession {
         }
         // A dropped directory only adds a workspace; the spec's `workspace` also enters IDE mode.
         if !self.app.is_ide_mode {
-            self.app.enter_ide_mode();
+            self.app.enter_ide_mode_deferred();
         }
         // Same call as a dropped directory in `WindowEvent::DroppedFile`.
         self.app.apply_selected_workspace_folder(dir);
-        self.frame_ok()
+        let response = self.frame_ok();
+        if self.drew_last_step {
+            self.app.startup_trace.first_frame();
+        }
+        // The window runs this in the `about_to_wait` after the first content frame; the
+        // command must end in the complete state.
+        self.finish_startup();
+        self.frame_ok();
+        response
+    }
+
+    /// Ends a startup the way the window does: waits for the blank editor area to clear
+    /// (highlight ready or the sync fallback deadline), then runs the deferred work.
+    pub(crate) fn finish_startup(&mut self) {
+        let limit = Instant::now()
+            + crate::app::FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT
+            + Duration::from_millis(500);
+        while self.app.startup_editor_pending.is_some() && Instant::now() < limit {
+            if !self.step(false) {
+                std::thread::sleep(WAIT_IDLE_SLEEP);
+            }
+        }
+        self.app.finish_ide_deferred();
     }
 
     fn resize(&mut self, w: u32, h: u32) -> Response {

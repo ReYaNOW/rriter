@@ -485,6 +485,9 @@ pub struct Renderer {
     pub(crate) git_tooltip_timer: Option<GitTooltipTimer>,
 
     pub was_empty_ide: bool,
+    /// Frame input set by `App::render_main_frame` from `App::startup_editor_pending`: draw the
+    /// IDE chrome with a blank editor area and no tab bar.
+    pub(crate) startup_editor_hidden: bool,
     pub empty_ide_art_idx: usize,
     pub identical_words_cache: Vec<(usize, usize)>,
     pub identical_words_cache_editor: usize,

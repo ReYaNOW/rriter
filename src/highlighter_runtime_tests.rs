@@ -29,7 +29,7 @@ fn highlighter_query_spans_skip_captures_past_text_end_for_stale_tree() {
     let (commented, uncommented) = stale_comment_toggle_texts();
     let stale_tree = parse_python(&commented);
     let (lang, queries) = get_ts_config("py").expect("python config");
-    let mut cache = HashMap::new();
+    let cache = QueryCache::new();
     let mut spans = Vec::new();
     collect_query_highlight_spans(
         &lang,
@@ -37,7 +37,7 @@ fn highlighter_query_spans_skip_captures_past_text_end_for_stale_tree() {
         &queries,
         &stale_tree,
         &uncommented,
-        &mut cache,
+        &cache,
         None,
         &mut spans,
     );

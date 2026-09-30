@@ -344,6 +344,9 @@ pub(super) fn resume(app: &mut App, event_loop: &ActiveEventLoop) {
         App::update_window_title(window, &app.base_title, app.editor.is_dirty());
     }
     trim_allocator_after_gl_bootstrap();
+    // `--ide`: the first frame is the full IDE chrome. The restore here loads no file
+    // synchronously; the editor area stays blank until the active tab's highlight is in.
+    app.enter_ide_on_startup();
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]

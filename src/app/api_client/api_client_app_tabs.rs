@@ -322,6 +322,7 @@ impl crate::app::App {
             icon_key: "api",
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: id,
@@ -412,6 +413,7 @@ impl crate::app::App {
             icon_key: "api",
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: id,
@@ -557,6 +559,7 @@ impl crate::app::App {
             icon_key: "api",
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: API_MANUAL_MOCK_SPEC_ID,

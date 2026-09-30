@@ -802,7 +802,7 @@ impl Highlighter {
             &queries,
             &tree,
             text,
-            &mut self.sync_query_cache,
+            &self.query_cache,
             Some(range),
             &mut spans,
         );

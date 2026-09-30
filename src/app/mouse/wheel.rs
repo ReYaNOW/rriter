@@ -91,6 +91,9 @@ fn git_changes_total_height(git: &crate::app::git_panel::GitPanelState, scale: f
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.startup_blocks_pointer_input() {
+            return;
+        }
         self.lsp_actions_menu = None;
         let closed_git_menu =
             self.ide_panel.git.commit_menu_open() || self.ide_panel.git.commit_options_menu_open();

@@ -437,207 +437,6 @@ impl App {
         self.clipboard.as_mut()?.get_file_list().ok()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn enter_ide_mode(&mut self) {
-        self.is_ide_mode = true;
-
-        let was_welcome = self.show_welcome;
-        self.show_welcome = false;
-        if was_welcome && self.base_title == "Добро пожаловать" {
-            self.base_title = "Безымянный".to_string();
-            self.file_path = None;
-            self.file_key = None;
-            self.text_file_format = crate::platform::TextFileFormat::default();
-        }
-
-        // Re-entering IDE mode (Welcome after closing a file) must not stop a running mock server.
-        let mock_server = std::mem::take(&mut self.ide_panel.api.mock.server);
-        let mock_server_status = self.ide_panel.api.mock.server_status.clone();
-        if self.is_automation_mode() {
-            self.ide_panel = crate::app::IdePanelState::default();
-        } else {
-            self.ide_panel = crate::load_panel_state();
-            self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
-            self.load_database_panel_state();
-        }
-        self.ide_panel.api.mock.server = mock_server;
-        self.ide_panel.api.mock.server_status = mock_server_status;
-        self.ide_panel.enforce_single_open_per_group();
-
-        if self.ide_panel.is_open(PanelId::Database) {
-            self.reconcile_expanded_database_connections();
-        }
-
-        if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
-            self.add_terminal();
-        }
-
-        if self.lsp.is_none() {
-            let mut lsp = crate::lsp::LspManager::with_ui_waker(
-                self.ide_workspaces.clone(),
-                self.ui_waker.clone(),
-            );
-            lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
-            if !self.dart_settings.enabled {
-                lsp.set_server_enabled("dart", false);
-            }
-            self.lsp = Some(lsp);
-        }
-
-        let has_startup_file =
-            self.file_path.is_some() || self.editor.len() > 0 || self.editor.is_dirty();
-
-        if has_startup_file && self.tabs.is_empty() {
-            self.tabs.push(EditorTab {
-                editor: crate::editor::Editor::new(128),
-                file_path: self.file_path.clone(),
-                file_key: self.file_key.clone(),
-                text_file_format: self.text_file_format,
-                base_title: self.base_title.clone(),
-                file_extension: self.file_extension.clone(),
-                markdown: Default::default(),
-                pdf: None,
-                scroll_y: crate::scroll::ScrollState::new(15.0),
-                scroll_x: crate::scroll::ScrollState::new(15.0),
-                spans: Vec::new(),
-                completions: Vec::new(),
-                foldable_ranges: Vec::new(),
-                last_sent_version: u64::MAX,
-                search_results: Vec::new(),
-                search_current_idx: None,
-                is_highlighted_once: false,
-                is_highlight_complete: false,
-                icon_key: "default_file",
-                syntax_errors: Vec::new(),
-                closing_hints: Default::default(),
-                deleted: false,
-                kind: EditorTabKind::Normal,
-            });
-            self.active_tab = 0;
-        }
-
-        let (saved_tabs, saved_active) = if self.scroll_render_bench.is_some()
-            || self.is_automation_mode()
-        {
-            (Vec::new(), 0)
-        } else {
-            crate::load_open_tabs(true)
-        };
-
-        if !saved_tabs.is_empty() {
-            let mut loaded_any = false;
-            for saved_tab in saved_tabs {
-                match saved_tab {
-                    crate::OpenTabSnapshot::File(path) => {
-                        if path.exists() {
-                            self.open_file_in_tab_bg(path, false);
-                            loaded_any = true;
-                        }
-                    }
-                    crate::OpenTabSnapshot::Empty => {
-                        self.open_new_tab();
-                        loaded_any = true;
-                    }
-                    crate::OpenTabSnapshot::Api {
-                        spec_id,
-                        route_idx,
-                        auth_view,
-                    } => {
-                        if self
-                            .ide_panel
-                            .api
-                            .specs
-                            .iter()
-                            .any(|entry| entry.id == spec_id)
-                        {
-                            if auth_view {
-                                self.open_api_auth_tab(spec_id);
-                            } else {
-                                if let Some(route_idx) = route_idx {
-                                    self.open_api_route_with_new_tab(spec_id, route_idx, true);
-                                } else {
-                                    self.open_api_spec_tab(spec_id);
-                                }
-                            }
-                            loaded_any = true;
-                        }
-                    }
-                    crate::OpenTabSnapshot::DatabaseTable {
-                        connection_id,
-                        database_name,
-                        table_name,
-                    } => {
-                        if self.ide_panel.database.connection(connection_id).is_some() {
-                            self.open_database_table_tab(connection_id, &database_name, &table_name);
-                            loaded_any = true;
-                        }
-                    }
-                    crate::OpenTabSnapshot::DatabaseQuery {
-                        connection_id,
-                        database_name,
-                        console_id,
-                    } => {
-                        if self.ide_panel.database.connection(connection_id).is_some() {
-                            self.restore_database_query_tab(connection_id, &database_name, console_id);
-                            loaded_any = true;
-                        }
-                    }
-                    crate::OpenTabSnapshot::Pdf { path, page, frac } => {
-                        if path.exists() {
-                            self.open_pdf_tab_restored(path, page, frac);
-                            loaded_any = true;
-                        }
-                    }
-                }
-            }
-
-            self.startup_trace.mark("ide-tabs-open");
-            if loaded_any {
-                let target = if has_startup_file {
-                    0
-                } else {
-                    saved_active.min(self.tabs.len().saturating_sub(1))
-                };
-                self.switch_to_tab(target);
-                self.save_tabs_state();
-                self.startup_trace.mark("ide-switch");
-                if !self.is_highlighted_once {
-                    self.wait_for_current_highlight();
-                }
-            }
-        }
-
-        let title = self.base_title.clone();
-        if !self.tabs.is_empty() {
-            self.tabs[self.active_tab].icon_key =
-                crate::app::file_icons::file_icon_key_for_name(&title);
-        }
-
-        if let Some(path) = &self.file_path {
-            if let Some(lsp) = &mut self.lsp {
-                let text = self.editor.get_full_text();
-                lsp.notify_open(
-                    path,
-                    &self.file_extension,
-                    &text,
-                    crate::editor::lsp_document_version(self.editor.version),
-                );
-            }
-            self.refresh_current_editor_git_base();
-        }
-
-        self.refresh_file_tree();
-        self.start_file_watcher();
-        if self.ide_panel.is_open(PanelId::Git) {
-            self.refresh_git_panel();
-        }
-
-        if let Some(w) = self.window.as_ref() {
-            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-            w.request_redraw();
-        }
-        self.startup_trace.mark("ide-done");
-    }
     pub fn save_tabs_state(&mut self) {
         if !self.is_ide_mode || self.is_automation_mode() {
             return;
@@ -717,6 +516,7 @@ impl App {
             .unwrap_or(0)
             .max(self.editor.version)
             .max(self.highlighter.current_version)
+            .max(self.ide_preload.as_ref().and_then(|preload| preload.highlight_version).unwrap_or(0))
             .saturating_add(1)
     }
 
@@ -806,12 +606,21 @@ impl App {
     }
 
     pub fn switch_to_tab(&mut self, new_idx: usize) {
+        self.switch_to_tab_options(new_idx, true);
+    }
+
+    /// `wait_highlight == false` (deferred `--ide` startup) leaves a tab that was never
+    /// highlighted to the worker (`about_to_wait` applies the result) and leaves the git base
+    /// of a placeholder tab to `run_ide_deferred`, so no first frame waits for `git`.
+    fn switch_to_tab_options(&mut self, new_idx: usize, wait_highlight: bool) {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
         }
         if new_idx == self.active_tab || new_idx >= self.tabs.len() {
             return;
         }
+        // A tab restored as a placeholder (`open_pending_file_tab`) is read before it is shown.
+        self.materialize_pending_tab(new_idx, wait_highlight);
 
         self.cancel_pointer_interactions();
         let previous_tab = self.active_tab;
@@ -832,7 +641,7 @@ impl App {
             self.autocomplete_active = false;
             self.inline_git_popup = None;
         } else if self.active_tab_is_git_diff() {
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            while self.highlighter.rx.try_recv().is_ok() {}
             if !self.is_highlighted_once {
                 self.editor.version = self.next_tab_highlight_version();
                 self.prepare_active_git_diff_highlight_after_switch();
@@ -850,7 +659,7 @@ impl App {
                 self.file_extension.clone(),
             );
         } else if self.is_highlighted_once {
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
+            while self.highlighter.rx.try_recv().is_ok() {}
             self.is_highlight_complete = false;
             self.highlighter.restart_cached_view(
                 self.editor.version,
@@ -859,10 +668,7 @@ impl App {
                 self.editor.cursor,
             );
         } else {
-            self.editor.version = self.next_tab_highlight_version();
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
-            self.reset_highlighter_with_text(self.editor.get_full_text(), false);
-            self.wait_for_current_highlight();
+            self.begin_initial_tab_highlight(wait_highlight);
         }
 
         if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() && !self.tabs[self.active_tab].kind.is_pdf() {
@@ -1138,7 +944,8 @@ mod tests {
         assert!(main_keys.contains("self.defer_terminal_panel_until_ready();"));
         assert!(about.contains("app.process_terminal_presentation_intents()"));
         assert!(about.matches("app.add_terminal();").count() >= 2);
-        assert!(app_production.contains(
+        // `enter_ide_mode_impl` lives in the startup file.
+        assert!(include_str!("app_ide_startup_methods.rs").contains(
             "self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {\n            self.add_terminal();"
         ));
 
@@ -1581,6 +1388,7 @@ mod tests {
             closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
         }
     }
 

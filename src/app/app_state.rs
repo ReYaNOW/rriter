@@ -61,6 +61,25 @@ pub struct EditorTab {
     /// swapped by `sync_active_tab`, so it is always read from `tabs[idx]`.
     /// Written only by `App::set_tabs_deleted_under`.
     pub deleted: bool,
+    /// How much of a session-restored tab is read yet. Not swapped by `sync_active_tab`.
+    /// Written only by `App::open_pending_file_tab` (creation), `App::materialize_pending_tab`
+    /// and `App::discard_unreadable_pending_tab`.
+    pub load: TabLoad,
+}
+
+/// Load state of a tab restored from the saved session (`--ide` startup restores tabs as
+/// placeholders so the tab bar is complete before any file is read).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabLoad {
+    /// Text (and git base) are in the editor: the normal state of every tab.
+    #[default]
+    Loaded,
+    /// Only the file identity is set: the buffer is an empty placeholder and must never be
+    /// shown, saved or sent to the LSP before `materialize_pending_tab` read the file.
+    Pending,
+    /// The text is read; the git base (gutter) is still to be loaded by `run_ide_deferred`
+    /// (or by the next `switch_to_tab_options` that waits for the tab).
+    GitBasePending,
 }
 
 impl EditorTab {
@@ -1424,6 +1443,45 @@ pub struct App {
     /// Startup stage timing (`RRITER_STARTUP_TRACE`); the first content frame is marked on it.
     pub(crate) startup_trace: crate::startup_trace::StartupTrace,
     pub(crate) startup_deferred_pending: bool,
+    /// `--ide` startup: the open-tabs list and the active file, read before the window exists
+    /// (see `App::preload_ide_startup`); consumed by `enter_ide_mode_impl`, dropped when
+    /// `run_ide_deferred` finishes.
+    pub(crate) ide_preload: Option<IdePreload>,
+    /// Post-first-frame IDE restore work, one step per `run_ide_deferred` call.
+    pub(crate) ide_deferred: IdeDeferred,
+    /// `--ide` startup: the tab bar and the editor area stay blank (theme background) and
+    /// editor / tab input is ignored until the active tab's first highlight is applied. Holds
+    /// the deadline after which `App::poll_startup_editor_wait` highlights synchronously.
+    /// Set only by `begin_startup_editor_wait`, cleared only by `clear_startup_editor_wait`.
+    pub(crate) startup_editor_pending: Option<std::time::Instant>,
+}
+
+/// Stage of the IDE restore work that runs after the first content frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IdeDeferred {
+    None,
+    /// `enter_ide_mode_deferred` ran; the first content frame has not been drawn yet.
+    AwaitFrame,
+    /// A content frame was drawn; each `about_to_wait` runs one `run_ide_deferred` step
+    /// until it sets `None`.
+    Ready,
+}
+
+/// Active file of the saved session, read early together with its highlight request.
+pub(crate) struct PreloadedFile {
+    pub path: PathBuf,
+    pub text: String,
+    pub format: crate::platform::TextFileFormat,
+    /// Editor version the highlighter `Reset` was sent for.
+    pub version: u64,
+}
+
+pub(crate) struct IdePreload {
+    pub tabs: Vec<crate::OpenTabSnapshot>,
+    pub active: usize,
+    pub file: Option<PreloadedFile>,
+    /// Version of the early `Reset` still in flight; cleared once the tab took it over.
+    pub highlight_version: Option<u64>,
 }
 
 #[cfg(test)]

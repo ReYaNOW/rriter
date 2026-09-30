@@ -323,6 +323,9 @@ impl App {
             ui_waker: options.ui_waker,
             startup_trace: options.startup_trace,
             startup_deferred_pending: !options.headless,
+            ide_preload: None,
+            ide_deferred: crate::app::IdeDeferred::None,
+            startup_editor_pending: None,
         };
 
         app.highlighter.reset(
@@ -332,6 +335,8 @@ impl App {
             app.editor.cursor,
         );
         app.last_sent_version = app.editor.version;
+        // After the empty reset above: the worker keeps only the last queued `Reset`.
+        app.preload_ide_startup();
 
         if show_welcome {
             app.base_title = "Добро пожаловать".to_string();

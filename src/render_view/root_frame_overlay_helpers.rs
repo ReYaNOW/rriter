@@ -159,6 +159,19 @@ impl Renderer {
         wants_pointer
     }
 
+    /// Editor area (right of the activity bar and the side panels) in the theme background.
+    fn draw_blank_editor_area(&mut self, panel_left_w: f32) {
+        let editor_x = 48.0 * self.scale_factor + panel_left_w;
+        let editor_w = (self.width - editor_x).max(0.0);
+        self.push_rect(
+            editor_x,
+            0.0,
+            editor_w,
+            self.height,
+            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_empty_ide_frame(
         &mut self,
@@ -175,8 +188,15 @@ impl Renderer {
         continue_bottom_chrome: bool,
         modal_overlay_open: bool,
         s: f32,
+        blank_editor_area: bool,
     ) -> (bool, Vec<(usize, usize)>) {
-        self.draw_empty_ide(panel_left_w);
+        if blank_editor_area {
+            // `--ide` startup, before the active tab's first highlight: theme background
+            // only (no tab bar, no editor content, no cowsay).
+            self.draw_blank_editor_area(panel_left_w);
+        } else {
+            self.draw_empty_ide(panel_left_w);
+        }
 
         let (ui_mx, ui_my) = if modal_overlay_open {
             (-1.0, -1.0)
@@ -185,19 +205,21 @@ impl Renderer {
         };
         let is_ui_disabled = ide_panel.terminal_focused;
         if continue_bottom_chrome {
-            self.draw_ide_bottom_panel(
-                ide_panel,
-                lsp,
-                ui_registry,
-                lsp_has_diagnostics,
-                s,
-                ui_mx,
-                ui_my,
-                panel_bottom_h,
-                is_ui_disabled,
-                blink_alpha,
-                None,
-            );
+            if panel_bottom_h > 0.0 {
+                self.draw_ide_bottom_panel(
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    lsp_has_diagnostics,
+                    s,
+                    ui_mx,
+                    ui_my,
+                    panel_bottom_h,
+                    is_ui_disabled,
+                    blink_alpha,
+                    None,
+                );
+            }
             self.draw_status_bar(
                 editor,
                 None,

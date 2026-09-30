@@ -91,6 +91,12 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
     let open_y = (window_height - h) / 2.0;
     let target_y = if app.show_settings { open_y } else { start_y };
 
+    if !app.show_settings && app.settings_y > start_y {
+        // Closed panel still parked below the window (initial 10000.0): snap instead of
+        // animating ~0.9 s of invisible redraws after every launch.
+        app.settings_y = start_y;
+        app.settings_anim_progress = 0.0;
+    }
     let diff = target_y - app.settings_y;
     if diff.abs() > 1.5 {
         app.settings_y += diff * 10.0 * dt;
@@ -396,11 +402,16 @@ fn about_to_wait_picker_receivers(app: &mut App, dt: f32, now: Instant) -> bool 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn about_to_wait_highlight(app: &mut App) -> bool {
     let mut needs_redraw = false;
-    if app.highlighter.poll(app.editor.version) {
+    // Before the IDE entry the early `Reset` of `preload_ide_startup` answers for a version
+    // the (still empty) editor does not have: polling now would drop that result.
+    if !app.preloaded_highlight_awaits_ide_entry() && app.highlighter.poll(app.editor.version) {
         app.apply_highlight_results();
         if app.autocomplete_active {
             app.update_autocomplete();
         }
+        needs_redraw = true;
+    }
+    if app.poll_startup_editor_wait() {
         needs_redraw = true;
     }
     if app.request_visible_priority_highlight() {

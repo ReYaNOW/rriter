@@ -42,6 +42,9 @@ const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SaveOutcome {
     Saved,
+    /// Nothing was written and nothing needed to be: the tab is an unread restored
+    /// placeholder, so the file on disk is its saved state.
+    Unchanged,
     /// A protected save runs in the background; the buffer stays dirty until it completes.
     Pending(ProtectedSaveId),
     Failed,

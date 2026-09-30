@@ -547,7 +547,11 @@ impl App {
         if !self.is_ide_mode || self.active_tab_is_git_diff() {
             return None;
         }
-        let path = self.file_path.as_ref()?;
+        self.git_base_text_for_path(self.file_path.as_ref()?)
+    }
+
+    /// HEAD text of a file inside an open workspace (gutter base); `None` outside or untracked.
+    pub(crate) fn git_base_text_for_path(&self, path: &Path) -> Option<String> {
         let abs_path = self.abs_path_for_workspace(path);
         if !self
             .ide_workspaces
@@ -677,6 +681,7 @@ impl App {
             icon_key: "default_file",
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: EditorTabKind::GitDiff(meta.clone(), state),
         };
         self.tabs.push(tab);

@@ -327,6 +327,8 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
     }
 }
 
+/// Tests never read the user's `tabs_ide.txt`; a test that needs a saved session hands it to
+/// `App::preload_ide_session` directly.
 #[cfg(test)]
 pub fn load_open_tabs(_is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
     (Vec::new(), 0)
@@ -829,6 +831,7 @@ mod tests {
             syntax_errors: Vec::new(),
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: crate::app::EditorTabKind::Normal,
         }
     }
