@@ -168,6 +168,15 @@ fn run_git_checked(
     git_output_strs(repo_root, args, label, true).map(|_| ())
 }
 
+/// Local (non-network) git command for callers outside the panel, e.g. the PGO fixtures.
+pub(crate) fn run_git_local(
+    repo_root: &std::path::Path,
+    args: &[&str],
+    label: &str,
+) -> Result<(), String> {
+    git_output_strs(repo_root, args, label, false).map(|_| ())
+}
+
 fn run_git_checked_owned(
     repo_root: &std::path::Path,
     args: Vec<std::ffi::OsString>,

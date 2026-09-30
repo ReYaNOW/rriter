@@ -76,6 +76,9 @@ fn lookup(
     match name {
         "pdf" => Some(("pdf", None, super::automation_pdf::steps(workspace))),
         "api_mock" => Some(("api_mock", None, super::automation_api_mock::steps(workspace))),
+        "git_changes" => {
+            Some(("git_changes", None, super::automation_git_changes::steps(workspace)))
+        }
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]

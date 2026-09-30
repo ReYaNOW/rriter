@@ -219,6 +219,12 @@ fn pgo_group_api_mock() {
 }
 
 #[test]
+fn pgo_group_git_changes() {
+    let outcome = run_pgo_scenario("group:git_changes", 90_000);
+    assert!(outcome.success, "{outcome:?}");
+}
+
+#[test]
 fn headless_pgo_cli_parses_scenario_and_pgo_window_defaults() {
     let opts = parse_args(&os(&["--headless", "--pgo-train", "--pgo-scenario", "group:x"]))
         .expect("valid args");

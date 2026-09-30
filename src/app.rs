@@ -19,6 +19,7 @@ mod automation_database;
 mod automation_groups;
 mod automation_markdown;
 mod automation_api_mock;
+mod automation_git_changes;
 mod automation_pdf;
 pub(crate) mod context_menu;
 mod dart_settings;
