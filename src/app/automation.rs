@@ -157,6 +157,9 @@ pub struct AutomationOptions {
     pub scenario: PgoScenario,
 }
 
+/// A group's precondition; `Err(reason)` skips the group.
+pub(super) type GroupRequires = Option<fn(&App) -> Result<(), String>>;
+
 #[derive(Debug, Clone)]
 pub(super) enum AutomationStep {
     WaitReady,
@@ -295,7 +298,7 @@ pub(super) enum AutomationStep {
     /// Opens a group; a `requires` returning `Err(reason)` skips everything up to `GroupEnd`.
     GroupStart {
         name: &'static str,
-        requires: Option<fn(&App) -> Result<(), String>>,
+        requires: GroupRequires,
     },
     GroupEnd,
     Finish,

@@ -552,6 +552,9 @@
       "expect_used": 1,
       "unwrap_used": 5
     },
+    "src/headless/ui_tests_pgo.rs": {
+      "expect_used": 9
+    },
     "src/headless/ui_tests_problems.rs": {
       "expect_used": 3
     },

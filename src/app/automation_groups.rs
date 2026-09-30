@@ -57,7 +57,7 @@ pub(super) fn welcome_steps() -> Vec<AutomationStep> {
     ]
 }
 
-type Requires = Option<fn(&App) -> Result<(), String>>;
+type Requires = crate::app::automation::GroupRequires;
 
 /// The groups run only in the headless training: the GUI `full` keeps its pre-group step set.
 fn headless_only(app: &App) -> Result<(), String> {
