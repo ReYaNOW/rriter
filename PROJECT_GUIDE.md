@@ -1523,6 +1523,17 @@ Entrypoints/state:
 * `src/app/automation_database.rs` -> PGO-only semantic Database Tools workload: fixture endpoint parsing, in-memory secretless PostgreSQL connection seeding, production DB waits/actions, table/query scrolling, diagnostics, and regression tests.
 * `src/app/automation_dart.rs` -> PGO-only Dart setup/waits: disables external Dart SDK/LSP work for deterministic training while requiring current tree-sitter syntax closing hints, with diagnostics and regression tests.
 * `src/app/automation_markdown.rs` -> PGO-only Markdown Edit/Read workload: semantic mode/readiness steps, production shared vertical scrolling, deterministic incremental scenario chunk, and focused regressions.
+* `src/app/automation_groups.rs` -> PGO group registry: `FULL_GROUPS`, `group_steps` (wraps a group in `GroupStart`/`GroupEnd`), `startup`/`welcome` scenario steps.
+* `src/app/automation_pdf.rs` -> PGO group `pdf` (requires pdfium): PDF open/scroll workload.
+* `src/app/automation_api_mock.rs` -> PGO group `api_mock`: API Mock panel workload.
+* `src/app/automation_git_changes.rs` -> PGO group `git_changes`: Git changes panel workload.
+* `src/app/automation_editor_ops.rs` -> PGO group `editor_ops`: editor operations workload.
+* `src/app/automation_lsp_nav.rs` -> PGO group `lsp_nav`: LSP navigation workload.
+* `src/app/automation_input_scroll.rs` -> PGO group `input_scroll`: keyboard/wheel/mouse input and scroll workload.
+* `src/app/automation_terminal_ops.rs` -> PGO group `terminal_ops`: terminal panel workload.
+* `src/headless/ui_tests_pgo.rs` -> `run_pgo_scenario` and per-group headless PGO scenario tests.
+* `scripts/pgo_coverage.py` -> PGO pipeline coverage helpers: profdata parsing, per-module summary, group marker checks, PGO warning counts.
+* `scripts/pgo_fixtures.py` -> PGO pipeline fixture servers/data started by `pgo_pipeline.py`.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.

@@ -1,5 +1,7 @@
 # План автоматизации PGO и унификации build-скриптов RRiter
 
+> На Linux GUI-тренировка заменена headless-тренировкой (`make max`); см. `docs/superpowers/specs/2026-09-30-headless-pgo-design.md` и раздел «PGO training» в `docs/headless.md`.
+
 ## 1. Статус документа
 
 Этап сравнения baseline/PGO был реализован ранее. Этапы автоматизации PGO и
