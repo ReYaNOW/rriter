@@ -82,6 +82,11 @@ fn lookup(
         "editor_ops" => {
             Some(("editor_ops", None, super::automation_editor_ops::steps(workspace)))
         }
+        "lsp_nav" => Some((
+            "lsp_nav",
+            Some(super::automation_lsp_nav::requires),
+            super::automation_lsp_nav::steps(workspace),
+        )),
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]

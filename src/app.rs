@@ -21,6 +21,7 @@ mod automation_markdown;
 mod automation_api_mock;
 mod automation_editor_ops;
 mod automation_git_changes;
+mod automation_lsp_nav;
 mod automation_pdf;
 pub(crate) mod context_menu;
 mod dart_settings;

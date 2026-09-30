@@ -230,6 +230,27 @@ fn pgo_group_editor_ops() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+/// With `ty` the group runs to the end; without it the group is skipped (like `skip_without_ty`
+/// in the goto-definition tests) and the skip is reported.
+#[test]
+fn pgo_group_lsp_nav() {
+    let ty_found = crate::platform::resolve_tool_executable(
+        std::ffi::OsStr::new("ty"),
+        "RRITER_TY_PATH",
+    )
+    .is_some();
+    let (outcome, _session, report_path) = run_pgo_session("group:lsp_nav", 90_000);
+    assert!(outcome.success, "{outcome:?}");
+    let report = read_report(&report_path);
+    let skipped = &report["skipped_groups"];
+    if ty_found {
+        assert_eq!(*skipped, serde_json::json!([]), "{report}");
+        assert!(report["completed_steps"].to_string().contains("cursor at definition"), "{report}");
+    } else {
+        assert_eq!(*skipped, serde_json::json!([{ "group": "lsp_nav", "reason": "ty not found" }]));
+    }
+}
+
 #[test]
 fn headless_pgo_cli_parses_scenario_and_pgo_window_defaults() {
     let opts = parse_args(&os(&["--headless", "--pgo-train", "--pgo-scenario", "group:x"]))
