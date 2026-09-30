@@ -240,6 +240,83 @@ pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiM
     }
 }
 
+/// Loopback address of a Mock server URL reported by the panel (`http://host:port`).
+pub(crate) fn loopback_addr_from_panel_url(url: &str) -> Result<SocketAddr, String> {
+    let (_, port) = url
+        .strip_prefix("http://")
+        .and_then(|authority| authority.rsplit_once(':'))
+        .ok_or_else(|| format!("unexpected Mock server URL: {url}"))?;
+    let port = port
+        .parse::<u16>()
+        .map_err(|error| format!("invalid Mock server port in {url}: {error}"))?;
+    Ok(SocketAddr::from(([127, 0, 0, 1], port)))
+}
+
+/// Sends one raw HTTP/1.1 request to the Mock server at the panel `url` from a worker thread,
+/// so the UI keeps drawing while the server answers. The receiver yields the status code and
+/// body; dropping it is fine, the worker ignores a closed channel. Used by the headless tests
+/// and the `api_mock` PGO group.
+pub(crate) fn request_to_mock(
+    url: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Receiver<Result<(u16, String), String>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let (url, method, path, headers, body) = (
+        url.to_string(),
+        method.to_string(),
+        path.to_string(),
+        headers.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect::<Vec<_>>(),
+        body.to_vec(),
+    );
+    std::thread::spawn(move || {
+        let _ = sender.send(send_raw_request(&url, &method, &path, &headers, &body));
+    });
+    receiver
+}
+
+fn send_raw_request(
+    url: &str,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Result<(u16, String), String> {
+    use std::io::{Read, Write};
+    let address = loopback_addr_from_panel_url(url)?;
+    let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2))
+        .map_err(|error| error.to_string())?;
+    // A Python route's first request starts its worker through uv.
+    stream.set_read_timeout(Some(Duration::from_secs(10))).map_err(|error| error.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(|error| error.to_string())?;
+    write!(stream, "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n")
+        .map_err(|error| error.to_string())?;
+    for (key, value) in headers {
+        write!(stream, "{key}: {value}\r\n").map_err(|error| error.to_string())?;
+    }
+    if !body.is_empty() || method != "GET" {
+        write!(stream, "Content-Length: {}\r\n", body.len()).map_err(|error| error.to_string())?;
+    }
+    stream.write_all(b"\r\n").map_err(|error| error.to_string())?;
+    stream.write_all(body).map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    let response = String::from_utf8_lossy(&bytes);
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| format!("invalid HTTP response: {response}"))?;
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .ok_or_else(|| format!("HTTP response has no body separator: {response}"))?;
+    Ok((status, body))
+}
+
 fn run_server_thread(
     snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
     python: Arc<PythonWorkerSlot>,

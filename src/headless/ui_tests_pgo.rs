@@ -213,6 +213,12 @@ fn pgo_group_pdf() {
 }
 
 #[test]
+fn pgo_group_api_mock() {
+    let outcome = run_pgo_scenario("group:api_mock", 60_000);
+    assert!(outcome.success, "{outcome:?}");
+}
+
+#[test]
 fn headless_pgo_cli_parses_scenario_and_pgo_window_defaults() {
     let opts = parse_args(&os(&["--headless", "--pgo-train", "--pgo-scenario", "group:x"]))
         .expect("valid args");

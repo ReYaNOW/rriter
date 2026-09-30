@@ -75,6 +75,7 @@ fn lookup(
 ) -> Option<(&'static str, Requires, Vec<AutomationStep>)> {
     match name {
         "pdf" => Some(("pdf", None, super::automation_pdf::steps(workspace))),
+        "api_mock" => Some(("api_mock", None, super::automation_api_mock::steps(workspace))),
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]
