@@ -287,7 +287,6 @@ pub(super) enum AutomationStep {
         mods: &'static str,
         clicks: u8,
     },
-    #[allow(dead_code)]
     Drag {
         from: AutomationTarget,
         to: AutomationTarget,

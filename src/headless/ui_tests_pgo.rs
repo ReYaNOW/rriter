@@ -230,6 +230,12 @@ fn pgo_group_editor_ops() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+#[test]
+fn pgo_group_input_scroll() {
+    let outcome = run_pgo_scenario("group:input_scroll", 60_000);
+    assert!(outcome.success, "{outcome:?}");
+}
+
 /// With `ty` the group runs to the end; without it the group is skipped (like `skip_without_ty`
 /// in the goto-definition tests) and the skip is reported.
 #[test]

@@ -87,6 +87,9 @@ fn lookup(
             Some(super::automation_lsp_nav::requires),
             super::automation_lsp_nav::steps(workspace),
         )),
+        "input_scroll" => {
+            Some(("input_scroll", None, super::automation_input_scroll::steps(workspace)))
+        }
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]
