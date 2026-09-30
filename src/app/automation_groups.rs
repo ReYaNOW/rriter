@@ -79,6 +79,9 @@ fn lookup(
         "git_changes" => {
             Some(("git_changes", None, super::automation_git_changes::steps(workspace)))
         }
+        "editor_ops" => {
+            Some(("editor_ops", None, super::automation_editor_ops::steps(workspace)))
+        }
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]

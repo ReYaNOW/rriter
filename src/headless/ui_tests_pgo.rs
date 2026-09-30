@@ -225,6 +225,12 @@ fn pgo_group_git_changes() {
 }
 
 #[test]
+fn pgo_group_editor_ops() {
+    let outcome = run_pgo_scenario("group:editor_ops", 60_000);
+    assert!(outcome.success, "{outcome:?}");
+}
+
+#[test]
 fn headless_pgo_cli_parses_scenario_and_pgo_window_defaults() {
     let opts = parse_args(&os(&["--headless", "--pgo-train", "--pgo-scenario", "group:x"]))
         .expect("valid args");
