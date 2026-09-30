@@ -251,6 +251,8 @@ Before editing hot files:
 
 ### UI Architecture
 
+The bottom panel (terminal, Problems) is translucent and lies on top of everything, by the user's design: it spans the window from the sidebar icons to the right edge, and the editor and every left panel keep painting under it to the status bar, faintly visible through it; only input over it goes to the panel. Never make it opaque, start it right of the left panel, or clip other content at its top, and don't report the show-through as a bug. Reason: two "fixes" (#18 moved it right of the left panel, the explorer clip hid rows under it) removed the intended look (01.10).
+
 Use declarative UI registry for new buttons/elements when applicable:
 
 1. Add `UiId`.
