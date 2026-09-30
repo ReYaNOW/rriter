@@ -29,7 +29,7 @@ resvg = { version = "0.47.0", default-features = false }
 usvg = { version = "0.47.0", default-features = false, features = ["text"] }
 tiny-skia = "0.12"
 # Mermaid -> SVG; без CLI и PNG-бэкенда (растеризует resvg из decode.rs).
-mermaid-rs-renderer = { version = "0.3.1", default-features = false }
+mermaid-rs-renderer = { version = "=0.3.1", default-features = false } # exact: decode.rs seeds its private font-cache format
 
 # Синтаксическая подсветка
 tree-sitter = "0.26.11"
