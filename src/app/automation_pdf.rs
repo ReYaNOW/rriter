@@ -1,0 +1,108 @@
+//! `pdf` PGO group: opens a generated 3-page PDF and drives the viewer (raster, scroll,
+//! paging, dark-page toggle, search).
+
+use std::path::Path;
+
+use crate::app::App;
+use crate::app::automation::{AutomationButton, AutomationStep, AutomationTarget};
+use crate::app::pdf_tab::PdfPhase;
+use crate::pdf::library::LocateResult;
+use crate::ui_system::UiId;
+
+const WHEEL_STEPS: usize = 20;
+/// Frames the viewer gets to re-rasterize after a dark-page toggle.
+const RERASTER_FRAMES: u16 = 20;
+
+/// pdfium must be locatable the way the viewer locates it (override env, exe dir, managed dir);
+/// the headless Linux pipeline provides it, GUI runs on other hosts may not have it.
+pub(super) fn requires(_app: &App) -> Result<(), String> {
+    requires_with(crate::pdf::library::locate())
+}
+
+fn requires_with(located: LocateResult) -> Result<(), String> {
+    match located {
+        LocateResult::Found(_) => Ok(()),
+        LocateResult::NotInstalled | LocateResult::Missing { .. } => Err("pdfium not found".to_string()),
+    }
+}
+
+fn write_and_open(app: &mut App, workspace: &Path) -> Result<(), String> {
+    let dir = workspace.join("pgo_pdf");
+    std::fs::create_dir_all(&dir).map_err(|error| format!("create pgo_pdf: {error}"))?;
+    let path = crate::pdf::fixture::try_write_fixture_pdf(&dir)
+        .map_err(|error| format!("write fixture pdf into {}: {error}", dir.display()))?;
+    if !path.is_file() {
+        return Err(format!("fixture pdf was not written: {}", path.display()));
+    }
+    app.open_file_in_tab(path, false);
+    Ok(())
+}
+
+/// The viewer searches with the editor search panel's case flag, and an earlier `full` step
+/// (`ToggleSearchCase`) leaves it on: the fixture's "Go to second" would no longer match
+/// "second" next to "Second page target", so `search_found_both_matches` would never hold.
+fn reset_search_case(app: &mut App, _workspace: &Path) -> Result<(), String> {
+    app.search_case_sensitive = false;
+    Ok(())
+}
+
+fn rasterized(app: &App) -> bool {
+    app.active_pdf_tab()
+        .is_some_and(|pdf| matches!(pdf.phase, PdfPhase::Ready) && !pdf.textures.is_empty())
+}
+
+fn search_found_both_matches(app: &App) -> bool {
+    app.active_pdf_tab()
+        .is_some_and(|pdf| pdf.search.done && pdf.search.matches.len() == 2)
+}
+
+pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
+    use AutomationStep as S;
+    let mut steps = vec![
+        S::Call { what: "pdf reset search case", run: reset_search_case },
+        S::Call { what: "pdf open", run: write_and_open },
+        S::WaitUntil { what: "pdf rasterized", check: rasterized, timeout_ms: 20_000 },
+        // Earlier groups leave the file tree, terminal or project search focused, which would
+        // swallow the paging keys below; hand the keyboard to the document.
+        S::FocusEditor,
+    ];
+    // A negative wheel delta scrolls the document down.
+    steps.extend((0..WHEEL_STEPS).map(|_| S::Wheel {
+        at: AutomationTarget::Ui(UiId::PdfBody),
+        dx: 0.0,
+        dy: -3.0,
+    }));
+    steps.extend([S::Key("pagedown"), S::Key("pagedown"), S::Key("pagedown"), S::Key("end"), S::Key("home")]);
+    for _ in 0..2 {
+        steps.push(S::Click {
+            at: AutomationTarget::Ui(UiId::PdfDarkToggle),
+            button: AutomationButton::Left,
+            mods: "",
+            clicks: 1,
+        });
+        steps.push(S::WaitFrames(RERASTER_FRAMES));
+    }
+    steps.extend([
+        S::WaitUntil { what: "pdf rasterized after toggle", check: rasterized, timeout_ms: 10_000 },
+        S::Key("ctrl+f"),
+        S::TypeText("second"),
+        S::WaitUntil { what: "pdf search done", check: search_found_both_matches, timeout_ms: 10_000 },
+    ]);
+    steps
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn missing_pdfium_skips_the_group_with_a_reason() {
+        let missing = Err("pdfium not found".to_string());
+        assert_eq!(requires_with(LocateResult::NotInstalled), missing);
+        let bad_path = LocateResult::Missing { message: "x".to_string(), installable: false };
+        assert_eq!(requires_with(bad_path), missing);
+        assert_eq!(requires_with(LocateResult::Found(PathBuf::from("/lib/pdfium.so"))), Ok(()));
+    }
+}

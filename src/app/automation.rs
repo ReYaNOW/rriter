@@ -6,12 +6,13 @@ use winit::dpi::PhysicalSize;
 use crate::app::events::host_loop::HostLoop;
 
 use crate::app::api_client::ApiFocus;
+use crate::app::keyboard::KeyInput;
 use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
 use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
 use crate::app::automation_markdown::{MarkdownAutomationStep, MarkdownStepResult};
 use crate::app::{App, PanelId};
 
-pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 17;
+pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 18;
 
 const TIMED_SCROLL_HZ: f32 = 120.0;
 const TIMED_SCROLL_PAUSE_SECS: f32 = 2.0;
@@ -102,12 +103,62 @@ fn autocomplete_failure_diagnostics(app: &App, expected: &str) -> String {
     )
 }
 
-#[derive(Debug, Clone)]
+/// Which automation scenario a run executes; parsed from `--pgo-scenario`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PgoScenario {
+    Full,
+    Startup,
+    Welcome,
+    Smoke,
+    Group(String),
+}
+
+impl PgoScenario {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "full" => Ok(Self::Full),
+            "startup" => Ok(Self::Startup),
+            "welcome" => Ok(Self::Welcome),
+            "smoke" => Ok(Self::Smoke),
+            _ => match text.strip_prefix("group:") {
+                Some("") => Err(format!("PGO scenario {text:?} has no group name")),
+                Some(name) => Ok(Self::Group(name.to_string())),
+                None => Err(format!("unknown PGO scenario {text:?}")),
+            },
+        }
+    }
+
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Full => "full".to_string(),
+            Self::Startup => "startup".to_string(),
+            Self::Welcome => "welcome".to_string(),
+            Self::Smoke => "smoke".to_string(),
+            Self::Group(name) => format!("group:{name}"),
+        }
+    }
+
+    /// Only the GUI-equivalent training run leaves its open tabs behind for `startup`.
+    pub fn saves_session_on_exit(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    /// Only `startup` reads the saved session; every other scenario starts from a clean slate.
+    pub fn restores_session(&self) -> bool {
+        matches!(self, Self::Startup)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AutomationOptions {
     pub workspace: PathBuf,
     pub report_path: PathBuf,
     pub timeout: Duration,
+    pub scenario: PgoScenario,
 }
+
+/// A group's precondition; `Err(reason)` skips the group.
+pub(super) type GroupRequires = Option<fn(&App) -> Result<(), String>>;
 
 #[derive(Debug, Clone)]
 pub(super) enum AutomationStep {
@@ -213,7 +264,58 @@ pub(super) enum AutomationStep {
     AddSettingsIgnore(&'static str),
     RemoveSettingsIgnore(&'static str),
     RefreshSettingsTools,
+    /// Polled once per frame until `check` holds; the step fails with name `what` after `timeout_ms`.
+    WaitUntil {
+        what: &'static str,
+        check: fn(&App) -> bool,
+        timeout_ms: u64,
+    },
+    /// Runs once and must not block the frame for long: slow work goes to a thread and a
+    /// following `WaitUntil` waits for the feature state. `Err(e)` fails the step as `what: e`.
+    Call {
+        what: &'static str,
+        run: fn(&mut App, &Path) -> Result<(), String>,
+    },
+    /// A key combo in `KeyInput::parse_combo` syntax, delivered like the driver's `key` command.
+    Key(&'static str),
+    Wheel {
+        at: AutomationTarget,
+        dx: f32,
+        dy: f32,
+    },
+    /// `mods` is a `+`-separated modifier list (`""`, `"ctrl"`, `"ctrl+shift"`).
+    Click {
+        at: AutomationTarget,
+        button: AutomationButton,
+        mods: &'static str,
+        clicks: u8,
+    },
+    Drag {
+        from: AutomationTarget,
+        to: AutomationTarget,
+        steps: u16,
+    },
+    /// Opens a group; a `requires` returning `Err(reason)` skips everything up to `GroupEnd`.
+    GroupStart {
+        name: &'static str,
+        requires: GroupRequires,
+    },
+    GroupEnd,
     Finish,
+}
+
+/// Where a mouse step acts, in physical pixels.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum AutomationTarget {
+    /// Centre of the element's rectangle in the last frame's `ui_registry`.
+    Ui(crate::ui_system::UiId),
+    /// Computed from the app state each time the step needs it; `None` fails the step.
+    Find(fn(&App) -> Option<(f32, f32)>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AutomationButton {
+    Left,
 }
 
 impl AutomationStep {
@@ -310,6 +412,13 @@ impl AutomationStep {
             Self::AddSettingsIgnore(pattern) => format!("add-settings-ignore:{pattern}"),
             Self::RemoveSettingsIgnore(pattern) => format!("remove-settings-ignore:{pattern}"),
             Self::RefreshSettingsTools => "refresh-settings-tools".to_string(),
+            Self::WaitUntil { what, .. } | Self::Call { what, .. } => (*what).to_string(),
+            Self::Key(combo) => format!("key:{combo}"),
+            Self::Wheel { .. } => "wheel".to_string(),
+            Self::Click { .. } => "click".to_string(),
+            Self::Drag { .. } => "drag".to_string(),
+            Self::GroupStart { name, .. } => (*name).to_string(),
+            Self::GroupEnd => "group-end".to_string(),
             Self::Finish => "finish".to_string(),
         }
     }
@@ -331,6 +440,7 @@ impl AutomationStep {
             | Self::WaitApiResponse { .. }
             | Self::TriggerAutocomplete(_)
             | Self::ShowHover { .. } => Duration::from_secs(30),
+            Self::WaitUntil { timeout_ms, .. } => Duration::from_millis(*timeout_ms),
             Self::Dart(step) => step.timeout(),
             Self::Database(step) => step.timeout(),
             Self::Markdown(step) => step.timeout(),
@@ -386,12 +496,25 @@ pub struct AutomationController {
     failure: Option<AutomationFailure>,
     report_written: bool,
     hover_last_anchor: Option<(f32, f32)>,
+    /// Ticks seen so far; the headless runner ticks once per frame.
+    frames: u64,
+    finished: bool,
+    scenario_error: Option<String>,
+    /// `(group, reason)` of every group whose `requires` failed.
+    skipped_groups: Vec<(String, String)>,
+    /// Combo pressed by a `Key` step and released on its next tick.
+    key_hold: Option<crate::app::keyboard::KeyComboHold>,
+    /// Where the running `Drag` step pressed the button.
+    drag_from: Option<(f32, f32)>,
 }
 
 impl AutomationController {
     pub fn new(options: AutomationOptions) -> Self {
         let now = Instant::now();
-        let steps = full_pgo_scenario(&options.workspace);
+        let (steps, scenario_error) = match scenario_steps(&options.scenario, &options.workspace) {
+            Ok(steps) => (steps, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             options,
             steps,
@@ -405,7 +528,42 @@ impl AutomationController {
             failure: None,
             report_written: false,
             hover_last_anchor: None,
+            frames: 0,
+            finished: false,
+            scenario_error,
+            skipped_groups: Vec::new(),
+            key_hold: None,
+            drag_from: None,
         }
+    }
+
+    /// `None` while the run is in progress; `Err(step name)` once a step failed or timed out.
+    pub fn outcome(&self) -> Option<Result<(), String>> {
+        if let Some(failure) = &self.failure {
+            return Some(Err(failure.name.clone()));
+        }
+        self.finished.then_some(Ok(()))
+    }
+
+    pub fn scenario(&self) -> &PgoScenario {
+        &self.options.scenario
+    }
+
+    /// Whether the exit path may write the user's tab list: only a headless run of a
+    /// session-leaving scenario that succeeded. The GUI `--pgo-train` run (also `Full`)
+    /// must never touch the real `tabs_ide.txt`, and a failed run must not leave a partial one.
+    pub fn saves_session_now(&self, headless: bool) -> bool {
+        headless && self.options.scenario.saves_session_on_exit() && self.outcome() == Some(Ok(()))
+    }
+
+    /// Ticks seen so far (one per frame in the headless runner).
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// The global timeout the controller enforces itself.
+    pub fn timeout(&self) -> Duration {
+        self.options.timeout
     }
 
     pub fn tick(
@@ -414,6 +572,16 @@ impl AutomationController {
         event_loop: &HostLoop,
         now: Instant,
     ) -> AutomationTick {
+        self.frames += 1;
+        if let Some(reason) = self.scenario_error.take() {
+            return self.fail_and_exit(
+                self.options.scenario.as_str(),
+                reason,
+                None,
+                now,
+                AutomationFailureKind::Failed,
+            );
+        }
         if now.saturating_duration_since(self.started_at) > self.options.timeout {
             let step = self.steps.get(self.step_index).cloned();
             let name = step
@@ -607,6 +775,7 @@ impl AutomationController {
     }
 
     fn finish_and_exit(&mut self) -> AutomationTick {
+        self.finished = true;
         self.write_report("success");
         println!(
             "PGO_AUTOMATION_DONE completed={} skipped={} duration_ms={}",
@@ -647,6 +816,8 @@ impl AutomationController {
         let report = json!({
             "status": status,
             "scenario_version": PGO_AUTOMATION_SCENARIO_VERSION,
+            "scenario": self.options.scenario.as_str(),
+            "frames": self.frames,
             "driver": "semantic-internal-actions",
             "platform": std::env::consts::OS,
             "architecture": std::env::consts::ARCH,
@@ -657,6 +828,11 @@ impl AutomationController {
             "duration_ms": self.started_at.elapsed().as_millis(),
             "completed_steps": self.completed,
             "skipped_steps": self.skipped,
+            "skipped_groups": self
+                .skipped_groups
+                .iter()
+                .map(|(group, reason)| json!({ "group": group, "reason": reason }))
+                .collect::<Vec<_>>(),
             "failed_step": failure.map(|failure| failure.reason.as_str()),
             "failed_step_index": failure.map(|failure| failure.index),
             "failed_step_name": failure.map(|failure| failure.name.as_str()),

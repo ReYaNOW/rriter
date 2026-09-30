@@ -32,6 +32,21 @@ impl KeyInput {
         released
     }
 
+    /// Parses a `+`-separated modifier list (`"ctrl+shift"`); the empty string is no modifiers.
+    pub fn parse_modifiers(spec: &str) -> Result<ModifiersState, String> {
+        let mut modifiers = ModifiersState::empty();
+        for token in spec.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+            let Some(modifier) = modifier_token(token) else {
+                return Err(format!("unknown modifier '{token}'"));
+            };
+            if modifiers.contains(modifier) {
+                return Err(format!("duplicate modifier '{token}'"));
+            }
+            modifiers |= modifier;
+        }
+        Ok(modifiers)
+    }
+
     pub fn parse_combo(combo: &str) -> Result<(Self, ModifiersState), String> {
         if combo.trim().is_empty() {
             return Err("empty key combo".to_string());
@@ -46,12 +61,8 @@ impl KeyInput {
             if tokens.peek().is_none() {
                 break token;
             }
-            let modifier = match token.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => ModifiersState::CONTROL,
-                "shift" => ModifiersState::SHIFT,
-                "alt" => ModifiersState::ALT,
-                "super" | "meta" => ModifiersState::SUPER,
-                _ => return Err(format!("unknown key token '{token}'")),
+            let Some(modifier) = modifier_token(token) else {
+                return Err(format!("unknown key token '{token}'"));
             };
             if modifiers.contains(modifier) {
                 return Err(format!("duplicate modifier '{token}'"));
@@ -142,6 +153,16 @@ impl KeyInput {
     }
 }
 
+fn modifier_token(token: &str) -> Option<ModifiersState> {
+    match token.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some(ModifiersState::CONTROL),
+        "shift" => Some(ModifiersState::SHIFT),
+        "alt" => Some(ModifiersState::ALT),
+        "super" | "meta" => Some(ModifiersState::SUPER),
+        _ => None,
+    }
+}
+
 const LETTER_CODES: [KeyCode; 26] = [
     KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE,
     KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ,
@@ -155,9 +176,39 @@ const DIGIT_CODES: [KeyCode; 10] = [
     KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9,
 ];
 
+/// A key combo held down by [`App::press_key_combo`]: the matching release and the modifiers
+/// to put back when the combo ends.
+pub struct KeyComboHold {
+    release: KeyInput,
+    saved: ModifiersState,
+}
+
 impl App {
     pub fn handle_main_keyboard_input(&mut self, host: &HostLoop, event: KeyEvent) {
         self.handle_main_key_input(host, KeyInput::from(&event));
+    }
+
+    /// Shared by the headless `key` command and the automation `Key` step: substitutes the
+    /// modifiers with `mods` and delivers the press; the caller renders a frame, then calls
+    /// `release_key_combo` and `end_key_combo`.
+    pub fn press_key_combo(
+        &mut self,
+        host: &HostLoop,
+        input: KeyInput,
+        mods: ModifiersState,
+    ) -> KeyComboHold {
+        let hold = KeyComboHold { release: input.released(), saved: self.modifiers };
+        self.modifiers = mods;
+        self.handle_main_key_input(host, input);
+        hold
+    }
+
+    pub fn release_key_combo(&mut self, host: &HostLoop, hold: &KeyComboHold) {
+        self.handle_main_key_input(host, hold.release.clone());
+    }
+
+    pub fn end_key_combo(&mut self, hold: KeyComboHold) {
+        self.modifiers = hold.saved;
     }
 }
 

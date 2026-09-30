@@ -14,6 +14,8 @@ mod ui_tests_api_client_import;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_pdf;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_pgo;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_multipart;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_navigation;
@@ -120,6 +122,7 @@ mod ui_tests_welcome;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 
+use crate::app::automation::{AutomationOptions, PgoScenario};
 use crate::app::events::host_loop::{HeadlessLoopState, HostLoop};
 use crate::app::{App, AppInitOptions};
 use crate::platform::offscreen_gl::OffscreenContext;
@@ -149,9 +152,13 @@ const WAIT_IDLE_SLEEP: Duration = Duration::from_millis(2);
 const AWAIT_BACKGROUND_SLEEP: Duration = Duration::from_millis(2);
 /// Sleep slice of `native_wake` while it models a blocked native loop.
 const NATIVE_WAKE_SLICE: Duration = Duration::from_millis(1);
+/// Frame period of `--pgo-train`: 60 Hz, the pace of the windowed training run.
+const PGO_FRAME_PACE: Duration = Duration::from_micros(16_667);
 
 /// Headless entry point (arguments without the program name). Returns the process exit code:
 /// 0 all `ok`, 1 at least one `err`, 2 arguments, 3 GL context or `Renderer`.
+/// With `--pgo-train`: 0 scenario finished, 1 a step failed or timed out, 2 arguments,
+/// workspace, GL context or `Renderer`.
 pub(crate) fn run(args: &[OsString], trace: StartupTrace) -> u8 {
     trace.mark("headless-run");
     let options = match profile::parse_args(args) {
@@ -161,6 +168,12 @@ pub(crate) fn run(args: &[OsString], trace: StartupTrace) -> u8 {
             return 2;
         }
     };
+    if let Some(automation) = &options.automation
+        && !automation.workspace.is_dir()
+    {
+        eprintln!("headless: --pgo-workspace {}: not a directory", automation.workspace.display());
+        return 2;
+    }
     let profile = match Profile::prepare(&options) {
         Ok(profile) => profile,
         Err(reason) => {
@@ -186,6 +199,9 @@ fn run_prepared(options: &HeadlessOptions, root: &Path, trace: StartupTrace) -> 
     trace.mark("egl-vendor");
     crate::init_rayon_global_pool();
     trace.mark("rayon");
+    if let Some(automation) = options.automation.as_ref() {
+        return run_pgo(options, automation, root, trace);
+    }
     let protocol = match split_protocol_fd(libc::STDOUT_FILENO, libc::STDERR_FILENO) {
         Ok(file) => file,
         Err(error) => {
@@ -222,6 +238,48 @@ fn run_prepared(options: &HeadlessOptions, root: &Path, trace: StartupTrace) -> 
     let code = session.exit_code();
     drop(session);
     code
+}
+
+/// `--pgo-train`: one automation scenario, paced like the window, no protocol commands.
+fn run_pgo(
+    options: &HeadlessOptions,
+    automation: &AutomationOptions,
+    root: &Path,
+    trace: StartupTrace,
+) -> u8 {
+    let mut session = match HeadlessSession::with_trace(options, root.to_path_buf(), trace) {
+        Ok(session) => session,
+        Err((_, message)) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    if let Err(reason) = session.enter_pgo_scenario(automation) {
+        eprintln!("headless: {reason}");
+        session.app.shutdown_background_services();
+        return 2;
+    }
+    let outcome = session.run_automation(Some(PGO_FRAME_PACE));
+    drop(session);
+    match outcome.failed_step {
+        None => {
+            eprintln!(
+                "headless: PGO scenario {} finished after {} frames",
+                automation.scenario.as_str(),
+                outcome.frames
+            );
+            0
+        }
+        Some(step) => {
+            eprintln!(
+                "headless: PGO scenario {} failed at step {step} after {} frames (report {})",
+                automation.scenario.as_str(),
+                outcome.frames,
+                automation.report_path.display()
+            );
+            1
+        }
+    }
 }
 
 /// Protocol replies keep the original `stdout` fd (returned, close-on-exec); `stdout` itself
@@ -282,7 +340,10 @@ impl HeadlessSession {
         platform::configure_tool_paths(config.tool_paths.clone());
         let mut app = App::new_from_config(
             config,
-            AppInitOptions { startup_trace: trace, ..AppInitOptions::headless() },
+            AppInitOptions {
+                startup_trace: trace,
+                ..AppInitOptions::headless(options.automation.clone())
+            },
         );
         app.startup_trace.mark("app");
         let mut renderer = Renderer::new(
@@ -401,14 +462,11 @@ impl HeadlessSession {
                 self.frame_ok()
             }
             Command::Key { input, mods, .. } => {
-                let saved = self.app.modifiers;
-                self.app.modifiers = mods;
-                let release = input.released();
-                self.app.handle_main_key_input(&HostLoop::headless(&self.loop_state), input);
+                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input, mods);
                 self.step(true);
-                self.app.handle_main_key_input(&HostLoop::headless(&self.loop_state), release);
+                self.app.release_key_combo(&HostLoop::headless(&self.loop_state), &hold);
                 self.step(true);
-                self.app.modifiers = saved;
+                self.app.end_key_combo(hold);
                 Response::Ok(None)
             }
             Command::Type(text) => {
@@ -507,6 +565,18 @@ impl HeadlessSession {
         response
     }
 
+    /// Puts the app where the scenario starts: IDE mode with the workspace (as the `workspace`
+    /// command), or the welcome screen for `welcome`.
+    fn enter_pgo_scenario(&mut self, automation: &AutomationOptions) -> Result<(), String> {
+        if automation.scenario == PgoScenario::Welcome {
+            return Ok(());
+        }
+        match self.workspace(automation.workspace.clone()) {
+            Response::Err(reason) => Err(reason),
+            _ => Ok(()),
+        }
+    }
+
     /// Ends a startup the way the window does: waits for the blank editor area to clear
     /// (highlight ready or the sync fallback deadline), then runs the deferred work.
     pub(crate) fn finish_startup(&mut self) {
@@ -522,15 +592,10 @@ impl HeadlessSession {
     }
 
     fn resize(&mut self, w: u32, h: u32) -> Response {
-        if let Err(error) = self.gl.resize(w, h) {
+        let size = PhysicalSize::new(w, h);
+        if let Err(error) = frame::resize_surface(&mut self.app, &mut self.gl, size) {
             return Response::Err(format!("resize {w}x{h}: {error}"));
         }
-        let size = PhysicalSize::new(w, h);
-        if let Some(window) = self.headless_window() {
-            window.set_size(size);
-        }
-        // `handle_main_resized` also resizes the renderer, as the window branch does.
-        self.app.handle_main_resized(size);
         self.step(true);
         Response::Ok(Some(format!("{w}x{h}")))
     }
@@ -573,9 +638,9 @@ impl HeadlessSession {
     }
 
     fn settle(&mut self, budget: Duration) -> (u32, bool) {
-        let Self { app, loop_state, drew_last_step, .. } = self;
+        let Self { app, gl, loop_state, drew_last_step, .. } = self;
         frame::settle_loop(budget, || {
-            *drew_last_step = frame::step_frame(app, loop_state, false);
+            *drew_last_step = frame::step_frame(app, gl, loop_state, false);
             if *drew_last_step {
                 app.startup_trace.first_frame();
                 StepState::Redrawn
@@ -680,7 +745,8 @@ impl HeadlessSession {
     }
 
     fn step(&mut self, force: bool) -> bool {
-        self.drew_last_step = frame::step_frame(&mut self.app, &self.loop_state, force);
+        self.drew_last_step =
+            frame::step_frame(&mut self.app, &mut self.gl, &self.loop_state, force);
         self.drew_last_step
     }
 

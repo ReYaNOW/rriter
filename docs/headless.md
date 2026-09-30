@@ -217,6 +217,38 @@ Not isolated: opened files are read from their real paths; LSP servers
 (`~/.cache/ruff`, `~/.cache/ty`); a profile with the Terminal panel open starts
 a PTY with the user's shell.
 
+## PGO training
+
+`make max` (synonyms `make pgo`, `make pgo-auto`) runs `scripts/pgo_pipeline.py`, which trains the
+instrumented binary headless on Linux (no window, no user HOME, no network) and installs the
+PGO+Fat-LTO binary. `make max-nopgo` is the plain Fat-LTO build. Needs `target/pdfium.path`
+(`make pdfium`) and `llvm-cxxfilt`; the pipeline fails before any build if either is missing.
+
+```
+rriter --headless --pgo-train --pgo-scenario S --pgo-workspace W --pgo-report R
+       --pgo-timeout-seconds T --profile P
+```
+
+`--profile` is the rriter profile directory here (not the `.profdata` path of the pipeline).
+Exit codes: `0` scenario finished, `1` a step failed or timed out, `2` launch error (EGL,
+arguments, workspace). The report JSON carries `status`, `scenario`, `scenario_version`,
+`frames`, `failed_step` and `skipped_groups`.
+
+Scenarios (`--pgo-scenario`): `full` (all groups, saves the session on exit), `startup`
+(restores that session), `welcome` (welcome screen), `smoke`, and `group:<name>` for iterating on
+one group (`pdf`, `api_mock`, `git_changes`, `editor_ops`, `lsp_nav`, `input_scroll`,
+`terminal_ops`). `make pgo-script` always runs the default list (`full,startup,welcome`); to run
+one group through the script use
+`python3 scripts/pgo_pipeline.py --run-only --run-executable <binary> --scenarios group:<name>`
+(`--scenarios` accepts `group:<name>` on Linux and is ignored on other hosts). The focused test
+is `make test TEST_FILTER=headless::ui_tests_pgo`.
+
+A group whose external tool is missing (`requires` returns `Err`, e.g. `pdf` without pdfium) is
+skipped and listed in `skipped_groups`; the run still succeeds. The pipeline treats a skipped
+`pdf` as an error on Linux and checks per-group coverage markers (`scripts/pgo_coverage.py`).
+The pipeline runs `--scenarios full,startup,welcome` on Linux (`--install-binary PATH` copies the
+result); on other platforms it runs the GUI `full` scenario.
+
 ## Limits
 
 - Animations run on the real clock; `wait` is the only way to let them pass.

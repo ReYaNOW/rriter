@@ -29,7 +29,7 @@ fn fixture_head_commit_count(repository: &git2::Repository) -> usize {
     walk.filter_map(Result::ok).count()
 }
 
-fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
+pub(crate) fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
     if workspace.join(".git").exists() {
         let repository = git2::Repository::open(workspace)
             .map_err(|error| format!("failed to open fixture Git repository: {error}"))?;
@@ -154,6 +154,39 @@ fn fixture_python_tests(workspace: &Path) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
     files.into_iter().map(|(_, path)| path).collect()
+}
+
+fn scenario_steps(
+    scenario: &PgoScenario,
+    workspace: &Path,
+) -> Result<Vec<AutomationStep>, String> {
+    match scenario {
+        PgoScenario::Full => Ok(full_pgo_scenario(workspace)),
+        PgoScenario::Smoke => Ok(vec![
+            AutomationStep::WaitReady,
+            AutomationStep::ResizeWindow {
+                width: 1600,
+                height: 900,
+            },
+            AutomationStep::WaitFrames(3),
+            AutomationStep::Finish,
+        ]),
+        PgoScenario::Group(name) => {
+            let group = crate::app::automation_groups::group_steps(name, workspace)
+                .ok_or_else(|| format!("unknown PGO group {name:?}"))?;
+            // Like `full`, a lone group needs the fixture workspace and its git repository.
+            let mut steps = vec![
+                AutomationStep::WaitReady,
+                AutomationStep::ApplyWorkspace,
+                AutomationStep::WaitFileTree,
+            ];
+            steps.extend(group);
+            steps.push(AutomationStep::Finish);
+            Ok(steps)
+        }
+        PgoScenario::Startup => Ok(crate::app::automation_groups::startup_steps()),
+        PgoScenario::Welcome => Ok(crate::app::automation_groups::welcome_steps()),
+    }
 }
 
 fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
@@ -384,8 +417,11 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
         S::WaitFrames(5),
         S::ShowSettings(false),
         S::WaitFrames(5),
-        S::Finish,
     ]);
+    for group in crate::app::automation_groups::FULL_GROUPS {
+        steps.extend(crate::app::automation_groups::group_steps(group, workspace).unwrap_or_default());
+    }
+    steps.push(S::Finish);
     steps
 }
 

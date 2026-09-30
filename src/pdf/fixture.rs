@@ -2,12 +2,20 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn write_fixture_pdf(dir: &Path) -> PathBuf {
+/// Writes the fixture PDF; a failed directory or file write is returned, not swallowed.
+pub fn try_write_fixture_pdf(dir: &Path) -> std::io::Result<PathBuf> {
     write_fixture_pdf_with_target_height(dir, "rriter-fixture.pdf", 792.0, 792.0)
 }
 
+#[cfg(test)]
+pub fn write_fixture_pdf(dir: &Path) -> PathBuf {
+    try_write_fixture_pdf(dir).expect("write fixture pdf")
+}
+
+#[cfg(test)]
 pub fn write_fixture_pdf_mixed(dir: &Path) -> PathBuf {
     write_fixture_pdf_with_target_height(dir, "rriter-fixture-mixed.pdf", 612.0, 500.0)
+        .expect("write mixed fixture pdf")
 }
 
 fn write_fixture_pdf_with_target_height(
@@ -15,7 +23,7 @@ fn write_fixture_pdf_with_target_height(
     filename: &str,
     target_height: f32,
     destination_y: f32,
-) -> PathBuf {
+) -> std::io::Result<PathBuf> {
     let page_one = b"BT /F1 24 Tf 72 700 Td (Hello PDF viewer) Tj 0 -40 Td (Go to second) Tj ET";
     let page_two = b"BT /F1 24 Tf 72 700 Td (Second page target) Tj ET";
     let objects = vec![
@@ -40,6 +48,7 @@ fn write_fixture_pdf_with_target_height(
 /// filled path (`1 1 0 rg … re f`) under black text. The yellow box spans
 /// x 72..540, y 300..700 (PDF points, origin bottom-left); the text sits at
 /// x 150..~420, y 450..~560, so the box corners are highlight without text.
+#[cfg(test)]
 pub fn write_fixture_pdf_highlight(dir: &Path) -> PathBuf {
     let content = b"1 1 0 rg 72 300 468 400 re f 0 0 0 rg BT /F1 150 Tf 150 450 Td (HH) Tj ET";
     let objects = vec![
@@ -49,10 +58,10 @@ pub fn write_fixture_pdf_highlight(dir: &Path) -> PathBuf {
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>".to_owned(),
         stream_object(content),
     ];
-    write_pdf(dir, "rriter-fixture-highlight.pdf", &objects)
+    write_pdf(dir, "rriter-fixture-highlight.pdf", &objects).expect("write highlight fixture pdf")
 }
 
-fn write_pdf(dir: &Path, filename: &str, objects: &[String]) -> PathBuf {
+fn write_pdf(dir: &Path, filename: &str, objects: &[String]) -> std::io::Result<PathBuf> {
     let path = dir.join(filename);
     let mut pdf = String::from("%PDF-1.4\n");
     let mut offsets = Vec::with_capacity(objects.len() + 1);
@@ -71,9 +80,9 @@ fn write_pdf(dir: &Path, filename: &str, objects: &[String]) -> PathBuf {
         "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF",
         objects.len() + 1
     );
-    let _ = fs::create_dir_all(dir);
-    let _ = fs::write(&path, pdf.as_bytes());
-    path
+    fs::create_dir_all(dir)?;
+    fs::write(&path, pdf.as_bytes())?;
+    Ok(path)
 }
 
 fn stream_object(bytes: &[u8]) -> String {
@@ -83,6 +92,7 @@ fn stream_object(bytes: &[u8]) -> String {
     object
 }
 
+#[cfg(test)]
 pub fn write_garbage(dir: &Path) -> PathBuf {
     let path = dir.join("rriter-garbage.pdf");
     let _ = fs::create_dir_all(dir);
@@ -90,6 +100,7 @@ pub fn write_garbage(dir: &Path) -> PathBuf {
     path
 }
 
+#[cfg(test)]
 pub fn write_empty(dir: &Path) -> PathBuf {
     let path = dir.join("rriter-empty.pdf");
     let _ = fs::create_dir_all(dir);

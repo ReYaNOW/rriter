@@ -1,6 +1,7 @@
 //! Headless command-line options and the isolated profile root that replaces the user's
 //! config/data/cache/state directories for the whole headless process.
 
+use crate::app::automation::{AutomationOptions, PgoScenario};
 use crate::headless::protocol::{parse_f64, parse_scale, parse_size};
 use crate::platform::{self, AppPaths};
 use std::ffi::{OsStr, OsString};
@@ -8,8 +9,16 @@ use std::fs::{self, DirBuilder};
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const DEFAULT_SIZE: (u32, u32) = (1920, 1080);
+/// Window of a `--pgo-train` run unless `--size`/`--scale` say otherwise: the training window
+/// the GUI pipeline used, so the layout paths that get profiled are the same.
+const PGO_SIZE: (u32, u32) = (2560, 1440);
+const PGO_SCALE: f64 = 1.333;
+const PGO_DEFAULT_TIMEOUT_SECONDS: u64 = 240;
+const PGO_MIN_TIMEOUT_SECONDS: u64 = 30;
+const PGO_DEFAULT_REPORT: &str = "rriter-pgo-automation-report.json";
 const DEFAULT_RUNTIME_BASE: &str = "/tmp";
 const TEMP_ROOT_PREFIX: &str = "rriter-headless-";
 /// Upper bound on `rriter-headless-<pid>-<n>` names tried before giving up.
@@ -25,6 +34,8 @@ pub(crate) struct HeadlessOptions {
     pub keep_profile: bool,
     pub allow_writes: bool,
     pub path: Option<PathBuf>,
+    /// `--pgo-train`: run this scenario headlessly instead of reading protocol commands.
+    pub automation: Option<AutomationOptions>,
 }
 
 impl Default for HeadlessOptions {
@@ -38,7 +49,45 @@ impl Default for HeadlessOptions {
             keep_profile: false,
             allow_writes: false,
             path: None,
+            automation: None,
         }
+    }
+}
+
+/// Raw `--pgo-*` flag values, turned into `AutomationOptions` once `--pgo-train` is known.
+#[derive(Default)]
+struct PgoFlags {
+    train: bool,
+    scenario: Option<PgoScenario>,
+    workspace: Option<PathBuf>,
+    report: Option<PathBuf>,
+    timeout_seconds: Option<u64>,
+    /// First `--pgo-*` flag other than `--pgo-train`, for the "requires --pgo-train" error.
+    first_extra: Option<&'static str>,
+}
+
+impl PgoFlags {
+    fn build(self) -> Result<AutomationOptions, String> {
+        let workspace = match self.workspace {
+            Some(workspace) => workspace,
+            None => std::env::current_dir()
+                .map_err(|e| format!("cannot determine the PGO workspace: {e}"))?,
+        };
+        let workspace = std::path::absolute(&workspace)
+            .map_err(|e| format!("--pgo-workspace {}: {e}", workspace.display()))?;
+        let report_path = self.report.unwrap_or_else(|| workspace.join(PGO_DEFAULT_REPORT));
+        let timeout_seconds = self.timeout_seconds.unwrap_or(PGO_DEFAULT_TIMEOUT_SECONDS);
+        if timeout_seconds < PGO_MIN_TIMEOUT_SECONDS {
+            return Err(format!(
+                "--pgo-timeout-seconds must be at least {PGO_MIN_TIMEOUT_SECONDS}"
+            ));
+        }
+        Ok(AutomationOptions {
+            workspace,
+            report_path,
+            timeout: Duration::from_secs(timeout_seconds),
+            scenario: self.scenario.unwrap_or(PgoScenario::Full),
+        })
     }
 }
 
@@ -63,6 +112,9 @@ pub(crate) fn parse_args(args: &[OsString]) -> Result<HeadlessOptions, String> {
     let mut from_user = false;
     let mut hz: Option<f64> = None;
     let mut budget_ms: Option<f64> = None;
+    let mut size_given = false;
+    let mut scale_given = false;
+    let mut pgo = PgoFlags::default();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let flag = match arg.to_str() {
@@ -84,14 +136,41 @@ pub(crate) fn parse_args(args: &[OsString]) -> Result<HeadlessOptions, String> {
         match flag {
             "--headless" => {}
             "--script" => opts.script = Some(path_value(flag, iter.next())?),
-            "--size" => opts.size = parse_size(str_value(flag, iter.next())?)?,
-            "--scale" => opts.scale = parse_scale(str_value(flag, iter.next())?)?,
+            "--size" => {
+                opts.size = parse_size(str_value(flag, iter.next())?)?;
+                size_given = true;
+            }
+            "--scale" => {
+                opts.scale = parse_scale(str_value(flag, iter.next())?)?;
+                scale_given = true;
+            }
             "--profile" => profile_dir = Some(path_value(flag, iter.next())?),
             "--profile-from-user" => from_user = true,
             "--hz" => hz = Some(positive(flag, str_value(flag, iter.next())?)?),
             "--budget-ms" => budget_ms = Some(positive(flag, str_value(flag, iter.next())?)?),
             "--keep-profile" => opts.keep_profile = true,
             "--allow-writes" => opts.allow_writes = true,
+            "--pgo-train" => pgo.train = true,
+            "--pgo-scenario" => {
+                let text = str_value(flag, iter.next())?;
+                pgo.scenario = Some(PgoScenario::parse(text).map_err(|e| format!("{flag}: {e}"))?);
+                pgo.first_extra.get_or_insert("--pgo-scenario");
+            }
+            "--pgo-workspace" => {
+                pgo.workspace = Some(path_value(flag, iter.next())?);
+                pgo.first_extra.get_or_insert("--pgo-workspace");
+            }
+            "--pgo-report" => {
+                pgo.report = Some(path_value(flag, iter.next())?);
+                pgo.first_extra.get_or_insert("--pgo-report");
+            }
+            "--pgo-timeout-seconds" => {
+                let text = str_value(flag, iter.next())?;
+                pgo.timeout_seconds = Some(
+                    text.parse::<u64>().map_err(|_| format!("{flag}: invalid value {text:?}"))?,
+                );
+                pgo.first_extra.get_or_insert("--pgo-timeout-seconds");
+            }
             _ => return Err(format!("unknown option '{flag}'")),
         }
     }
@@ -109,6 +188,24 @@ pub(crate) fn parse_args(args: &[OsString]) -> Result<HeadlessOptions, String> {
         (None, true) => ProfileChoice::FromUser,
         (None, false) => ProfileChoice::Temp,
     };
+    if !pgo.train {
+        return match pgo.first_extra {
+            Some(flag) => Err(format!("{flag} requires --pgo-train")),
+            None => Ok(opts),
+        };
+    }
+    if opts.script.is_some() || opts.path.is_some() {
+        return Err("--pgo-train takes neither --script nor FILE_OR_DIR".to_string());
+    }
+    // The scenario writes into its workspace (fixtures, report, saved session).
+    opts.allow_writes = true;
+    if !size_given {
+        opts.size = PGO_SIZE;
+    }
+    if !scale_given {
+        opts.scale = PGO_SCALE;
+    }
+    opts.automation = Some(pgo.build()?);
     Ok(opts)
 }
 

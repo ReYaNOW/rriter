@@ -804,6 +804,14 @@ mod tests {
     use super::*;
     use crate::parse_kde_color;
 
+    #[test]
+    fn open_tabs_content_with_garbage_bytes_is_an_error_not_a_panic() {
+        let garbage = String::from_utf8_lossy(&[0xff, 0xfe, 0x00, 0x80, b'\n', 0xc3, 0x28]).into_owned();
+        assert!(parse_open_tabs_content_checked(&garbage).is_err());
+        assert!(parse_open_tabs_content_checked("not-a-number\nFILE\t/tmp/a.py\n").is_err());
+        assert_eq!(parse_open_tabs_content(&garbage), (Vec::new(), 0));
+    }
+
     fn tab(path: Option<&str>) -> crate::app::EditorTab {
         crate::app::EditorTab {
             editor: Editor::new(16),

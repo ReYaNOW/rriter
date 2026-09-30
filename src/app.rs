@@ -16,7 +16,15 @@ pub(crate) use protected_save::{ProtectedSaveCompletion, ProtectedSaves, Protect
 pub mod automation;
 mod automation_dart;
 mod automation_database;
+mod automation_groups;
 mod automation_markdown;
+mod automation_api_mock;
+mod automation_editor_ops;
+mod automation_git_changes;
+mod automation_input_scroll;
+mod automation_lsp_nav;
+mod automation_pdf;
+mod automation_terminal_ops;
 pub(crate) mod context_menu;
 mod dart_settings;
 pub mod database;

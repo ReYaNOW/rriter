@@ -9,6 +9,7 @@ never touched: HOME/XDG/APPDATA are redirected into a disposable state folder.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import http.server
 import json
@@ -19,14 +20,44 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import IO, Mapping, Sequence
 
+from pgo_coverage import (
+    GROUP_MARKERS,
+    PgoError,
+    check_markers,
+    count_pgo_warnings,
+    demangled_functions,
+    check_new_raw_profiles,
+    find_cxxfilt,
+    format_coverage,
+    module_summary,
+    unrequired_groups,
+    verify_raw_profiles,
+    zero_modules,
+)
+from pgo_fixtures import (  # noqa: F401  (re-exported for tests and self-test)
+    FIXTURE_VERSION,
+    LOCAL_API_MARKER,
+    OPENAPI_BULK_METHODS,
+    OPENAPI_BULK_PATH_COUNT,
+    OPENAPI_SCHEMA_COUNT,
+    _copy_python_test_fixtures,
+    _dart_fixture_source,
+    _large_openapi_fixture,
+    _openapi_operation,
+    _openapi_schema,
+    _write_fixture_files,
+    find_pdfium,
+    managed_ty_bin_dir,
+)
 from postgres_fixture import (
     DEFAULT_DATABASE_NAME,
     DEFAULT_DATABASE_USER,
@@ -35,13 +66,9 @@ from postgres_fixture import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_VERSION = 17
-FIXTURE_VERSION = 7
+SCENARIO_VERSION = 18
 DEFAULT_TIMEOUT_SECONDS = 600
-OPENAPI_BULK_PATH_COUNT = 512
-OPENAPI_SCHEMA_COUNT = 192
-OPENAPI_BULK_METHODS = ("get", "post", "patch", "delete")
-LOCAL_API_MARKER = "RRITER_PGO_LOCAL_API_OK"
+ALL_SCENARIOS = ("full", "startup", "welcome")
 LOCAL_API_TOKEN = "rriter-pgo-bearer-token"
 PGO_DATABASE_ENV_HOST = "RRITER_PGO_DATABASE_HOST"
 PGO_DATABASE_ENV_PORT = "RRITER_PGO_DATABASE_PORT"
@@ -68,10 +95,6 @@ REQUIRED_DATABASE_SQL_FAMILIES = frozenset(
         "rollback",
     }
 )
-
-
-class PgoError(RuntimeError):
-    pass
 
 
 class _PgoApiServer(http.server.ThreadingHTTPServer):
@@ -179,8 +202,19 @@ class PgoConfig:
     run_only: bool = False
     run_executable: Path | None = None
     verbose: bool = True
+    # Linux headless training runs: `full` must precede `startup` (it saves the session).
+    scenarios: tuple[str, ...] = ALL_SCENARIOS
+    pdfium_path: Path | None = None
+    install_binary: Path | None = None
 
     def validate(self) -> "PgoConfig":
+        if not self.scenarios:
+            raise PgoError("at least one PGO scenario is required")
+        for name in self.scenarios:
+            if name not in ALL_SCENARIOS and not name.startswith("group:"):
+                raise PgoError(f"unknown PGO scenario: {name}")
+        if "startup" in self.scenarios and "full" not in self.scenarios[: self.scenarios.index("startup")]:
+            raise PgoError("scenario startup restores the session saved by full; run full before startup")
         if self.mode not in {"fresh", "reuse"}:
             raise PgoError(f"unsupported PGO mode: {self.mode}")
         if not self.target:
@@ -196,6 +230,27 @@ class PgoConfig:
         if self.run_executable is not None and not self.run_only:
             raise PgoError("--run-executable requires --run-only")
         return self
+
+
+STDERR_TAIL_LINES = 30
+# The marker is printed by RRiter to stdout, which the pipeline does not capture.
+STEP_HINT = "inspect the last PGO_AUTOMATION_STEP_START line in the output above (none: it failed before step 0)"
+
+
+def _start_stderr_pump(stream: IO[str] | None, lines: collections.deque[str]) -> threading.Thread:
+    """Copy a child's stderr to ours while keeping the lines for error reports."""
+
+    def pump() -> None:
+        if stream is None:
+            return
+        for line in stream:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            lines.append(line)
+
+    thread = threading.Thread(target=pump, name="rriter-pgo-stderr", daemon=True)
+    thread.start()
+    return thread
 
 
 class Runner:
@@ -253,17 +308,47 @@ class Runner:
             cwd=cwd,
             env=dict(env),
             text=True,
+            errors="replace",
+            stderr=subprocess.PIPE,
             **kwargs,
         )
+        tail: collections.deque[str] = collections.deque(maxlen=STDERR_TAIL_LINES)
+        pump = _start_stderr_pump(process.stderr, tail)
         try:
             return_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self._terminate_process_tree(process)
+            pump.join(timeout=5)
             raise
-        completed = subprocess.CompletedProcess(arguments, return_code)
+        pump.join(timeout=5)
+        completed = subprocess.CompletedProcess(arguments, return_code, stderr="".join(tail))
         if check and return_code != 0:
-            raise subprocess.CalledProcessError(return_code, arguments)
+            raise subprocess.CalledProcessError(return_code, arguments, stderr=completed.stderr)
         return completed
+
+    def run_logged(
+        self,
+        command: Sequence[str | os.PathLike[str]],
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+    ) -> str:
+        """Run a build command, echo its stderr live and return the whole stderr text."""
+
+        arguments = [os.fspath(part) for part in command]
+        if self.verbose:
+            print(f"[rriter-pgo] $ {subprocess.list2cmdline(arguments)}", flush=True)
+        process = subprocess.Popen(
+            arguments, cwd=cwd, env=dict(env), text=True, errors="replace", stderr=subprocess.PIPE
+        )
+        lines: collections.deque[str] = collections.deque()
+        pump = _start_stderr_pump(process.stderr, lines)
+        return_code = process.wait()
+        # A daemon that inherited stderr keeps the pipe open; do not wait for EOF forever.
+        pump.join(timeout=5)
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, arguments)
+        return "".join(lines)
 
     @staticmethod
     def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -329,7 +414,7 @@ def paths_for(config: PgoConfig) -> PgoPaths:
         training_dir=training,
         fixture_dir=training / "workspace",
         state_dir=training / "state",
-        report_path=training / "automation-report.json",
+        report_path=training / "automation-report-full.json",
         merged_profile=merged,
         summary_path=summary,
         manifest_path=manifest,
@@ -479,7 +564,7 @@ def build_with_profile(config: PgoConfig, paths: PgoPaths, runner: Runner) -> Pa
         f"-Cprofile-use={paths.merged_profile}",
         "-Cllvm-args=-pgo-warn-missing-function",
     ]
-    runner.run(
+    build_log = runner.run_logged(
         cargo_build_command(config),
         cwd=paths.root,
         env=build_environment(
@@ -488,417 +573,11 @@ def build_with_profile(config: PgoConfig, paths: PgoPaths, runner: Runner) -> Pa
             pgo_flags=flags,
         ),
     )
+    log_pgo_warnings(build_log)
     executable = executable_path(paths.use_target_dir, config.target, config.binary_name)
     if not executable.is_file():
         raise PgoError(f"PGO RRiter executable not found: {executable}")
     return executable
-
-
-def _openapi_schema(index: int) -> dict[str, object]:
-    related_ref = (
-        f"#/components/schemas/Entity{index + 1:03d}"
-        if index + 1 < OPENAPI_SCHEMA_COUNT
-        else "#/components/schemas/ErrorEnvelope"
-    )
-    return {
-        "type": "object",
-        "required": ["id", "name", "state", "created_at"],
-        "properties": {
-            "id": {"type": "integer", "format": "int64", "minimum": 1},
-            "name": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 120,
-                "example": f"resource-{index:04d}",
-            },
-            "state": {
-                "type": "string",
-                "enum": ["queued", "running", "paused", "done", "failed"],
-            },
-            "created_at": {"type": "string", "format": "date-time"},
-            "labels": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": 32,
-            },
-            "metrics": {
-                "type": "object",
-                "additionalProperties": {"type": "number", "format": "double"},
-            },
-            "related": {"$ref": related_ref},
-        },
-    }
-
-
-def _openapi_operation(path_index: int, method: str) -> dict[str, object]:
-    schema_index = path_index % OPENAPI_SCHEMA_COUNT
-    operation: dict[str, object] = {
-        "tags": [f"bulk-{path_index % 32:02d}"],
-        "operationId": f"bulk_{method}_{path_index:04d}",
-        "summary": f"{method.upper()} bulk resource {path_index:04d}",
-        "description": (
-            "### Deterministic PGO route\n"
-            "- Exercises route filtering and markdown rendering.\n"
-            "- Uses nested schemas, parameters, auth, examples, and responses.\n"
-            f"- Fixture route index: `{path_index:04d}`."
-        ),
-        "security": [{"BearerAuth": []}, {"HeaderKey": []}],
-        "parameters": [
-            {
-                "name": "resource_id",
-                "in": "path",
-                "required": True,
-                "description": "Stable resource identifier",
-                "schema": {"type": "integer", "format": "int64", "minimum": 1},
-                "example": path_index + 1,
-            },
-            {
-                "name": "page_size",
-                "in": "query",
-                "required": False,
-                "description": "Result window size",
-                "schema": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500,
-                    "default": 50,
-                },
-            },
-            {
-                "name": "include",
-                "in": "query",
-                "required": False,
-                "schema": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["owner", "metrics", "history"]},
-                },
-            },
-        ],
-        "responses": {
-            "200": {
-                "description": "Successful deterministic response",
-                "content": {
-                    "application/json": {
-                        "schema": {"$ref": f"#/components/schemas/Entity{schema_index:03d}"},
-                        "examples": {
-                            "default": {
-                                "value": {
-                                    "id": path_index + 1,
-                                    "name": f"resource-{path_index:04d}",
-                                    "state": "running",
-                                }
-                            }
-                        },
-                    }
-                },
-            },
-            "400": {
-                "description": "Invalid request",
-                "content": {
-                    "application/json": {
-                        "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
-                    }
-                },
-            },
-            "404": {
-                "description": "Resource not found",
-                "content": {
-                    "application/json": {
-                        "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
-                    }
-                },
-            },
-        },
-    }
-    if method in {"post", "patch"}:
-        operation["requestBody"] = {
-            "required": True,
-            "content": {
-                "application/json": {
-                    "schema": {"$ref": f"#/components/schemas/Entity{schema_index:03d}"}
-                }
-            },
-        }
-    return operation
-
-
-def _large_openapi_fixture() -> dict[str, object]:
-    schemas = {
-        f"Entity{index:03d}": _openapi_schema(index)
-        for index in range(OPENAPI_SCHEMA_COUNT)
-    }
-    schemas["ErrorEnvelope"] = {
-        "type": "object",
-        "required": ["code", "message"],
-        "properties": {
-            "code": {"type": "string", "example": "fixture_error"},
-            "message": {"type": "string"},
-            "details": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-        },
-    }
-    paths: dict[str, object] = {
-        "/automation/featured/{resource_id}": {
-            "post": {
-                **_openapi_operation(0, "post"),
-                "tags": ["automation"],
-                "operationId": "PGO_FEATURED_WRITE",
-                "summary": "PGO_FEATURED_WRITE",
-                "description": (
-                    "### Featured API Client training route\n"
-                    "- Filtered and opened by the native Rust automation.\n"
-                    "- Contains path, query, request-body, auth, and response UI."
-                ),
-            }
-        },
-        "/automation/ping": {
-            "get": {
-                "tags": ["automation"],
-                "operationId": "PGO_LOCAL_SERVER_PING",
-                "summary": "PGO_LOCAL_SERVER_PING",
-                "description": (
-                    "Calls the local deterministic HTTP server started by "
-                    "pgo_pipeline.py and verifies the real API Client request path."
-                ),
-                "security": [{"BearerAuth": []}],
-                "responses": {
-                    "200": {
-                        "description": "Deterministic local response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["marker", "accepted"],
-                                    "properties": {
-                                        "marker": {"type": "string"},
-                                        "accepted": {"type": "boolean"},
-                                    },
-                                },
-                                "example": {
-                                    "marker": LOCAL_API_MARKER,
-                                    "accepted": True,
-                                },
-                            }
-                        },
-                    }
-                },
-            }
-        }
-    }
-    for index in range(OPENAPI_BULK_PATH_COUNT):
-        paths[f"/bulk/resources/{{resource_id}}/items/item-{index:04d}"] = {
-            method: _openapi_operation(index, method)
-            for method in OPENAPI_BULK_METHODS
-        }
-    return {
-        "openapi": "3.0.3",
-        "info": {
-            "title": "RRiter large PGO API fixture",
-            "version": "2.0.0",
-            "description": "Large deterministic OpenAPI document generated by pgo_pipeline.py.",
-        },
-        "servers": [
-            {
-                "url": "http://127.0.0.1:9/api/v1",
-                "description": "Deliberately unreachable local fixture server",
-            }
-        ],
-        "tags": [
-            {"name": "automation", "description": "Native PGO automation route"},
-            *[
-                {"name": f"bulk-{index:02d}", "description": f"Bulk group {index:02d}"}
-                for index in range(32)
-            ],
-        ],
-        "paths": paths,
-        "components": {
-            "securitySchemes": {
-                "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
-                "HeaderKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
-            },
-            "schemas": schemas,
-        },
-    }
-
-
-def _copy_python_test_fixtures(workspace: Path) -> list[str]:
-    source_dir = ROOT / "tests"
-    target_dir = workspace / "tests"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
-    if source_dir.is_dir():
-        for source in sorted(source_dir.glob("*.py")):
-            if not source.is_file():
-                continue
-            target = target_dir / source.name
-            shutil.copyfile(source, target)
-            copied.append(target.relative_to(workspace).as_posix())
-
-    completion_fixture = target_dir / "pgo_completion_hover.py"
-    completion_fixture.write_text(
-        "from __future__ import annotations\n\n"
-        "from dataclasses import dataclass\n"
-        "from typing import Any, Iterable\n\n"
-        "@dataclass(slots=True)\n"
-        "class PgoCompletionModel:\n"
-        "    name: str\n"
-        "    values: list[int]\n"
-        "    metadata: dict[str, Any]\n\n"
-        "def pgo_completion_target(model: PgoCompletionModel) -> int:\n"
-        "    return sum(model.values) + len(model.metadata)\n\n"
-        "def pgo_completion_transform(items: Iterable[PgoCompletionModel]) -> list[int]:\n"
-        "    return [pgo_completion_target(item) for item in items]\n\n"
-        "async def pgo_hover_target(model: PgoCompletionModel) -> dict[str, int]:\n"
-        "    \"\"\"Return a normalized summary used by deterministic PGO hover training.\"\"\"\n"
-        "    return {model.name: pgo_completion_target(model)}\n\n"
-        "pgo_completion_result = pri\n",
-        encoding="utf-8",
-    )
-    copied.append(completion_fixture.relative_to(workspace).as_posix())
-    (workspace / ".rriter-pgo-python-tests.json").write_text(
-        json.dumps({"files": copied}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return copied
-
-
-def _dart_fixture_source() -> str:
-    lines = [
-        "// Deterministic Dart fixture for parser/highlight/fold/closing-label PGO training.\n",
-        "import 'dart:async';\n", "import 'dart:collection';\n\n",
-        "class PgoAnnotation { final String name; const PgoAnnotation(this.name); }\n",
-        "const pgoAnnotation = PgoAnnotation('rriter-pgo');\n",
-        "enum PgoState { idle, running, complete }\n",
-        "typedef PgoMapper<T> = T Function(T value);\n",
-        "extension PgoIterableExtension on Iterable<int> { int get total => fold(0, (a, b) => a + b); }\n\n",
-        "@pgoAnnotation\nabstract class PgoWorker<T extends num> {\n  const PgoWorker();\n  Future<T> run(T value);\n}\n\n",
-        "class PgoConfig<T> {\n  final String name;\n  final T? value;\n  const PgoConfig({required this.name, this.value});\n",
-        "  String describe() => 'PgoConfig(name: $name, value: $value)';\n}\n\n",
-        "const pgoDartCompletionTarget = 'deterministic-completion-marker';\n",
-        "const pgoDartBanner = '''RRiter PGO\nDart syntax fixture\nclosing labels\n''';\n\n",
-    ]
-    for index in range(36):
-        lines.extend([
-            f"class PgoNode{index} {{\n  final int seed;\n  const PgoNode{index}(this.seed);\n",
-            f"  Future<int> compute{index}(List<int> values) async {{\n    var total = seed;\n    final queue = Queue<int>()..addAll(values);\n",
-            f"    for (final value in queue) {{\n      if ((value + {index}) % 2 == 0) {{\n        try {{\n          var cursor = value;\n",
-            "          while (cursor > 0) {\n            total += cursor;\n            cursor -= 1;\n          }\n",
-            "        } catch (error) {\n          total -= error.hashCode;\n        } finally {\n          total += values.length;\n        }\n",
-            "      } else {\n        total -= value;\n      }\n    }\n    await Future<void>.delayed(Duration.zero);\n    return total;\n  }\n}\n\n",
-        ])
-    lines.extend([
-        "Future<int> pgoDartTarget(List<int> values, {PgoState state = PgoState.running}) async {\n",
-        "  int nested(int value) {\n    if (value > 1) {\n      for (var i = 0; i < value; i++) {\n        value += i;\n      }\n    }\n    return value;\n  }\n",
-        "  final int pgoDartTargetValue = nested(values.length);\n  // pgoDartEditTarget\n",
-        "  switch (state) {\n    case PgoState.idle:\n      return pgoDartTargetValue;\n    case PgoState.running:\n      return await const PgoNode0(3).compute0(values);\n    case PgoState.complete:\n      return values.total;\n  }\n}\n",
-    ])
-    return "".join(lines)
-
-
-def _write_fixture_files(workspace: Path) -> None:
-    (workspace / "src").mkdir(parents=True, exist_ok=True)
-    (workspace / "lib").mkdir(parents=True, exist_ok=True)
-    (workspace / "Cargo.toml").write_text(
-        "[package]\nname = \"rriter-pgo-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-        encoding="utf-8",
-    )
-    (workspace / "README.md").write_text(
-        "# RRiter PGO Markdown fixture\n\n"
-        "Deterministic workspace for native GUI automation and Markdown training.\n\n"
-        "## Edit and Read coverage\n\n"
-        "### Semantic structures\n\n"
-        "Ordinary paragraph text wraps across the preview viewport and keeps source markers visible in Edit mode. "
-        "A second sentence makes the paragraph long enough to exercise wrapping deterministically.\n\n"
-        "Unicode: \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 \U0001f600 \u2014 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 UTF-8 \u0433\u0440\u0430\u043d\u0438\u0446.\n\n"
-        "**strong text** and *emphasis text* plus `inline_code(42)`.\n\n"
-        "[deterministic link](https://example.invalid/path)\n\n"
-        "> Block quote first line.\n"
-        "> Multiline quote continuation with **strong quote text**.\n\n"
-        "- unordered item\n"
-        "- [ ] unchecked task\n"
-        "- [x] checked task\n"
-        "  - nested unordered item\n\n"
-        "1. ordered first\n"
-        "2. ordered second\n\n"
-        "---\n\n"
-        "| left | center | right |\n"
-        "| :--- | :----: | ----: |\n"
-        "| alpha | beta | gamma |\n"
-        "| \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 | \U0001f600 | 42 |\n\n"
-        "```rust\n"
-        "fn main() {\n"
-        "    let value = 42;\n"
-        "    println!(\"{value}\");\n"
-        "}\n"
-        "```\n\n"
-        "```python\n"
-        "def answer():\n"
-        "    return 42\n"
-        "```\n\n"
-        "```bash\n"
-        "echo \"markdown pgo\"\n"
-        "```\n\n"
-        "## Scroll coverage A\n\n"
-        "Paragraph A repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
-        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
-        "## Scroll coverage B\n\n"
-        "Paragraph B repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
-        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
-        "## Scroll coverage C\n\n"
-        "Paragraph C repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
-        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
-        "## Scroll coverage D\n\n"
-        "Paragraph D repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
-        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
-        "Incremental edit anchor: RRITER_PGO_MARKDOWN_EDIT_TARGET\n",
-        encoding="utf-8",
-    )
-    (workspace / ".rriter-pgo-fixture.json").write_text(
-        json.dumps({"fixture_version": FIXTURE_VERSION}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (workspace / "src" / "main.rs").write_text(
-        "use std::collections::BTreeMap;\n\n"
-        "fn summarize(values: &[u64]) -> u64 { values.iter().copied().sum() }\n\n"
-        "fn main() {\n"
-        "    let mut values = BTreeMap::new();\n"
-        "    values.insert(\"alpha\", summarize(&[1, 2, 3]));\n"
-        "    println!(\"{values:?}\");\n"
-        "}\n",
-        encoding="utf-8",
-    )
-    (workspace / "src" / "worker.py").write_text(
-        "from dataclasses import dataclass\n\n"
-        "@dataclass(slots=True)\n"
-        "class Job:\n"
-        "    name: str\n"
-        "    weight: int\n\n"
-        "def total(items: list[Job]) -> int:\n"
-        "    return sum(item.weight for item in items)\n",
-        encoding="utf-8",
-    )
-    (workspace / "pubspec.yaml").write_text(
-        "name: rriter_pgo_fixture\nversion: 0.0.0\npublish_to: none\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n",
-        encoding="utf-8",
-    )
-    (workspace / "lib" / "pgo_training.dart").write_text(
-        _dart_fixture_source(), encoding="utf-8"
-    )
-    large = ["// Deterministic large Rust file used for editor render and scroll training.\n"]
-    for index in range(6000):
-        large.append(
-            f"pub fn generated_{index}(value: u64) -> u64 {{ "
-            f"value.wrapping_mul({index + 3}).rotate_left({index % 63}) }}\n"
-        )
-    (workspace / "src" / "large.rs").write_text("".join(large), encoding="utf-8")
-    (workspace / "openapi.json").write_text(
-        json.dumps(_large_openapi_fixture(), ensure_ascii=False, indent=2)
-        + "\n",
-        encoding="utf-8",
-    )
-    _copy_python_test_fixtures(workspace)
 
 
 def _set_openapi_server_url(openapi_path: Path, base_url: str) -> None:
@@ -934,6 +613,7 @@ def isolated_runtime_environment(
     database_endpoint: tuple[str, int] | None = None,
 ) -> dict[str, str]:
     environment = base_environment(config)
+    real_environment = dict(environment)
     home = paths.state_dir / "home"
     xdg_config = paths.state_dir / "xdg-config"
     xdg_cache = paths.state_dir / "xdg-cache"
@@ -985,9 +665,33 @@ def isolated_runtime_environment(
                 PGO_DATABASE_ENV_USER: DEFAULT_DATABASE_USER,
             }
         )
+    if config.pdfium_path is not None:
+        environment["RRITER_PDFIUM_PATH"] = str(config.pdfium_path)
     if "linux" in config.target:
-        environment["WINIT_UNIX_BACKEND"] = "wayland"
+        _provide_ty(environment, real_environment, verbose=config.verbose)
     return environment
+
+
+def _provide_ty(
+    environment: dict[str, str], real_environment: Mapping[str, str], *, verbose: bool
+) -> None:
+    """Let the lsp_nav group find `ty`: PATH is inherited, a managed install is added to it.
+
+    `real_environment` is the environment before HOME/XDG were redirected into the state
+    folder; the managed install lives under the real user data directory.
+    """
+
+    if shutil.which("ty", path=environment.get("PATH")) is not None:
+        return
+    bin_dir = managed_ty_bin_dir(real_environment)
+    if bin_dir is not None:
+        environment["PATH"] = os.pathsep.join([str(bin_dir), environment.get("PATH", "")])
+    elif verbose:
+        print(
+            "[rriter-pgo] WARNING: `ty` is neither on PATH nor a managed RRiter install; "
+            "the lsp_nav group will skip itself and its code stays unprofiled",
+            flush=True,
+        )
 
 
 def database_fixture_telemetry_payload(
@@ -1040,19 +744,13 @@ def validate_database_fixture_telemetry(
 
 def validate_training_environment(config: PgoConfig) -> None:
     target = config.target
-    environment = base_environment(config)
     if "windows" in target and os.name != "nt":
         raise PgoError("Windows PGO training must run on Windows")
     if "apple-darwin" in target and sys.platform != "darwin":
         raise PgoError("macOS PGO training must run on macOS")
-    if "linux" in target:
-        if not sys.platform.startswith("linux"):
-            raise PgoError("Linux PGO training must run on Linux")
-        if not environment.get("WAYLAND_DISPLAY"):
-            raise PgoError(
-                "Linux PGO training requires a live Wayland session "
-                "(WAYLAND_DISPLAY is not set)"
-            )
+    if "linux" in target and not sys.platform.startswith("linux"):
+        # The Linux training is headless: no display server is needed.
+        raise PgoError("Linux PGO training must run on Linux")
 
 
 def describe_pgo_process_failure(returncode: int, *, os_name: str | None = None) -> str:
@@ -1087,6 +785,186 @@ def automation_failure_message(report: Mapping[str, object], report_path: Path) 
     )
 
 
+def active_scenarios(config: PgoConfig, host: str | None = None) -> tuple[str, ...]:
+    """Linux runs the configured headless scenarios; other hosts run the GUI `full` one."""
+
+    return config.scenarios if (sys.platform if host is None else host).startswith("linux") else ("full",)
+
+
+def report_path_for(paths: PgoPaths, scenario: str) -> Path:
+    return paths.training_dir / f"automation-report-{_slug(scenario)}.json"
+
+
+def training_command(
+    config: PgoConfig,
+    paths: PgoPaths,
+    executable: Path,
+    scenario: str,
+    report_path: Path,
+    *,
+    host: str | None = None,
+) -> list[str | os.PathLike[str]]:
+    common: list[str | os.PathLike[str]] = [
+        "--pgo-workspace", paths.fixture_dir,
+        "--pgo-report", report_path,
+        "--pgo-timeout-seconds", str(config.timeout_seconds),
+    ]
+    if not (sys.platform if host is None else host).startswith("linux"):
+        return [executable, "--ide", "--pgo-train", *common]
+    # full and startup share one profile dir: startup restores the session full saved.
+    profile = "headless-profile-welcome" if scenario == "welcome" else "headless-profile"
+    return [
+        executable, "--headless", "--pgo-train", "--pgo-scenario", scenario,
+        *common, "--profile", paths.state_dir / profile,
+    ]
+
+
+@dataclass
+class TrainingFixtures:
+    database: LocalPostgresFixture
+    api: LocalApiServer
+    database_endpoint: tuple[str, int]
+
+    def stop(self) -> None:
+        try:
+            self.database.stop()
+        finally:
+            self.api.stop()
+
+
+def start_fixtures(paths: PgoPaths) -> TrainingFixtures:
+    """Start the local PostgreSQL and API fixtures; the caller stops them in a `finally`."""
+
+    database = LocalPostgresFixture()
+    api = LocalApiServer.start()
+    try:
+        database.start()
+        endpoint = database.endpoint
+        print(
+            f"[rriter-pgo] local PostgreSQL fixture: {endpoint[0]}:{endpoint[1]}/{DEFAULT_DATABASE_NAME}",
+            flush=True,
+        )
+        _set_openapi_server_url(paths.fixture_dir / "openapi.json", api.base_url)
+    except BaseException:
+        try:
+            database.stop()
+        finally:
+            api.stop()
+        raise
+    return TrainingFixtures(database, api, endpoint)
+
+
+def _load_report(report_path: Path) -> tuple[dict[str, object] | None, Exception | None]:
+    if not report_path.is_file():
+        return None, None
+    try:
+        loaded = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise PgoError("automation report root must be an object")
+        return loaded, None
+    except (OSError, json.JSONDecodeError, PgoError) as error:
+        return None, error
+
+
+def _stderr_tail(result: object) -> str:
+    text = getattr(result, "stderr", "")
+    return "".join(text.splitlines(keepends=True)[-STDERR_TAIL_LINES:]) if isinstance(text, str) else ""
+
+
+def reject_skipped_pdf_group(
+    report: Mapping[str, object], scenario: str, *, host: str | None = None
+) -> None:
+    """On Linux pdfium is a preflight requirement, so a skipped `pdf` group is a setup error."""
+
+    if not (sys.platform if host is None else host).startswith("linux"):
+        return
+    for item in report.get("skipped_groups") or []:
+        if isinstance(item, dict) and item.get("group") == "pdf":
+            raise PgoError(
+                f"scenario {scenario}: the pdf group was skipped ({item.get('reason')}); pdfium is "
+                "a required Linux dependency of headless PGO (check RRITER_PDFIUM_PATH, `make pdfium`)"
+            )
+
+
+def run_scenario(
+    config: PgoConfig,
+    paths: PgoPaths,
+    executable: Path,
+    runner: Runner,
+    fixtures: TrainingFixtures,
+    name: str,
+    report_path: Path,
+    *,
+    profile_dir: Path | None = None,
+    check_raw: bool = False,
+) -> dict[str, object]:
+    print(f"[rriter-pgo] scenario {name}", flush=True)
+    raw_dir = paths.profile_dir if profile_dir is None else profile_dir
+    raw_before = set(raw_dir.glob("*.profraw"))
+    result = runner.run_process_tree(
+        training_command(config, paths, executable, name, report_path),
+        cwd=paths.fixture_dir,
+        env=isolated_runtime_environment(
+            config, paths, profile_dir=profile_dir, database_endpoint=fixtures.database_endpoint
+        ),
+        timeout=config.timeout_seconds + 45,
+        check=False,
+    )
+    report, report_error = _load_report(report_path)
+    where = f"scenario {name}: "
+    if result.returncode != 0:
+        message = where + describe_pgo_process_failure(result.returncode)
+        if report is not None:
+            if report.get("status") == "success":
+                message += f"; automation report status=success report={report_path}"
+            else:
+                message += "; " + automation_failure_message(report, report_path)
+        elif report_error is not None:
+            message += f"; structured automation report is invalid: {report_error}; {STEP_HINT}"
+        else:
+            message += f"; structured automation report is absent: {report_path}; {STEP_HINT}"
+        tail = _stderr_tail(result)
+        if tail:
+            message += f"\nlast {STDERR_TAIL_LINES} stderr lines:\n{tail}"
+        raise PgoError(message)
+    if check_raw:
+        check_new_raw_profiles(raw_dir, raw_before, name)
+    if report_error is None and report is None:
+        raise PgoError(
+            f"{where}RRiter exited with code 0 before writing the structured automation report; "
+            f"{STEP_HINT}: {report_path}"
+        )
+    if report_error is not None or report is None:
+        raise PgoError(f"{where}invalid automation report: {report_error}") from report_error
+    if report.get("status") != "success":
+        raise PgoError(where + automation_failure_message(report, report_path))
+    if int(report.get("scenario_version", -1)) != SCENARIO_VERSION:
+        raise PgoError(f"{where}automation report scenario version does not match the pipeline")
+    for skipped in report.get("skipped_groups") or []:
+        if isinstance(skipped, dict):
+            print(
+                f"[rriter-pgo] WARNING: scenario {name} skipped group "
+                f"{skipped.get('group')}: {skipped.get('reason')}",
+                flush=True,
+            )
+    reject_skipped_pdf_group(report, name)
+    if name == "full":
+        telemetry = fixtures.database.telemetry()
+        validate_database_fixture_telemetry(telemetry)
+        request_count = fixtures.api.server.request_count
+        last_request = dict(fixtures.api.server.last_request)
+        if request_count < 1 or not last_request.get("accepted"):
+            raise PgoError(
+                "RRiter did not complete the authenticated local API request; "
+                f"count={request_count} last_request={last_request}"
+            )
+        report["local_api_requests"] = request_count
+        report["local_api_last_request"] = last_request
+        report["database_fixture"] = database_fixture_telemetry_payload(telemetry)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
 def run_training(
     config: PgoConfig,
     paths: PgoPaths,
@@ -1094,105 +972,32 @@ def run_training(
     runner: Runner,
     *,
     profile_dir: Path | None = None,
+    check_raw: bool = False,
 ) -> dict[str, object]:
-    command = [
-        executable,
-        "--ide",
-        "--pgo-train",
-        "--pgo-workspace",
-        paths.fixture_dir,
-        "--pgo-report",
-        paths.report_path,
-        "--pgo-timeout-seconds",
-        str(config.timeout_seconds),
-    ]
-    database_fixture = LocalPostgresFixture()
-    api_server = LocalApiServer.start()
-    try:
-        database_fixture.start()
-        database_endpoint = database_fixture.endpoint
-        print(
-            "[rriter-pgo] local PostgreSQL fixture: "
-            f"{database_endpoint[0]}:{database_endpoint[1]}/{DEFAULT_DATABASE_NAME}",
-            flush=True,
-        )
-        _set_openapi_server_url(paths.fixture_dir / "openapi.json", api_server.base_url)
-        result = runner.run_process_tree(
-            command,
-            cwd=paths.fixture_dir,
-            env=isolated_runtime_environment(
-                config,
-                paths,
-                profile_dir=profile_dir,
-                database_endpoint=database_endpoint,
-            ),
-            timeout=config.timeout_seconds + 45,
-            check=False,
-        )
-        local_request_count = api_server.server.request_count
-        local_request = dict(api_server.server.last_request)
-    finally:
-        database_fixture.stop()
-        api_server.stop()
-    database_telemetry = database_fixture.telemetry()
-    report: dict[str, object] | None = None
-    report_error: Exception | None = None
-    if paths.report_path.is_file():
-        try:
-            loaded_report = json.loads(paths.report_path.read_text(encoding="utf-8"))
-            if not isinstance(loaded_report, dict):
-                raise PgoError("automation report root must be an object")
-            report = loaded_report
-        except (OSError, json.JSONDecodeError, PgoError) as error:
-            report_error = error
+    """Run every active scenario in order against one set of fixtures.
 
-    if result.returncode != 0:
-        message = describe_pgo_process_failure(result.returncode)
-        if report is not None:
-            if report.get("status") == "success":
-                message += f"; automation report status=success report={paths.report_path}"
-            else:
-                message += "; " + automation_failure_message(report, paths.report_path)
-        elif report_error is not None:
-            message += (
-                f"; structured automation report is invalid: {report_error}; "
-                "inspect the last PGO_AUTOMATION_STEP_START printed above"
+    The result is the `full` report when it ran (else the last one), with the skipped groups
+    of all scenarios merged in `skipped_groups` and the report files in `report_files`.
+    `check_raw` requires every run to leave its own .profraw (instrumented binaries only).
+    """
+
+    names = active_scenarios(config)
+    fixtures = start_fixtures(paths)
+    reports: dict[str, dict[str, object]] = {}
+    try:
+        for name in names:
+            reports[name] = run_scenario(
+                config, paths, executable, runner, fixtures, name,
+                report_path_for(paths, name), profile_dir=profile_dir, check_raw=check_raw,
             )
-        else:
-            message += (
-                f"; structured automation report is absent: {paths.report_path}; "
-                "inspect the last PGO_AUTOMATION_STEP_START printed above"
-            )
-        raise PgoError(message)
-    if not paths.report_path.is_file():
-        raise PgoError(
-            "RRiter exited with code 0 before writing the structured automation report; "
-            "the window may have been closed before the scenario finished; "
-            "inspect the last PGO_AUTOMATION_STEP_START printed above: "
-            f"{paths.report_path}"
-        )
-    if report_error is not None:
-        raise PgoError(f"invalid automation report: {report_error}") from report_error
-    if report is None:
-        raise PgoError(f"automation report could not be loaded: {paths.report_path}")
-    if report.get("status") != "success":
-        raise PgoError(automation_failure_message(report, paths.report_path))
-    if int(report.get("scenario_version", -1)) != SCENARIO_VERSION:
-        raise PgoError("automation report scenario version does not match the pipeline")
-    validate_database_fixture_telemetry(database_telemetry)
-    if local_request_count < 1 or not local_request.get("accepted"):
-        raise PgoError(
-            "RRiter did not complete the authenticated local API request; "
-            f"count={local_request_count} last_request={local_request}"
-        )
-    report["local_api_requests"] = local_request_count
-    report["local_api_last_request"] = local_request
-    report["database_fixture"] = database_fixture_telemetry_payload(database_telemetry)
-    paths.report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return report
+    finally:
+        fixtures.stop()
+    result = dict(reports.get("full", reports[names[-1]]))
+    result["skipped_groups"] = [
+        skipped for report in reports.values() for skipped in report.get("skipped_groups") or []
+    ]
+    result["report_files"] = {name: str(report_path_for(paths, name)) for name in names}
+    return result
 
 
 def existing_run_executable(config: PgoConfig, paths: PgoPaths) -> Path:
@@ -1218,8 +1023,12 @@ def existing_run_executable(config: PgoConfig, paths: PgoPaths) -> Path:
             f"run `{rebuild_command}` before `make pgo-script`"
         )
     automation_sources = [
-        paths.root / "src" / "app" / "automation.rs",
-        paths.root / "src" / "app" / "automation_database.rs",
+        *sorted(
+            source
+            for source in (paths.root / "src" / "app").glob("automation*.rs")
+            if not source.stem.endswith("_tests")
+        ),
+        *sorted((paths.root / "src" / "headless").glob("*.rs")),
     ]
     stale_source = next(
         (
@@ -1238,29 +1047,83 @@ def existing_run_executable(config: PgoConfig, paths: PgoPaths) -> Path:
     return executable
 
 
-def raw_profiles(paths: PgoPaths) -> list[Path]:
-    return sorted(
-        path
-        for path in paths.profile_dir.glob("*.profraw")
-        if path.is_file() and path.stat().st_size > 0
-    )
-
-
 def llvm_profdata_command(
     *arguments: str | os.PathLike[str],
 ) -> list[str | os.PathLike[str]]:
     return ["rustup", "run", "nightly", "llvm-profdata", *arguments]
 
 
+def install_binary(source: Path, destination: Path) -> None:
+    """Copy `source` over `destination` atomically (temp file next to it, then os.replace)."""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    os.close(descriptor)
+    try:
+        shutil.copyfile(source, temporary)
+        shutil.copymode(source, temporary)
+        os.replace(temporary, destination)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def check_profile_coverage(
+    config: PgoConfig,
+    paths: PgoPaths,
+    runner: Runner,
+    cxxfilt: str,
+    report: Mapping[str, object],
+) -> None:
+    """Write coverage.txt and fail when a scenario group left its marker functions unexecuted."""
+
+    shown = runner.run(
+        llvm_profdata_command("show", "--all-functions", "--counts", paths.merged_profile),
+        cwd=paths.root,
+        env=base_environment(config),
+        capture=True,
+    )
+    functions = demangled_functions(shown.stdout, cxxfilt)
+    if not functions:
+        raise PgoError("llvm-profdata show listed no functions; the profile cannot be checked")
+    summary = module_summary(functions)
+    coverage = paths.profile_dir / "coverage.txt"
+    coverage.write_text(format_coverage(summary), encoding="utf-8")
+    print(f"[rriter-pgo] coverage: {coverage}", flush=True)
+    zero = zero_modules(summary)
+    if zero:
+        print(f"[rriter-pgo] rriter modules with no executed function: {', '.join(zero)}", flush=True)
+    skipped = {
+        str(item.get("group"))
+        for item in report.get("skipped_groups") or []
+        if isinstance(item, dict)
+    }
+    problems = check_markers(
+        functions, GROUP_MARKERS, skipped | unrequired_groups(active_scenarios(config))
+    )
+    if problems:
+        raise PgoError(
+            "training did not reach code the scenario groups must cover:\n  " + "\n  ".join(problems)
+        )
+
+
+def log_pgo_warnings(build_log: str) -> None:
+    warnings = count_pgo_warnings(build_log)
+    print(
+        f"[rriter-pgo] profile-use build: {warnings.missing} functions without profile data, "
+        f"{warnings.mismatch} hash mismatches",
+        flush=True,
+    )
+    if warnings.hot:
+        print(f"[rriter-pgo] hot modules affected: {', '.join(warnings.hot)}", flush=True)
+
+
 def merge_profiles(config: PgoConfig, paths: PgoPaths, runner: Runner) -> list[Path]:
-    profiles = raw_profiles(paths)
-    if not profiles:
-        raise PgoError(f"no non-empty .profraw files were created in {paths.profile_dir}")
+    profiles = verify_raw_profiles(paths.profile_dir)
     paths.merged_profile.parent.mkdir(parents=True, exist_ok=True)
     runner.run(
         llvm_profdata_command(
             "merge",
-            "-sparse",
             "-o",
             paths.merged_profile,
             *profiles,
@@ -1327,7 +1190,12 @@ def write_manifest(
             "raw_profile_count": len(profiles),
             "automation_completed_steps": report.get("completed_steps", []),
             "automation_skipped_steps": report.get("skipped_steps", []),
-            "automation_report_sha256": sha256_file(paths.report_path),
+            "automation_report_sha256": {
+                name: sha256_file(Path(str(report_file)))
+                for name, report_file in dict(report.get("report_files") or {}).items()
+            },
+            "automation_scenarios": sorted(dict(report.get("report_files") or {})),
+            "automation_skipped_groups": report.get("skipped_groups", []),
             "created_unix_seconds": int(time.time()),
             "host": {
                 "system": platform.system(),
@@ -1392,6 +1260,14 @@ def run_pipeline(config: PgoConfig, *, runner: Runner | None = None) -> Path | N
     config = config.validate()
     runner = Runner(verbose=config.verbose) if runner is None else runner
     paths = paths_for(config)
+    cxxfilt: str | None = None
+    if (config.run_only or config.mode == "fresh") and "linux" in config.target:
+        # Preflight before any build: the headless groups need pdfium, the coverage check
+        # needs llvm-cxxfilt.
+        validate_training_environment(config)
+        config = replace(config, pdfium_path=find_pdfium(paths.root))
+        if not config.run_only:
+            cxxfilt = find_cxxfilt()
     if config.run_only:
         validate_training_environment(config)
         executable = existing_run_executable(config, paths)
@@ -1404,7 +1280,7 @@ def run_pipeline(config: PgoConfig, *, runner: Runner | None = None) -> Path | N
             runner,
             profile_dir=script_profiles,
         )
-        print(f"[rriter-pgo] automation report: {paths.report_path}", flush=True)
+        print(f"[rriter-pgo] automation reports: {report['report_files']}", flush=True)
         print(
             "[rriter-pgo] script-only run completed; no build, merge, or PGO-use "
             "build was performed",
@@ -1420,13 +1296,19 @@ def run_pipeline(config: PgoConfig, *, runner: Runner | None = None) -> Path | N
         paths.profile_dir.mkdir(parents=True, exist_ok=True)
         create_fixture(paths)
         executable = build_instrumented(config, paths, runner)
-        report = run_training(config, paths, executable, runner)
+        report = run_training(config, paths, executable, runner, check_raw=True)
         profiles = merge_profiles(config, paths, runner)
+        if cxxfilt is not None:
+            check_profile_coverage(config, paths, runner, cxxfilt, report)
         write_manifest(config, paths, runner, profiles, report)
         print(f"[rriter-pgo] profile: {paths.merged_profile}", flush=True)
         if config.train_only:
             return None
-    return build_with_profile(config, paths, runner)
+    executable = build_with_profile(config, paths, runner)
+    if config.install_binary is not None:
+        install_binary(executable, config.install_binary)
+        print(f"[rriter-pgo] installed: {config.install_binary}", flush=True)
+    return executable
 
 
 def parse_env(values: Sequence[str]) -> dict[str, str]:
@@ -1452,13 +1334,19 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--train-only", action="store_true")
     parser.add_argument("--run-only", action="store_true")
     parser.add_argument("--run-executable", type=Path)
+    parser.add_argument(
+        "--scenarios",
+        default=",".join(ALL_SCENARIOS),
+        help="Linux headless training runs, in order (ignored on other hosts)",
+    )
+    parser.add_argument("--install-binary", type=Path, metavar="PATH")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args(argv)
 
 
 def self_test() -> None:
-    with __import__("tempfile").TemporaryDirectory(prefix="rriter-pgo-selftest-") as directory:
+    with tempfile.TemporaryDirectory(prefix="rriter-pgo-selftest-") as directory:
         root = Path(directory)
         (root / "Cargo.lock").write_text("# fixture\n", encoding="utf-8")
         (root / "Cargo.toml").write_text("[package]\nname='fixture'\n", encoding="utf-8")
@@ -1654,6 +1542,15 @@ def self_test() -> None:
         )
         if existing_run_executable(fast_config, paths) != fast_executable.resolve():
             raise PgoError("fast automation executable self-test failed")
+        headless = training_command(config, paths, Path("rriter"), "welcome", paths.report_path, host="linux")
+        if headless[1:3] != ["--headless", "--pgo-train"] or "--ide" in headless:
+            raise PgoError("headless training command self-test failed")
+        if training_command(config, paths, Path("rriter"), "full", paths.report_path, host="win32")[1] != "--ide":
+            raise PgoError("GUI training command self-test failed")
+        installed = root / "installed" / "rriter"
+        install_binary(fast_executable, installed)
+        if installed.read_text(encoding="utf-8") != fast_executable.read_text(encoding="utf-8"):
+            raise PgoError("install_binary self-test failed")
         before = source_fingerprint(root)
         source.write_text("fn main() { println!(\"changed\"); }\n", encoding="utf-8")
         if source_fingerprint(root) == before:
@@ -1682,6 +1579,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_only=args.run_only,
         run_executable=args.run_executable,
         verbose=not args.quiet,
+        scenarios=tuple(name.strip() for name in args.scenarios.split(",") if name.strip()),
+        install_binary=args.install_binary,
     )
     executable = run_pipeline(config)
     if executable is not None:

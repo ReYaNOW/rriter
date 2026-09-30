@@ -26,7 +26,7 @@ TEST ?=
 TEST_THREADS ?= 8
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
+.PHONY: all fast max max-nopgo bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
 
 all: max
 
@@ -53,7 +53,21 @@ scroll-bench:
 
 # 2. Версия MAX (Ультимативная)
 # Для финального использования. Медленная сборка, максимальный FPS
-max:
+max: pdfium
+	@echo "🔥 MAX: свежий headless PGO → Fat LTO"
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--mode fresh \
+		--build-std \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
+		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_LTO=fat \
+		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
+		--install-binary "target/$(TARGET)/release/$(BINARY_NAME)"
+
+# MAX without PGO (the former `max`)
+max-nopgo:
 	@echo "🔥 Сборка ультимативной версии (Fat LTO, Immediate Abort)..."
 	$(MAX_PROFILE_OPTS) \
 	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
@@ -218,7 +232,6 @@ pgo-bench-build: $(PGO_BENCH_BUILD_TOOL)
 		--build-std \
 		--rustflag=-Ctarget-cpu=native \
 		--rustflag=-Cllvm-args=-fp-contract=fast \
-		--rustflag=-Clto=fat \
 		--rustflag=-Csymbol-mangling-version=v0 \
 		--rustflag=-Clink-arg=-fuse-ld=lld \
 		--rustflag=-Clink-arg=-Wl,--icf=all \
@@ -258,11 +271,16 @@ pgo-gen:
 	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
 	@echo "✅ Инструментированный RRiter: $(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)"
 
-pgo-run:
-	@echo "🏃 Открываю инструментированный RRiter в полноценном IDE-режиме."
-	@echo "ВАЖНО: используйте нужные функции и штатно ЗАКРОЙТЕ редактор."
-	LLVM_PROFILE_FILE="$(PROF_DIR)/manual_%p_%m.profraw" \
-		"$(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)" --ide
+pgo-run: pdfium
+	@echo "🏃 Тренировка инструментированного RRiter через pipeline (фикстуры, БД, API; без merge и сборки)."
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--run-only \
+		--run-executable "$(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)" \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)"
+	@mkdir -p "$(PROF_DIR)"
+	rm -f "$(PROF_DIR)"/*.profraw
+	cp "$(PGO_TRAINING_DIR)"/script-profiles/*.profraw "$(PROF_DIR)/"
 
 pgo-merge:
 	@echo "🔗 Слияние профилей..."
@@ -283,33 +301,23 @@ pgo-max:
 	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
 	@echo "✅ PGO RRiter: $(PGO_USE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)"
 
-pgo-auto:
-	@echo "🤖 Полный свежий PGO: сборка → GUI-тренировка → merge → MAX-сборка"
-	python3 scripts/pgo_pipeline.py \
-		--target "$(TARGET)" \
-		--mode fresh \
-		--build-std \
-		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
-		--rustflags "$(MAX_RUSTFLAGS)" \
-		--env CARGO_PROFILE_RELEASE_LTO=fat \
-		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
+pgo-auto: max
 
 pgo-gen-fast:
-	@echo "⚡ Быстрый RRiter для отладки PGO GUI-сценария (без PGO/MAX/LTO)..."
+	@echo "⚡ Быстрый RRiter для отладки PGO headless-сценария (без PGO/MAX/LTO)..."
 	@$(MAKE) fast
 	@echo "✅ Тестовый бинарник: $(PGO_FAST_EXECUTABLE)"
 
-pgo-script:
-	@echo "🎬 Только GUI-автоматизация на быстром RRiter — без сборки, merge и PGO-use"
+pgo-script: pdfium
+	@echo "🎬 Только headless-автоматизация на быстром RRiter — без сборки, merge и PGO-use"
 	python3 scripts/pgo_pipeline.py \
 		--target "$(TARGET)" \
 		--run-only \
 		--run-executable "$(PGO_FAST_EXECUTABLE)" \
 		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)"
 
-pgo-train:
-	@echo "🤖 Создание свежего профиля без финальной PGO-сборки"
+pgo-train: pdfium
+	@echo "🤖 Headless-тренировка: создание свежего профиля без финальной PGO-сборки"
 	python3 scripts/pgo_pipeline.py \
 		--target "$(TARGET)" \
 		--mode fresh \
@@ -321,7 +329,7 @@ pgo-train:
 		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
 
-pgo-use:
+pgo-use: pdfium
 	@echo "♻️ Проверка и использование совместимого PGO-профиля"
 	python3 scripts/pgo_pipeline.py \
 		--target "$(TARGET)" \
@@ -338,7 +346,7 @@ pgo-clean:
 	rm -rf "$(PROF_DIR)" "$(PGO_TRAINING_DIR)" \
 		"$(PGO_GENERATE_TARGET_DIR)" "$(PGO_USE_TARGET_DIR)"
 
-pgo: pgo-auto
+pgo: max
 
 clean:
 	@echo "🧹 Очистка..."

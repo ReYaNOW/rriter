@@ -119,6 +119,7 @@ fn automation_options(
         workspace,
         report_path,
         timeout: Duration::from_secs(timeout_seconds),
+        scenario: crate::app::automation::PgoScenario::Full,
     }))
 }
 
@@ -135,6 +136,11 @@ fn main() {
     }
     startup_trace.start_logo_decode(startup_trace::LOGO_PNG);
     if startup_args.iter().skip(1).any(|arg| arg == "--headless") {
+        // Same as the GUI branch below: a PGO run records the frame telemetry it trains on.
+        if startup_args.iter().skip(1).any(|arg| arg == "--pgo-train") {
+            crate::render_view::TELEMETRY_ENABLED
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         #[cfg(target_os = "linux")]
         std::process::exit(i32::from(headless::run(&startup_args[1..], startup_trace)));
         #[cfg(not(target_os = "linux"))]

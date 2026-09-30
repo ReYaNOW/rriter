@@ -441,6 +441,19 @@ impl App {
         if !self.is_ide_mode || self.is_automation_mode() {
             return;
         }
+        self.persist_tabs_state();
+    }
+
+    /// The one exception to the automation ban on `save_tabs_state`: the `full` scenario leaves
+    /// its final tab list for `startup`. Written once at the end, not on every tab change.
+    pub(crate) fn save_tabs_state_on_automation_exit(&mut self) {
+        if !self.is_ide_mode || !self.automation_saves_session() {
+            return;
+        }
+        self.persist_tabs_state();
+    }
+
+    fn persist_tabs_state(&mut self) {
         self.sync_active_tab();
         crate::save_open_tabs(&self.tabs, self.active_tab, self.is_ide_mode);
         self.sync_active_tab();

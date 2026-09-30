@@ -389,6 +389,7 @@
             workspace: root.clone(),
             report_path: root.join("automation-report.json"),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         let first = controller.steps[0].clone();
         assert!(controller.log_step_start(&first));
@@ -409,6 +410,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         controller.step_index = 1;
         controller.completed.push("wait-8-frames".to_string());
@@ -450,6 +452,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         controller.step_index = 2;
         controller.completed.push("previous-step".to_string());
@@ -603,11 +606,9 @@
             include_str!("automation_semantic_actions.rs"),
             include_str!("automation_fixtures.rs"),
         );
+        // The `Click`/`Wheel`/`Drag` steps go through the real `handle_main_*` input handlers
+        // with `AutomationTarget` coordinates; the semantic steps must not click by hand.
         assert!(!source.contains(concat!("handle_", "ui_click")));
-        assert!(!source.contains(concat!("Physical", "Position")));
-        assert!(!source.contains(concat!("Mouse", "Button")));
-        assert!(!source.contains(concat!("MouseScroll", "Delta")));
-        assert!(!source.contains(concat!("ui_", "registry")));
         assert!(!source.contains(concat!("rect_", "for")));
     }
 
@@ -891,6 +892,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(1),
+            scenario: PgoScenario::Full,
         });
         controller.write_interrupted_report("test shutdown");
         let report: serde_json::Value =
@@ -902,6 +904,176 @@
                 .is_some_and(|message| message.contains("current_step=wait-ready"))
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pgo_scenario_parses_every_form_and_round_trips() {
+        assert_eq!(PgoScenario::parse("full"), Ok(PgoScenario::Full));
+        assert_eq!(PgoScenario::parse("startup"), Ok(PgoScenario::Startup));
+        assert_eq!(PgoScenario::parse("welcome"), Ok(PgoScenario::Welcome));
+        assert_eq!(PgoScenario::parse("smoke"), Ok(PgoScenario::Smoke));
+        assert_eq!(
+            PgoScenario::parse("group:pdf"),
+            Ok(PgoScenario::Group("pdf".to_string()))
+        );
+        assert!(PgoScenario::parse("group:").is_err());
+        assert!(PgoScenario::parse("").is_err());
+        let error = PgoScenario::parse("bogus").unwrap_err();
+        assert!(error.contains("bogus"), "{error}");
+        for scenario in [
+            PgoScenario::Full,
+            PgoScenario::Startup,
+            PgoScenario::Welcome,
+            PgoScenario::Smoke,
+            PgoScenario::Group("api_mock".to_string()),
+        ] {
+            assert_eq!(PgoScenario::parse(&scenario.as_str()), Ok(scenario));
+        }
+    }
+
+    fn scenario_controller(name: &str, scenario: PgoScenario) -> (AutomationController, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "rriter-pgo-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let controller = AutomationController::new(AutomationOptions {
+            workspace: root.clone(),
+            report_path: root.join("report.json"),
+            timeout: Duration::from_secs(30),
+            scenario,
+        });
+        (controller, root)
+    }
+
+    fn read_report(root: &Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(root.join("report.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn outcome_is_none_until_finish_then_ok_and_report_has_scenario_fields() {
+        let (mut controller, root) = scenario_controller("outcome-ok", PgoScenario::Smoke);
+        assert_eq!(controller.outcome(), None);
+        assert_eq!(controller.finish_and_exit(), AutomationTick::Exit);
+        assert_eq!(controller.outcome(), Some(Ok(())));
+        let report = read_report(&root);
+        assert_eq!(report["status"], "success");
+        assert_eq!(report["scenario_version"], PGO_AUTOMATION_SCENARIO_VERSION);
+        assert_eq!(report["scenario"], "smoke");
+        assert_eq!(report["frames"], 0);
+        assert!(report["failed_step"].is_null());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn outcome_is_err_with_step_name_after_failure() {
+        let (mut controller, root) =
+            scenario_controller("outcome-err", PgoScenario::Group("pdf".to_string()));
+        assert_eq!(controller.outcome(), None);
+        controller.fail_and_exit(
+            "some-step".to_string(),
+            "boom".to_string(),
+            None,
+            Instant::now(),
+            AutomationFailureKind::Failed,
+        );
+        assert_eq!(controller.outcome(), Some(Err("some-step".to_string())));
+        let report = read_report(&root);
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["failed_step"], "boom");
+        assert_eq!(report["scenario"], "group:pdf");
+        assert!(report.get("frames").is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scenario_steps_selects_every_scenario_and_rejects_an_unknown_group() {
+        let root = Path::new("/nonexistent");
+        let full = scenario_steps(&PgoScenario::Full, root).unwrap();
+        assert_eq!(full.len(), full_pgo_scenario(root).len());
+        let smoke = scenario_steps(&PgoScenario::Smoke, root).unwrap();
+        let names: Vec<String> = smoke.iter().map(AutomationStep::name).collect();
+        assert_eq!(
+            names,
+            ["wait-ready", "resize-1600x900", "wait-3-frames", "finish"]
+        );
+        let startup: Vec<String> = scenario_steps(&PgoScenario::Startup, root)
+            .unwrap()
+            .iter()
+            .map(AutomationStep::name)
+            .collect();
+        assert_eq!(startup.first().map(String::as_str), Some("restored tabs"));
+        assert_eq!(startup.last().map(String::as_str), Some("finish"));
+        let welcome: Vec<String> = scenario_steps(&PgoScenario::Welcome, root)
+            .unwrap()
+            .iter()
+            .map(AutomationStep::name)
+            .collect();
+        // `WaitReady` needs IDE mode, so it must come after the IDE entry.
+        assert_eq!(welcome.first().map(String::as_str), Some("welcome visible"));
+        let enter = welcome.iter().position(|name| name == "enter ide").unwrap();
+        let ready = welcome.iter().position(|name| name == "wait-ready").unwrap();
+        assert!(enter < ready, "{welcome:?}");
+        let error = scenario_steps(&PgoScenario::Group("no_such".to_string()), root).unwrap_err();
+        assert!(error.contains("unknown PGO group") && error.contains("no_such"), "{error}");
+    }
+
+    #[test]
+    fn session_persistence_is_allowed_only_for_full_save_and_startup_restore() {
+        let table = [
+            (PgoScenario::Full, true, false),
+            (PgoScenario::Startup, false, true),
+            (PgoScenario::Welcome, false, false),
+            (PgoScenario::Smoke, false, false),
+            (PgoScenario::Group("pdf".to_string()), false, false),
+        ];
+        for (scenario, saves, restores) in table {
+            assert_eq!(scenario.saves_session_on_exit(), saves, "{scenario:?}");
+            assert_eq!(scenario.restores_session(), restores, "{scenario:?}");
+        }
+    }
+
+    #[test]
+    fn session_save_on_exit_needs_headless_full_and_success() {
+        let (mut ok, root) = scenario_controller("save-ok", PgoScenario::Full);
+        assert!(!ok.saves_session_now(true), "unfinished run");
+        assert_eq!(ok.finish_and_exit(), AutomationTick::Exit);
+        assert!(ok.saves_session_now(true));
+        assert!(!ok.saves_session_now(false), "GUI must not write the user's session");
+        let (mut failed, failed_root) = scenario_controller("save-failed", PgoScenario::Full);
+        failed.fail_and_exit(
+            "some-step".to_string(),
+            "boom".to_string(),
+            None,
+            Instant::now(),
+            AutomationFailureKind::Failed,
+        );
+        assert!(!failed.saves_session_now(true), "failed run");
+        let (mut smoke, smoke_root) = scenario_controller("save-smoke", PgoScenario::Smoke);
+        assert_eq!(smoke.finish_and_exit(), AutomationTick::Exit);
+        assert!(!smoke.saves_session_now(true), "non-Full scenario");
+        for dir in [root, failed_root, smoke_root] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn group_scenario_wraps_registered_group_between_wait_ready_and_finish() {
+        let root = Path::new("/nonexistent");
+        let steps = scenario_steps(&PgoScenario::Group("test_skip".to_string()), root).unwrap();
+        let names: Vec<String> = steps.iter().map(AutomationStep::name).collect();
+        assert_eq!(
+            names,
+            [
+                "wait-ready",
+                "apply-workspace",
+                "wait-file-tree",
+                "test_skip",
+                "test-skip-body",
+                "group-end",
+                "finish"
+            ]
+        );
     }
 
     #[test]
