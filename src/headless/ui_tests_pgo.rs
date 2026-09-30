@@ -262,6 +262,17 @@ fn pgo_group_git_changes() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+/// In the training window the first hunk is scrolled out of view by the hunk jumps and the
+/// wheel, so the rollback click must target a hunk that is on screen (not `GitDiffRollbackHunk(0, 0)`).
+#[test]
+fn pgo_group_git_changes_in_training_window() {
+    let (outcome, _session, report_path) =
+        run_pgo_session_sized("group:git_changes", 90_000, PGO_WINDOW, |_| Vec::new());
+    let report = read_report(&report_path);
+    assert!(outcome.success, "{outcome:?} {report}");
+    assert!(report["completed_steps"].to_string().contains("deleted tab"), "{report}");
+}
+
 #[test]
 fn pgo_group_editor_ops() {
     let outcome = run_pgo_scenario("group:editor_ops", 60_000);

@@ -128,6 +128,18 @@ fn diff_body(app: &App) -> Option<(f32, f32)> {
     })
 }
 
+/// Rollback icon of a hunk whose header is on screen in the active (diff) tab. After the
+/// hunk jumps and the wheel the first hunk has scrolled out of view, and the id carries the
+/// tab index, which is not 0 when earlier groups left tabs open.
+fn rollback_visible_hunk(app: &App) -> Option<(f32, f32)> {
+    let tab = app.active_tab;
+    app.ui_registry.element_hits().find_map(|(hit_id, _, rect, _)| {
+        let rect = rect?;
+        matches!(hit_id, UiId::GitDiffRollbackHunk(hit_tab, _) if hit_tab == tab)
+            .then(|| (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0))
+    })
+}
+
 fn ui_visible(app: &App, id: UiId) -> bool {
     app.ui_registry.element_hits().any(|(hit_id, _, rect, _)| hit_id == id && rect.is_some())
 }
@@ -196,7 +208,7 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
         dy: -3.0,
     }));
     steps.extend([
-        click_ui(UiId::GitDiffRollbackHunk(0, 0)),
+        click(AutomationTarget::Find(rollback_visible_hunk), 1),
         S::WaitFrames(2),
         S::Key("ctrl+s"),
         S::WaitFrames(5),
