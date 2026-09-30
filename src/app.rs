@@ -1,6 +1,7 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
+mod markdown_nav;
 pub(crate) use markdown::{
     MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
 };

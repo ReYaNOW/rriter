@@ -1764,7 +1764,8 @@ Syntax/languages:
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
 * `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.
-* `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches.
+* `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches; `MarkdownHeading` with `headings`, `link_definitions` (normalized label, destination), `inline_plain_text`, `normalize_link_label`.
+* `src/app/markdown_nav.rs` -> pure Markdown reader navigation model: `heading_slugs` (GitHub-style, unique), `LinkTarget` and `resolve_link` (reference labels, percent-decoding, `http`/`https`/`mailto` only), `media_paragraph` (image-only and badge paragraphs to `MediaItem`s), `mermaid_item`; no I/O.
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
 * `src/languages/python_highlight_spans.rs` -> Python syntax highlight span extraction helpers included by `python.rs`.
 * `src/languages/sql_analysis_tests.rs` -> SQL AST diagnostics and completion analysis regressions included by `sql_analysis.rs`.
