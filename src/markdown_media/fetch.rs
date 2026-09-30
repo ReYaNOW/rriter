@@ -6,10 +6,25 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{FetchEnv, FileStamp, MediaError, MediaKind, MediaSource};
+use std::time::Duration;
+
+use super::render_helper::render_media;
+use super::{FetchEnv, FileStamp, MediaError, MediaKind, MediaPixels, MediaRequest, MediaSource};
 
 /// Bytes fetched for one source, the detected kind and the file stamp (local files only).
 type Fetched = (MediaKind, Vec<u8>, Option<FileStamp>);
+
+/// How long the helper may take to decode one item.
+const HELPER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Fetches the bytes of `req` and decodes them in the helper. Blocks: background tasks only.
+pub(crate) fn load_media(req: &MediaRequest, env: &FetchEnv) -> Result<MediaPixels, MediaError> {
+    let render = env.render.as_ref().ok_or(MediaError::Unsupported)?;
+    let (kind, bytes, stamp) = fetch_bytes(&req.source, env)?;
+    let mut pixels = render_media(render, kind, &bytes, req.scale, req.max_raster_w, HELPER_TIMEOUT)?;
+    pixels.stamp = stamp;
+    Ok(pixels)
+}
 
 pub(crate) fn fetch_bytes(source: &MediaSource, env: &FetchEnv) -> Result<Fetched, MediaError> {
     match source {

@@ -185,6 +185,10 @@ fn run_helper(request_path: &Path) -> i32 {
 }
 
 pub fn handle_startup_helper(args: &[OsString]) -> Option<i32> {
+    // The media decoding helper runs on every platform, unlike the elevated save helper.
+    if let Some(exit_code) = crate::markdown_media::run_media_helper_if_requested() {
+        return Some(exit_code);
+    }
     #[cfg(any(windows, target_os = "macos"))]
     {
         if args.len() == 3 && args[1] == OsStr::new(ELEVATED_SAVE_FLAG) {

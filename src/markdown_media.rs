@@ -11,6 +11,9 @@ use crate::platform::PathKey;
 
 mod decode;
 mod fetch;
+mod render_helper;
+
+pub(crate) use render_helper::run_media_helper_if_requested;
 
 /// Identity of one media item inside the cache.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
