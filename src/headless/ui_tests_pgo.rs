@@ -279,6 +279,17 @@ fn pgo_group_editor_ops() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+/// `full` runs `editor_ops` after `api_mock` and `git_changes`; typing and pasting must still
+/// reach every cursor of the editor (the group asserts it), in the training window.
+#[test]
+fn pgo_group_editor_ops_after_earlier_groups() {
+    let (outcome, _session, report_path) =
+        run_pgo_session_sized("group:test_editor_ops_after_earlier_groups", 150_000, PGO_WINDOW, |_| Vec::new());
+    let report = read_report(&report_path);
+    assert!(outcome.success, "{outcome:?} {report}");
+    assert!(report["completed_steps"].to_string().contains("paste undone at every cursor"), "{report}");
+}
+
 #[test]
 fn pgo_group_input_scroll() {
     let outcome = run_pgo_scenario("group:input_scroll", 60_000);

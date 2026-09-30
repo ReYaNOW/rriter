@@ -62,6 +62,23 @@ fn line_point<const LINE: usize>(app: &App) -> Option<(f32, f32)> {
     (y >= 0.0 && y < body_h).then(|| ((body_x + TEXT_INSET).round(), (body_y + y).round()))
 }
 
+/// Typed at all carets; does not occur in `ops_text`.
+const TYPED: &str = "_x";
+/// Marker of the per-caret clipboard lines (`@0` .. `@5`); does not occur in `ops_text`.
+const PASTED: &str = "@";
+/// The primary caret plus the Alt-click carets.
+const CARETS: usize = CURSOR_LINES.len() + 1;
+
+fn typed_everywhere(app: &App, needle: &str, expected: usize) -> bool {
+    app.editor.get_full_text().matches(needle).count() == expected
+}
+
+fn set_caret_clipboard(app: &mut App, _workspace: &Path) -> Result<(), String> {
+    let lines: Vec<String> = (0..CARETS).map(|index| format!("{PASTED}{index}")).collect();
+    app.set_clipboard_text(lines.join("\n"));
+    Ok(())
+}
+
 fn alt_click(at: fn(&App) -> Option<(f32, f32)>) -> AutomationStep {
     AutomationStep::Click {
         at: AutomationTarget::Find(at),
@@ -95,8 +112,42 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
             check: |app| app.editor.extra_cursors().len() == CURSOR_LINES.len(),
             timeout_ms: 5_000,
         },
-        S::TypeText("_x"),
-        S::WaitFrames(2),
+        // Earlier groups leave panel inputs (terminal, search, commit message) focused, and those
+        // swallow typed text before it reaches the editor; hand the keyboard back to it.
+        S::FocusEditor,
+        S::TypeText(TYPED),
+        S::WaitUntil {
+            what: "text typed at every cursor",
+            check: |app| typed_everywhere(app, TYPED, CARETS),
+            timeout_ms: 5_000,
+        },
+        // Grouped undo: one Ctrl+Z reverts the edit at every cursor, Ctrl+Y replays it.
+        S::Key("ctrl+z"),
+        S::WaitUntil {
+            what: "typing undone at every cursor",
+            check: |app| typed_everywhere(app, TYPED, 0),
+            timeout_ms: 5_000,
+        },
+        S::Key("ctrl+y"),
+        S::WaitUntil {
+            what: "typing redone at every cursor",
+            check: |app| typed_everywhere(app, TYPED, CARETS),
+            timeout_ms: 5_000,
+        },
+        // One clipboard line per caret takes the per-caret paste path.
+        S::Call { what: "one clipboard line per caret", run: set_caret_clipboard },
+        S::Key("ctrl+v"),
+        S::WaitUntil {
+            what: "paste landed at every cursor",
+            check: |app| typed_everywhere(app, PASTED, CARETS),
+            timeout_ms: 5_000,
+        },
+        S::Key("ctrl+z"),
+        S::WaitUntil {
+            what: "paste undone at every cursor",
+            check: |app| typed_everywhere(app, PASTED, 0) && typed_everywhere(app, TYPED, CARETS),
+            timeout_ms: 5_000,
+        },
         S::Key("escape"),
         S::WaitFrames(2),
         S::Key("ctrl+a"),

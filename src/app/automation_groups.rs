@@ -150,6 +150,12 @@ fn lookup(
             Some(super::automation_pdf::requires),
             test_groups::api_mock_after_full_state_steps(workspace),
         )),
+        #[cfg(test)]
+        "test_editor_ops_after_earlier_groups" => Some((
+            "test_editor_ops_after_earlier_groups",
+            Some(headless_only),
+            test_groups::editor_ops_after_earlier_groups_steps(workspace),
+        )),
         _ => None,
     }
 }
@@ -213,8 +219,15 @@ mod test_groups {
     /// The pdf group entered the way `full` enters it: project search, file tree and terminal
     /// panels were focused by earlier groups and nothing has handed the keyboard back.
     pub(super) fn pdf_after_full_focus_steps(workspace: &Path) -> Vec<AutomationStep> {
+        let mut steps = leftover_focus_steps();
+        steps.extend(crate::app::automation_pdf::steps(workspace));
+        steps
+    }
+
+    /// Project search, file tree and terminal focused and nothing handed the keyboard back.
+    fn leftover_focus_steps() -> Vec<AutomationStep> {
         use AutomationStep as S;
-        let mut steps = vec![
+        vec![
             S::SetProjectSearchQuery("fn"),
             S::OpenPanel(crate::app::PanelId::Explorer),
             S::WaitFileTree,
@@ -232,9 +245,7 @@ mod test_groups {
                     Ok(())
                 },
             },
-        ];
-        steps.extend(crate::app::automation_pdf::steps(workspace));
-        steps
+        ]
     }
 
     const SMALL_SPEC: &str = r#"{"openapi":"3.0.0","info":{"title":"pgo","version":"1"},"paths":{"/featured":{"get":{"tags":["a"],"summary":"featured read","responses":{"200":{"description":"ok"}}},"post":{"tags":["a"],"summary":"featured write","responses":{"200":{"description":"ok"}}}},"/other":{"get":{"tags":["b"],"summary":"other read","responses":{"200":{"description":"ok"}}}}}}"#;
@@ -283,6 +294,16 @@ mod test_groups {
         ];
         steps.extend(crate::app::automation_pdf::steps(workspace));
         steps.extend(crate::app::automation_api_mock::steps(workspace));
+        steps
+    }
+
+    /// The `editor_ops` group entered the way `full` enters it: after `api_mock` and
+    /// `git_changes`, after panels were focused by the groups before them.
+    pub(super) fn editor_ops_after_earlier_groups_steps(workspace: &Path) -> Vec<AutomationStep> {
+        let mut steps = leftover_focus_steps();
+        steps.extend(crate::app::automation_api_mock::steps(workspace));
+        steps.extend(crate::app::automation_git_changes::steps(workspace));
+        steps.extend(crate::app::automation_editor_ops::steps(workspace));
         steps
     }
 
