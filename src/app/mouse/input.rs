@@ -422,6 +422,10 @@ impl App {
         state: ElementState,
         button: winit::event::MouseButton,
     ) {
+        // Only a press is held back: a release must always reach the drag state it ends.
+        if state == ElementState::Pressed && self.startup_blocks_pointer_input() {
+            return;
+        }
         let editor_was_focused = self.editor_has_input_focus();
         self.handle_main_mouse_input_inner(event_loop, state, button);
         self.autosave_after_editor_focus_change(editor_was_focused);

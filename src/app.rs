@@ -58,8 +58,9 @@ use std::path::{Path, PathBuf};
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
 // Also the total wait budget for a worker job that already runs the requested version
-// (`wait_for_current_highlight_with_timeouts`).
-const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
+// (`wait_for_current_highlight_with_timeouts`) and the `--ide` startup wait for the first
+// highlight (`begin_startup_editor_wait`).
+pub(crate) const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(1200);
 const FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
 
@@ -303,8 +304,10 @@ include!("app/database/database_table_app_methods.rs");
 include!("app/database/database_table_edit_methods.rs");
 include!("app/database/database_query_app_methods.rs");
 include!("app/app_ide_tab_methods.rs");
+include!("app/app_ide_startup_methods.rs");
 include!("app/app_file_tab_methods.rs");
 include!("app/app_window_external_methods.rs");
+include!("app/app_external_changes_methods.rs");
 
 #[cfg(test)]
 mod app_behavior_tests;

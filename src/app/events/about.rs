@@ -118,22 +118,20 @@ fn update_markdown_read_selection_autoscroll(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
-    if app.startup_deferred_pending && (app.is_ready || app.run_ide_on_startup) {
+    if app.startup_deferred_pending && app.is_ready {
         app.startup_deferred_pending = false;
         app.refresh_dart_tool_state();
     }
 
-    if app.run_ide_on_startup {
-        app.run_ide_on_startup = false;
-        app.enter_ide_mode_deferred();
-        // This one-shot pass drains nothing: a wake it consumed must come back.
-        app.ui_waker.redeliver_pending();
-        return; // Пропускаем один кадр, чтобы избежать гонок состояний
-    }
-
-    // The restore work that the first content frame does not need (see `run_ide_deferred`).
-    if app.ide_deferred == crate::app::IdeDeferred::Ready {
+    // The restore work that the first content frame does not need (see `run_ide_deferred`),
+    // once the editor area is shown: that frame is the one the user waits for.
+    if app.ide_deferred == crate::app::IdeDeferred::Ready && app.startup_editor_pending.is_none() {
+        // One step per tick (one inactive tab's file, then LSP and the git panel), so input
+        // and frames run in between.
         app.run_ide_deferred();
+        if app.ide_deferred != crate::app::IdeDeferred::None {
+            app.ui_waker.wake();
+        }
         app.ui_waker.redeliver_pending();
         return;
     }
@@ -254,6 +252,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     // `settle` still needs to know that one is outstanding.
     event_loop.set_awaiting_background(
         is_highlighting
+            || app.startup_editor_pending.is_some()
             || hover_poll_pending
             || !app.api_request_rx.is_empty()
             || app.api_mock_ty_rx.is_some()
@@ -266,7 +265,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             background_wake_at,
             earliest_optional_wake(
                 app.ide_panel.database.cancel_deadline(),
-                database_refresh_wake_at,
+                earliest_optional_wake(database_refresh_wake_at, app.startup_editor_pending),
             ),
         ),
     );

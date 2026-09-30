@@ -674,6 +674,7 @@ impl Renderer {
                 editor_hover_blocked: false,
                 git_tooltip_timer: None,
                 was_empty_ide: false,
+                startup_editor_hidden: false,
                 empty_ide_art_idx: 0,
                 identical_words_cache: Vec::with_capacity(64),
                 identical_words_cache_editor: 0,

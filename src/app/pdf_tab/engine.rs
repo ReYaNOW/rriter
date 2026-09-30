@@ -167,6 +167,7 @@ impl App {
             search_results: Vec::new(), search_current_idx: None,
             is_highlighted_once: false, is_highlight_complete: false,
             icon_key, closing_hints: Default::default(), kind: EditorTabKind::Pdf, deleted: false,
+            load: crate::app::TabLoad::Loaded,
         };
         let index = self.tabs.len();
         self.tabs.push(tab);

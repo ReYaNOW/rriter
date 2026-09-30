@@ -36,6 +36,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         syntax_errors: Vec::new(),
         closing_hints: Default::default(),
         deleted: false,
+        load: crate::app::TabLoad::Loaded,
         kind: EditorTabKind::Normal,
         pdf: None,
     });
@@ -68,6 +69,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         syntax_errors: Vec::new(),
         closing_hints: Default::default(),
         deleted: false,
+        load: crate::app::TabLoad::Loaded,
         kind: EditorTabKind::Normal,
         pdf: None,
     });
@@ -149,10 +151,6 @@ fn open_file_in_tab_reuses_existing_tabs_and_loads_into_empty_slot() {
     app.active_tab = 1;
     app.editor = Editor::new(32);
     app.base_title = "scratch".to_string();
-
-    app.open_file_in_tab_bg(first.clone(), false);
-    assert_eq!(app.active_tab, 1);
-    assert_eq!(app.editor.get_full_text(), "");
 
     app.open_file_in_tab(first.clone(), false);
     assert_eq!(app.active_tab, 0);

@@ -681,6 +681,7 @@ impl App {
             icon_key: "default_file",
             closing_hints: Default::default(),
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
             kind: EditorTabKind::GitDiff(meta.clone(), state),
         };
         self.tabs.push(tab);

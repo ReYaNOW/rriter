@@ -59,6 +59,7 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
         syntax_errors: Vec::new(),
         closing_hints: Default::default(),
         deleted: false,
+        load: crate::app::TabLoad::Loaded,
         kind: EditorTabKind::Normal,
     }
 }
@@ -237,8 +238,8 @@ pub(crate) fn test_app() -> Option<App> {
         startup_trace: crate::startup_trace::StartupTrace::disabled(),
         startup_deferred_pending: false,
         ide_preload: None,
-        pending_tab_loads: Vec::new(),
         ide_deferred: crate::app::IdeDeferred::None,
+        startup_editor_pending: None,
     })
 }
 

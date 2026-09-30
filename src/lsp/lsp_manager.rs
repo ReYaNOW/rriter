@@ -88,6 +88,12 @@ impl LspManager {
         Self::with_ui_waker(workspaces, crate::ui_waker::UiWaker::counting())
     }
 
+    /// Python files `notify_open` was called for (the LSP's open document set).
+    #[cfg(test)]
+    pub(crate) fn open_python_paths_for_test(&self) -> Vec<PathBuf> {
+        self.open_python_files.values().map(|file| file.path.clone()).collect()
+    }
+
     pub fn with_ui_waker(workspaces: Vec<PathBuf>, ui_waker: crate::ui_waker::UiWaker) -> Self {
         let mut manager = LspManager {
             python: None,

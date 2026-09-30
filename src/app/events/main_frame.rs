@@ -56,9 +56,16 @@ impl App {
     }
 
     pub(crate) fn render_main_frame(&mut self) -> FrameOutcome {
-                // The first content frame after `enter_ide_mode_deferred` is being drawn.
-                if self.ide_deferred == crate::app::IdeDeferred::AwaitFrame {
+                // The first content frame after `enter_ide_mode_deferred` is being drawn; a
+                // frame with the editor area held back is not it (the code is).
+                if self.ide_deferred == crate::app::IdeDeferred::AwaitFrame
+                    && self.startup_editor_pending.is_none()
+                {
                     self.ide_deferred = crate::app::IdeDeferred::Ready;
+                }
+                // `--ide` startup: tab bar and editor area stay blank until the first highlight.
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.startup_editor_hidden = self.startup_editor_pending.is_some();
                 }
                 let (autocomplete_frame_start, autocomplete_prev_frame) =
                     autocomplete_frame_start(self.autocomplete_active);

@@ -592,28 +592,6 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                     return;
                 }
 
-                if self.run_ide_on_startup {
-                    // IDE restore runs in the first `about_to_wait`, after this redraw: show the
-                    // background instead of a bare editor until the session is loaded.
-                    if let Some(renderer) = self.renderer.as_ref() {
-                        unsafe {
-                            use glow::HasContext;
-                            let gl = &renderer.gl;
-                            gl.clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
-                            gl.clear(glow::COLOR_BUFFER_BIT);
-                        }
-                    }
-                    if !self.present_main_surface() {
-                        event_loop.set_control_flow(ControlFlow::Wait);
-                        return;
-                    }
-                    crate::platform::finish_present();
-                    self.is_ready = true;
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
-                    return;
-                }
                 self.is_ready = true;
                 let outcome = self.render_main_frame();
 

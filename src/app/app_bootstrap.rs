@@ -324,8 +324,8 @@ impl App {
             startup_trace: options.startup_trace,
             startup_deferred_pending: !options.headless,
             ide_preload: None,
-            pending_tab_loads: Vec::new(),
             ide_deferred: crate::app::IdeDeferred::None,
+            startup_editor_pending: None,
         };
 
         app.highlighter.reset(

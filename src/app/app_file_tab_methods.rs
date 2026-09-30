@@ -48,6 +48,7 @@ impl App {
                 syntax_errors: Vec::new(),
                 closing_hints: Default::default(),
                 deleted: false,
+                load: crate::app::TabLoad::Loaded,
                 kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
@@ -91,6 +92,7 @@ impl App {
             closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
             deleted: false,
+            load: crate::app::TabLoad::Loaded,
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
@@ -247,11 +249,13 @@ impl App {
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
+            // A placeholder neighbour (restored, not read yet) is read before it is shown.
+            self.materialize_pending_tab(self.active_tab, true);
             if self.active_tab_is_api_client() || self.active_tab_is_database_table() {
-                while let Ok(_) = self.highlighter.rx.try_recv() {}
+                while self.highlighter.rx.try_recv().is_ok() {}
             } else {
                 self.editor.version = self.next_tab_highlight_version();
-                while let Ok(_) = self.highlighter.rx.try_recv() {}
+                while self.highlighter.rx.try_recv().is_ok() {}
                 self.reset_highlighter_with_text(self.editor.get_full_text(), false);
                 self.wait_for_current_highlight();
             }
@@ -304,11 +308,24 @@ impl App {
         self.open_file_in_tab_internal(path, add_to_history, true);
     }
 
-    /// Opens `path` in a tab without making it the tab being highlighted: no highlighter
-    /// `Reset` is sent (it would occupy the worker for a job whose result is discarded); the
-    /// tab is highlighted when it becomes active (`switch_to_tab`).
-    pub fn open_file_in_tab_bg(&mut self, path: PathBuf, add_to_history: bool) {
-        self.open_file_in_tab_internal_options(path, add_to_history, false, false);
+    /// Index of the tab that shows `path` (by `PathKey` or by `paths_equal`). The active tab's
+    /// identity lives in `self.file_path` / `self.file_key`, the others' in the tab itself.
+    pub(crate) fn tab_index_for_path(
+        &self,
+        path: &Path,
+        path_key: &crate::platform::PathKey,
+    ) -> Option<usize> {
+        let same = |key: Option<&crate::platform::PathKey>, open: Option<&Path>| {
+            key == Some(path_key)
+                || open.is_some_and(|open| crate::platform::paths_equal(open, path))
+        };
+        (0..self.tabs.len()).find(|&i| {
+            if i == self.active_tab {
+                same(self.file_key.as_ref(), self.file_path.as_deref())
+            } else {
+                same(self.tabs[i].file_key.as_ref(), self.tabs[i].file_path.as_deref())
+            }
+        })
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -343,30 +360,7 @@ impl App {
             return;
         }
 
-        let mut matching_tab = None;
-        for (i, tab) in self.tabs.iter().enumerate() {
-            if i == self.active_tab {
-                if self.file_key.as_ref() == Some(&path_key)
-                    || self
-                        .file_path
-                        .as_deref()
-                        .is_some_and(|open| crate::platform::paths_equal(open, &path))
-                {
-                    matching_tab = Some(i);
-                    break;
-                }
-            } else if tab.file_key.as_ref() == Some(&path_key)
-                || tab
-                    .file_path
-                    .as_deref()
-                    .is_some_and(|open| crate::platform::paths_equal(open, &path))
-            {
-                matching_tab = Some(i);
-                break;
-            }
-        }
-
-        if let Some(i) = matching_tab {
+        if let Some(i) = self.tab_index_for_path(&path, &path_key) {
             if i == self.active_tab {
                 self.reveal_active_tab_now();
             } else if wait_highlight {

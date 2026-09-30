@@ -26,6 +26,8 @@ impl Drop for InFlightGuard<'_> {
 }
 
 type QueryCacheKey = (&'static str, &'static str);
+/// One key's compile-once cell; `None` caches a query that failed to compile.
+type QuerySlot = Arc<OnceLock<Option<Arc<tree_sitter::Query>>>>;
 
 /// Compiled tree-sitter queries shared by the worker thread, the synchronous fallback on
 /// the main thread and prewarm threads. Owned by `Highlighter` behind an `Arc`.
@@ -33,7 +35,7 @@ type QueryCacheKey = (&'static str, &'static str);
 /// compiling blocks on that key's `OnceLock` until it is ready. `QueryCursor`s stay per
 /// call; `tree_sitter::Query` itself is `Send + Sync`.
 pub(crate) struct QueryCache {
-    entries: Mutex<HashMap<QueryCacheKey, Arc<OnceLock<Option<Arc<tree_sitter::Query>>>>>>,
+    entries: Mutex<HashMap<QueryCacheKey, QuerySlot>>,
     compile_count: AtomicUsize,
 }
 
@@ -45,7 +47,7 @@ impl QueryCache {
         }
     }
 
-    fn slot(&self, key: QueryCacheKey) -> Arc<OnceLock<Option<Arc<tree_sitter::Query>>>> {
+    fn slot(&self, key: QueryCacheKey) -> QuerySlot {
         // The lock guards only the map; compiling happens outside it, on the key's slot.
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(entries.entry(key).or_default())

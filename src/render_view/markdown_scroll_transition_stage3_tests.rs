@@ -31,6 +31,7 @@ fn stage3_install_normal_ide_tab(app: &mut App) {
         icon_key: "default_file",
         closing_hints: Default::default(),
         deleted: false,
+        load: crate::app::TabLoad::Loaded,
         kind: crate::app::EditorTabKind::Normal,
     });
     app.active_tab = 0;
