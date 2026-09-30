@@ -57,6 +57,15 @@ pub struct OffscreenContext {
 
 impl OffscreenContext {
     pub fn new(width: u32, height: u32) -> Result<Self, String> {
+        Self::new_traced(width, height, &crate::startup_trace::StartupTrace::disabled())
+    }
+
+    /// Same as `new`, marking each EGL sub-stage on `trace` (`egl-*` marks).
+    pub(crate) fn new_traced(
+        width: u32,
+        height: u32,
+        trace: &crate::startup_trace::StartupTrace,
+    ) -> Result<Self, String> {
         unsafe {
             let raw = libc::dlopen(c"libEGL.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
             if raw.is_null() {
@@ -66,6 +75,7 @@ impl OffscreenContext {
                 return Err(format!("dlopen: {message}"));
             }
             let library = Library(raw);
+            trace.mark("egl-dlopen");
             macro_rules! load {
                 ($name:literal, $ty:ty) => {
                     symbol::<$ty>(&library, CString::new($name).map_err(|_| format!("dlopen: invalid symbol {}", $name))?.as_c_str())?
@@ -90,8 +100,10 @@ impl OffscreenContext {
             if !extensions.split_whitespace().any(|ext| ext == "EGL_MESA_platform_surfaceless") {
                 return Err(format!("GetPlatformDisplay: EGL_MESA_platform_surfaceless missing; client extensions: {extensions}"));
             }
+            trace.mark("egl-symbols");
             let display = get_display(0x31DD, ptr::null_mut(), ptr::null());
             if display.is_null() { return Err(format!("GetPlatformDisplay: eglGetError=0x{:04X}", get_error())); }
+            trace.mark("egl-get-display");
             let mut result = Self {
                 _library: library, display, display_initialized: false, config: ptr::null_mut(), surface: ptr::null_mut(),
                 context: ptr::null_mut(), width, height,
@@ -107,27 +119,34 @@ impl OffscreenContext {
                 *users += 1;
                 result.display_initialized = true;
             }
+            trace.mark("egl-initialize");
             if bind_api(0x30A2) != 1 { return Err(result.error("ChooseConfig")); }
             let attrs = [0x3033, 1, 0x3040, 8, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3038];
             let mut count = 0;
             if choose_config(display, attrs.as_ptr(), &mut result.config, 1, &mut count) != 1 || count != 1 {
                 return Err(result.error("ChooseConfig"));
             }
+            trace.mark("egl-choose-config");
             result.surface = result.create_pbuffer(width, height);
             if result.surface.is_null() { return Err(result.error("CreatePbuffer")); }
+            trace.mark("egl-pbuffer");
             let context_attrs = [0x3098, 3, 0x30FB, 3, 0x30FD, 1, 0x3038];
             result.context = create_context(display, result.config, ptr::null_mut(), context_attrs.as_ptr());
             if result.context.is_null() { return Err(result.error("CreateContext")); }
+            trace.mark("egl-create-context");
             if make_current(display, result.surface, result.surface, result.context) != 1 {
                 return Err(result.error("MakeCurrent"));
             }
+            trace.mark("egl-make-current");
             use glow::HasContext;
             let gl = result.glow();
+            trace.mark("egl-gl-load");
             result.strings = GlStrings {
                 renderer: gl.get_parameter_string(glow::RENDERER),
                 version: gl.get_parameter_string(glow::VERSION),
                 vendor: gl.get_parameter_string(glow::VENDOR),
             };
+            trace.mark("egl-gl-strings");
             Ok(result)
         }
     }
@@ -194,7 +213,7 @@ pub(crate) mod test_support {
     pub(crate) fn offscreen_test_app(width: u32, height: u32, scale: f32) -> (OffscreenContext, crate::app::App) {
         let ctx = OffscreenContext::new(width, height).expect("offscreen EGL context");
         let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
-        let mut renderer = crate::renderer::Renderer::new(ctx.glow(), scale, app.theme.clone(), ctx.requested_context()).expect("production Renderer");
+        let mut renderer = crate::renderer::Renderer::new(ctx.glow(), scale, app.theme.clone(), ctx.requested_context(), &mut crate::startup_trace::StartupTrace::disabled()).expect("production Renderer");
         renderer.resize(width, height);
         app.renderer = Some(renderer);
         app.window = Some(Arc::new(crate::platform::WindowHost::Headless(

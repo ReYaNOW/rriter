@@ -1265,17 +1265,35 @@ pub struct Clipboard {
 }
 
 enum ClipboardBackend {
+    /// System clipboard not connected yet: `arboard::Clipboard::new` talks to the
+    /// display server, so it runs on first use instead of during startup.
+    Deferred,
+    /// The deferred connection failed; clipboard calls report an error from then on.
+    Unavailable,
     System(arboard::Clipboard),
     InMemory(Option<String>),
 }
 
 impl Clipboard {
-    pub fn new() -> Result<Self, arboard::Error> {
-        arboard::Clipboard::new().map(|inner| Self { backend: ClipboardBackend::System(inner) })
+    pub fn deferred_system() -> Self {
+        Self { backend: ClipboardBackend::Deferred }
     }
 
     pub fn in_memory() -> Self {
         Self { backend: ClipboardBackend::InMemory(None) }
+    }
+
+    fn system_mut(&mut self) -> Result<&mut arboard::Clipboard, arboard::Error> {
+        if matches!(self.backend, ClipboardBackend::Deferred) {
+            self.backend = match arboard::Clipboard::new() {
+                Ok(inner) => ClipboardBackend::System(inner),
+                Err(_) => ClipboardBackend::Unavailable,
+            };
+        }
+        match &mut self.backend {
+            ClipboardBackend::System(inner) => Ok(inner),
+            _ => Err(arboard::Error::ClipboardNotSupported),
+        }
     }
 
     pub fn is_in_memory(&self) -> bool {
@@ -1285,33 +1303,35 @@ impl Clipboard {
     pub fn in_memory_text(&self) -> Option<&str> {
         match &self.backend {
             ClipboardBackend::InMemory(text) => text.as_deref(),
-            ClipboardBackend::System(_) => None,
+            _ => None,
         }
     }
 
     pub fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
-        match &mut self.backend {
-            ClipboardBackend::System(inner) => clipboard_retry(|| inner.set_text(text.clone())),
-            ClipboardBackend::InMemory(contents) => {
-                *contents = Some(text);
-                Ok(())
-            }
+        if let ClipboardBackend::InMemory(contents) = &mut self.backend {
+            *contents = Some(text);
+            return Ok(());
         }
+        let inner = self.system_mut()?;
+        clipboard_retry(|| inner.set_text(text.clone()))
     }
 
     pub fn get_text(&mut self) -> Result<String, arboard::Error> {
-        match &mut self.backend {
-            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get_text()),
-            ClipboardBackend::InMemory(Some(text)) => Ok(text.clone()),
-            ClipboardBackend::InMemory(None) => Err(arboard::Error::ContentNotAvailable),
+        match &self.backend {
+            ClipboardBackend::InMemory(Some(text)) => return Ok(text.clone()),
+            ClipboardBackend::InMemory(None) => return Err(arboard::Error::ContentNotAvailable),
+            _ => {}
         }
+        let inner = self.system_mut()?;
+        clipboard_retry(|| inner.get_text())
     }
 
     pub fn get_file_list(&mut self) -> Result<Vec<PathBuf>, arboard::Error> {
-        let mut paths = match &mut self.backend {
-            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get().file_list())?,
-            ClipboardBackend::InMemory(_) => return Ok(Vec::new()),
-        };
+        if matches!(self.backend, ClipboardBackend::InMemory(_)) {
+            return Ok(Vec::new());
+        }
+        let inner = self.system_mut()?;
+        let mut paths = clipboard_retry(|| inner.get().file_list())?;
         #[cfg(target_os = "linux")]
         normalize_linux_arboard_file_list(&mut paths);
         Ok(paths)

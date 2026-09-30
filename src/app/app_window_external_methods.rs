@@ -1103,7 +1103,9 @@ impl App {
                 self.file_path = Some(path.clone());
                 self.file_key = Some(crate::platform::PathKey::new(&path));
                 self.text_file_format = decoded.format;
+                self.startup_trace.mark("ide-tab-read");
                 self.refresh_current_editor_git_base();
+                self.startup_trace.mark("ide-tab-git");
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.base_title = file_name.into_owned();
                 self.file_extension = path

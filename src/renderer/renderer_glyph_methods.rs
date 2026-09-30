@@ -84,12 +84,7 @@ fn rasterize_font_data_glyph(
     prefer_color: bool,
     allow_missing_whitespace: bool,
 ) -> Option<(swash::scale::image::Image, f32)> {
-    font_data.ensure_loaded();
-    let data = font_data.data_slice();
-    if data.is_empty() {
-        return None;
-    }
-    let font_ref = FontRef::from_index(data, font_data.index as usize)?;
+    let font_ref = font_data.font_ref()?;
     let glyph_id = font_ref.charmap().map(c);
     if glyph_id == 0 && !allow_missing_whitespace {
         return None;

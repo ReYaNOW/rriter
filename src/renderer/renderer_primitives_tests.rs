@@ -679,6 +679,7 @@ mod tests {
         let vec_font = FontData {
             source: FontSource::LoadedVec(std::sync::Arc::new(vec![1, 2, 3, 4])),
             index: 2,
+            font_key: None,
         };
         assert_eq!(vec_font.data_slice(), &[1, 2, 3, 4]);
         assert_eq!(vec_font.index, 2);

@@ -13,7 +13,10 @@ CODEX_ENV = HOME=/home/reyan RUSTUP_HOME=/home/reyan/.local/share/rustup CARGO_H
 FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
 
 # Ультимативные флаги (Fat LTO, v0 mangling, Identical Code Folding, Linker O3)
-MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C lto=fat -C symbol-mangling-version=v0 -C link-arg=-Wl,--icf=all -C link-arg=-Wl,-O3
+# Fat LTO задаётся профилем (MAX_PROFILE_OPTS), а не -C lto=fat в RUSTFLAGS: флаг в RUSTFLAGS
+# уходит и в pdfium-render (crate-type cdylib), и rustc отказывает: "lto can only be run for executables".
+MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C symbol-mangling-version=v0 -C link-arg=-Wl,--icf=all -C link-arg=-Wl,-O3
+MAX_PROFILE_OPTS = CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 
 # Настройки тестов
 TEST_FILTER ?=
@@ -52,7 +55,7 @@ scroll-bench:
 # Для финального использования. Медленная сборка, максимальный FPS
 max:
 	@echo "🔥 Сборка ультимативной версии (Fat LTO, Immediate Abort)..."
-	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	$(MAX_PROFILE_OPTS) \
 	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
 	RUSTFLAGS="$(MAX_RUSTFLAGS)" \
 	cargo +nightly build \
@@ -63,7 +66,7 @@ max:
 
 bloat-max:
 	@echo "📦 Анализ размера MAX-сборки..."
-	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	$(MAX_PROFILE_OPTS) \
 	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
 	RUSTFLAGS="$(MAX_RUSTFLAGS)" \
 	cargo +nightly bloat \
@@ -249,7 +252,7 @@ pgo-gen:
 	rm -rf $(PROF_DIR)
 	@mkdir -p $(PROF_DIR)
 	CARGO_TARGET_DIR="$(PGO_GENERATE_TARGET_DIR)" \
-	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	$(MAX_PROFILE_OPTS) \
 	CARGO_PROFILE_RELEASE_PANIC=abort \
 	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-generate=$(PROF_DIR)" \
 	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
@@ -274,7 +277,7 @@ pgo-max:
 	@test -s "$(PROF_DIR)/merged.profdata" || \
 		(echo "❌ Нет $(PROF_DIR)/merged.profdata; сначала выполните make pgo-merge" && exit 2)
 	CARGO_TARGET_DIR="$(PGO_USE_TARGET_DIR)" \
-	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	$(MAX_PROFILE_OPTS) \
 	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
 	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-use=$(PROF_DIR)/merged.profdata -Cllvm-args=-pgo-warn-missing-function" \
 	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
@@ -288,6 +291,7 @@ pgo-auto:
 		--build-std \
 		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
 		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_LTO=fat \
 		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
 
@@ -313,6 +317,7 @@ pgo-train:
 		--build-std \
 		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
 		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_LTO=fat \
 		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
 
@@ -324,6 +329,7 @@ pgo-use:
 		--build-std \
 		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
 		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_LTO=fat \
 		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
 

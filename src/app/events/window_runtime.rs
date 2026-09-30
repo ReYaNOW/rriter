@@ -165,24 +165,28 @@ fn blocking_swap_interval() -> glutin::surface::SwapInterval {
 }
 
 fn window_attributes(app: &App) -> WindowAttributes {
-    let icon_bytes = include_bytes!("../../icons/icon.png");
-    let window_icon = image::load_from_memory(icon_bytes)
-        .ok()
-        .map(|image| image.into_rgba8())
-        .and_then(|image| {
-            let (width, height) = image.dimensions();
-            winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
-        });
-    crate::platform::apply_window_attributes(
-        Window::default_attributes()
-            .with_title(format!("{} — RRiter", app.base_title))
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                app.window_width,
-                app.window_height,
-            ))
-            .with_window_icon(window_icon)
-            .with_transparent(false),
-    )
+    let attributes = Window::default_attributes()
+        .with_title(format!("{} — RRiter", app.base_title))
+        .with_inner_size(winit::dpi::LogicalSize::new(
+            app.window_width,
+            app.window_height,
+        ))
+        .with_maximized(app.should_maximize)
+        .with_transparent(false);
+    // The winit Wayland backend ignores window icons, so Linux/Wayland skips the PNG decode.
+    #[cfg(any(not(target_os = "linux"), feature = "linux-x11"))]
+    let attributes = {
+        let icon_bytes = include_bytes!("../../icons/icon.png");
+        let window_icon = image::load_from_memory(icon_bytes)
+            .ok()
+            .map(|image| image.into_rgba8())
+            .and_then(|image| {
+                let (width, height) = image.dimensions();
+                winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
+            });
+        attributes.with_window_icon(window_icon)
+    };
+    crate::platform::apply_window_attributes(attributes)
 }
 
 fn create_not_current_context(
@@ -241,7 +245,7 @@ fn create_glow_context(gl_config: &Config) -> glow::Context {
     }
 }
 
-fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWindow, String> {
+fn bootstrap(app: &mut App,event_loop: &ActiveEventLoop) -> Result<BootstrappedWindow, String> {
     let template = ConfigTemplateBuilder::new()
         .with_transparency(false)
         .with_depth_size(0)
@@ -257,6 +261,7 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
                 .unwrap_or_else(|| panic!("no OpenGL framebuffer configuration is available"))
         })
         .map_err(|error| format!("window/display creation failed: {error}"))?;
+    app.startup_trace.mark("display");
     let window = WindowHost::Native(Arc::new(
         window.ok_or_else(|| "window backend did not create a window".to_string())?
     ));
@@ -275,13 +280,16 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
         "{requested_context} / GPU priority {}",
         gpu_priority_label(context.priority())
     );
+    app.startup_trace.mark("gl-context");
     let renderer = Renderer::new(
         create_glow_context(&gl_config),
         window.scale_factor() as f32,
         app.theme.clone(),
         requested_context,
+        &mut app.startup_trace,
     )
     .map_err(|error| format!("RRiter renderer initialization failed: {error}"))?;
+    app.startup_trace.mark("renderer");
     Ok(BootstrappedWindow {
         window: Arc::new(window),
         config: gl_config,
@@ -309,7 +317,7 @@ pub(super) fn resume(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.window.is_some() {
         return;
     }
-    let runtime = match bootstrap(app, event_loop) {
+    let mut runtime = match bootstrap(app, event_loop) {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("{error}");
@@ -321,6 +329,12 @@ pub(super) fn resume(app: &mut App, event_loop: &ActiveEventLoop) {
         "RRiter graphics:\n{}",
         runtime.renderer.graphics_diagnostics.report()
     );
+    // The first redraw draws content now, so the renderer must not wait for a Resized event
+    // to learn the window size (Wayland sends one before the redraw; other backends may not).
+    let inner = runtime.window.inner_size();
+    if inner.width > 0 && inner.height > 0 {
+        runtime.renderer.resize(inner.width, inner.height);
+    }
     app.renderer = Some(runtime.renderer);
     app.gl_config = Some(runtime.config);
     app.window = Some(runtime.window);

@@ -1,7 +1,7 @@
 use glow::HasContext;
 use std::collections::HashMap;
-use swash::FontRef;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith, image::Content};
+use swash::{CacheKey, FontRef};
 
 mod geometry;
 pub use geometry::Vertex;
@@ -209,6 +209,9 @@ impl GitGraphTooltipHover {
 pub struct FontData {
     pub source: FontSource,
     pub index: u32,
+    /// Table-directory offset and swash cache key, computed once on first use: a fresh
+    /// `CacheKey` per `FontRef::from_index` would miss swash's scaler and hinting caches.
+    font_key: Option<(u32, CacheKey)>,
 }
 
 impl FontData {
@@ -219,6 +222,7 @@ impl FontData {
                 std::rc::Rc::new(std::cell::RefCell::new(None)),
             ),
             index: 0,
+            font_key: None,
         }
     }
 
@@ -226,6 +230,7 @@ impl FontData {
         Self {
             source: FontSource::Static(data),
             index: 0,
+            font_key: None,
         }
     }
 
@@ -263,6 +268,21 @@ impl FontData {
             FontSource::LoadedVec(arc) => arc.as_slice(),
             FontSource::Lazy(_, _) => &[],
         }
+    }
+
+    /// Loads the font if needed and returns a `FontRef` that keeps the same cache key across calls.
+    pub fn font_ref(&mut self) -> Option<FontRef<'_>> {
+        self.ensure_loaded();
+        if self.font_key.is_none() {
+            let font_ref = FontRef::from_index(self.data_slice(), self.index as usize)?;
+            self.font_key = Some((font_ref.offset, font_ref.key));
+        }
+        let (offset, key) = self.font_key?;
+        Some(FontRef {
+            data: self.data_slice(),
+            offset,
+            key,
+        })
     }
 }
 
