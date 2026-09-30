@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 
 const TEST_SIZE: (u32, u32) = (1280, 720);
 const TEST_SCALE: f64 = 4.0 / 3.0;
+/// Window of a real `--pgo-train` run (`PGO_SIZE`/`PGO_SCALE` in `headless::profile`).
+const PGO_WINDOW: ((u32, u32), f64) = ((2560, 1440), 1.333);
 
 static RUN_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -30,6 +32,16 @@ fn run_pgo_session_seeded(
     timeout_ms: u64,
     seed: impl FnOnce(&std::path::Path) -> Vec<crate::OpenTabSnapshot>,
 ) -> (PgoRunOutcome, HeadlessSession, PathBuf) {
+    run_pgo_session_sized(scenario, timeout_ms, (TEST_SIZE, TEST_SCALE), seed)
+}
+
+/// `run_pgo_session_seeded` in a window of `(size, scale)`; the training window is `PGO_WINDOW`.
+fn run_pgo_session_sized(
+    scenario: &str,
+    timeout_ms: u64,
+    (size, scale): ((u32, u32), f64),
+    seed: impl FnOnce(&std::path::Path) -> Vec<crate::OpenTabSnapshot>,
+) -> (PgoRunOutcome, HeadlessSession, PathBuf) {
     let root = ensure_test_profile_root();
     reset_api_test_state();
     let n = RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -42,8 +54,8 @@ fn run_pgo_session_seeded(
         scenario: PgoScenario::parse(scenario).expect("known scenario"),
     };
     let options = HeadlessOptions {
-        size: TEST_SIZE,
-        scale: TEST_SCALE,
+        size,
+        scale,
         allow_writes: true,
         automation: Some(automation.clone()),
         ..HeadlessOptions::default()
@@ -221,6 +233,20 @@ fn pgo_group_pdf_after_panels_focused_by_earlier_groups() {
     let report = read_report(&report_path);
     if report["skipped_groups"] == serde_json::json!([]) {
         assert!(report["completed_steps"].to_string().contains("pdf search done"), "{report}");
+    }
+}
+
+/// `full` reaches the api_mock group with an imported spec, cycled panels and the pdf tab
+/// active; the group must open the API panel and find its controls from that state, in the
+/// training window.
+#[test]
+fn pgo_group_api_mock_after_full_state() {
+    let (outcome, _session, report_path) =
+        run_pgo_session_sized("group:test_api_mock_after_full_state", 120_000, PGO_WINDOW, |_| Vec::new());
+    let report = read_report(&report_path);
+    if report["skipped_groups"] == serde_json::json!([]) {
+        assert!(outcome.success, "{outcome:?} {report}");
+        assert!(report["completed_steps"].to_string().contains("mock server stopped"), "{report}");
     }
 }
 

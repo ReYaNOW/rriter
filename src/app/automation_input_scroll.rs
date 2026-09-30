@@ -132,6 +132,9 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
         S::Call { what: "scroll fixture", run: prepare },
         S::WaitUntil { what: "big.rs open", check: big_open, timeout_ms: 20_000 },
         S::WaitUntil { what: "scrollbar drawn", check: scrollbar_drawn, timeout_ms: 10_000 },
+        // Earlier groups leave the git message input or a panel focused, which would swallow
+        // the paging keys below.
+        S::FocusEditor,
     ];
     wheel_batches(&mut steps, WHEEL_DOWN_BATCHES, -3.0);
     wheel_batches(&mut steps, WHEEL_UP_BATCHES, 3.0);

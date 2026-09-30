@@ -144,6 +144,12 @@ fn lookup(
             Some(super::automation_pdf::requires),
             test_groups::pdf_after_full_focus_steps(workspace),
         )),
+        #[cfg(test)]
+        "test_api_mock_after_full_state" => Some((
+            "test_api_mock_after_full_state",
+            Some(super::automation_pdf::requires),
+            test_groups::api_mock_after_full_state_steps(workspace),
+        )),
         _ => None,
     }
 }
@@ -228,6 +234,55 @@ mod test_groups {
             },
         ];
         steps.extend(crate::app::automation_pdf::steps(workspace));
+        steps
+    }
+
+    const SMALL_SPEC: &str = r#"{"openapi":"3.0.0","info":{"title":"pgo","version":"1"},"paths":{"/featured":{"get":{"tags":["a"],"summary":"featured read","responses":{"200":{"description":"ok"}}},"post":{"tags":["a"],"summary":"featured write","responses":{"200":{"description":"ok"}}}},"/other":{"get":{"tags":["b"],"summary":"other read","responses":{"200":{"description":"ok"}}}}}}"#;
+
+    fn write_small_spec(_app: &mut App, workspace: &Path) -> Result<(), String> {
+        std::fs::write(workspace.join("openapi.json"), SMALL_SPEC).map_err(|error| error.to_string())
+    }
+
+    /// The `api_mock` group entered the way `full` enters it: an imported spec with an opened
+    /// route, the side and bottom panels cycled, the settings shown, and the pdf group just run
+    /// (pdf tab active, its search open).
+    pub(super) fn api_mock_after_full_state_steps(workspace: &Path) -> Vec<AutomationStep> {
+        use crate::app::PanelId;
+        use AutomationStep as S;
+        let mut steps = vec![
+            // `full` resizes the window to 1280x800 before anything else.
+            S::ResizeWindow { width: 1280, height: 800 },
+            S::Call { what: "test-write-spec", run: write_small_spec },
+            S::OpenPanel(PanelId::ApiClient),
+            S::WaitMillis(200),
+            S::ImportApiSpec,
+            S::WaitApiSpec,
+            S::WaitApiRoutesPanel,
+            S::ScrollApiRoutesTimed { duration_secs: 1 },
+            S::ResetApiPanelScroll,
+            S::SetApiRouteFilter("featured"),
+            S::WaitApiRouteFilter("featured"),
+            S::OpenApiRouteMatching("featured"),
+            S::WaitApiRouteOpen("featured"),
+            S::ScrollApiTabTimed { duration_secs: 1 },
+            S::ResetApiTabScroll,
+            S::ResetApiPanelScroll,
+            S::ClearApiRouteFilter,
+            S::OpenPanel(PanelId::Explorer),
+            S::WaitFrames(3),
+            S::OpenPanel(PanelId::LspServers),
+            S::WaitFrames(8),
+            S::OpenPanel(PanelId::Problems),
+            S::WaitFrames(8),
+            S::OpenPanel(PanelId::Terminal),
+            S::WaitTerminal,
+            S::ShowSettings(true),
+            S::WaitFrames(5),
+            S::ShowSettings(false),
+            S::WaitFrames(5),
+        ];
+        steps.extend(crate::app::automation_pdf::steps(workspace));
+        steps.extend(crate::app::automation_api_mock::steps(workspace));
         steps
     }
 

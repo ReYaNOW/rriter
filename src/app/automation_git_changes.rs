@@ -52,6 +52,11 @@ fn prepare(app: &mut App, workspace: &Path) -> Result<(), String> {
     if app.ide_panel.is_open(PanelId::Git) {
         app.ide_panel.toggle(PanelId::Git);
     }
+    // An open bottom panel (the terminal `full` leaves open) shortens the side panel and clips
+    // the commit controls in a small window.
+    if let Some(bottom) = app.ide_panel.open_bottom_panel_id() {
+        app.ide_panel.toggle(bottom);
+    }
     let root = workspace.to_path_buf();
     std::thread::spawn(move || {
         if let Err(error) = commit_and_edit(&root) {

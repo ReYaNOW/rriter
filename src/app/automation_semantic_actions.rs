@@ -305,6 +305,9 @@ fn step_failure_context(
     match step {
         AutomationStep::OpenPanel(panel) => panel_failure_diagnostics(app, *panel),
         AutomationStep::Database(_) => crate::app::automation_database::diagnostics(app),
+        AutomationStep::WaitUntil { what, .. } if what.starts_with("api mock") => {
+            crate::app::automation_api_mock::diagnostics(app)
+        }
         AutomationStep::ShowHover { needle, .. } => hover_failure_diagnostics(
             app,
             app.editor.get_full_text().find(needle),

@@ -24,6 +24,11 @@ fn prepare(app: &mut App, _workspace: &Path) -> Result<(), String> {
     if app.ide_panel.is_open(PanelId::ApiClient) {
         app.ide_panel.toggle(PanelId::ApiClient);
     }
+    // `full` leaves the terminal open at the bottom of its 1280x800 window; the bottom panel
+    // shortens the side panel, so the manual-route controls would be clipped away.
+    if let Some(bottom) = app.ide_panel.open_bottom_panel_id() {
+        app.ide_panel.toggle(bottom);
+    }
     Ok(())
 }
 
@@ -43,6 +48,34 @@ fn send_request(app: &mut App, _workspace: &Path) -> Result<(), String> {
 
 fn ui_visible(app: &App, id: UiId) -> bool {
     app.ui_registry.element_hits().any(|(hit_id, _, rect, _)| hit_id == id && rect.is_some())
+}
+
+/// State of the API panel and its surroundings for a timed-out `api mock` wait: which panels
+/// are open, whether the panel scroll lets the controls register, and what the last frame holds.
+pub(super) fn diagnostics(app: &App) -> String {
+    let scroll = &app.ide_panel.api.panel_scroll;
+    let (mut mock_ids, mut total) = (0usize, 0usize);
+    for (id, _, _, _) in app.ui_registry.element_hits() {
+        total += 1;
+        mock_ids += usize::from(format!("{id:?}").starts_with("ApiMock"));
+    }
+    format!(
+        "api_open={} top_open={:?} bottom_open={:?} scroll_current={} scroll_target={} scroll_dragging={} scroll_settled={} import_menu_open={} import_url_open={} import_error={} sidebar_drag={} show_settings={} registry_total={total} registry_api_mock={mock_ids} active_tab={}/{}",
+        app.ide_panel.is_open(PanelId::ApiClient),
+        app.ide_panel.slots.iter().find(|slot| slot.open && slot.group == crate::app::app_state::PanelGroup::Top).map(|slot| slot.id),
+        app.ide_panel.open_bottom_panel_id(),
+        scroll.current,
+        scroll.target,
+        scroll.is_dragging,
+        scroll.is_settled(),
+        app.ide_panel.api.import_menu_open,
+        app.ide_panel.api.import_url_open,
+        app.ide_panel.api.import_error.is_some(),
+        app.ide_panel.drag.is_some(),
+        app.show_settings,
+        app.active_tab,
+        app.tabs.len(),
+    )
 }
 
 fn logged_requests(app: &App) -> usize {
