@@ -22,11 +22,14 @@ bytemuck = "1.25.1"
 rustc-hash = "2.1.3"
 
 # Оптимизированные графические библиотеки
-# Только PNG, без лишних сканеров шрифтов.
-image = { version = "0.25.1", default-features = false, features = ["png"] }
+# PNG, JPEG, GIF и WebP для картинок Markdown; без лишних сканеров шрифтов.
+image = { version = "0.25.1", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 resvg = { version = "0.47.0", default-features = false }
-usvg = { version = "0.47.0", default-features = false }
+# Фича text нужна для текста в SVG-бейджах и Mermaid; системные шрифты не включаются.
+usvg = { version = "0.47.0", default-features = false, features = ["text"] }
 tiny-skia = "0.12"
+# Mermaid -> SVG; без CLI и PNG-бэкенда (растеризует resvg из decode.rs).
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 
 # Синтаксическая подсветка
 tree-sitter = "0.26.11"

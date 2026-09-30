@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use crate::platform::PathKey;
 
+mod decode;
 mod fetch;
 
 /// Identity of one media item inside the cache.
