@@ -119,6 +119,7 @@ fn automation_options(
         workspace,
         report_path,
         timeout: Duration::from_secs(timeout_seconds),
+        scenario: crate::app::automation::PgoScenario::Full,
     }))
 }
 

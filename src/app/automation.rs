@@ -102,11 +102,48 @@ fn autocomplete_failure_diagnostics(app: &App, expected: &str) -> String {
     )
 }
 
+/// Which automation scenario a run executes; parsed from `--pgo-scenario`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PgoScenario {
+    Full,
+    Startup,
+    Welcome,
+    Smoke,
+    Group(String),
+}
+
+impl PgoScenario {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "full" => Ok(Self::Full),
+            "startup" => Ok(Self::Startup),
+            "welcome" => Ok(Self::Welcome),
+            "smoke" => Ok(Self::Smoke),
+            _ => match text.strip_prefix("group:") {
+                Some("") => Err(format!("PGO scenario {text:?} has no group name")),
+                Some(name) => Ok(Self::Group(name.to_string())),
+                None => Err(format!("unknown PGO scenario {text:?}")),
+            },
+        }
+    }
+
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Full => "full".to_string(),
+            Self::Startup => "startup".to_string(),
+            Self::Welcome => "welcome".to_string(),
+            Self::Smoke => "smoke".to_string(),
+            Self::Group(name) => format!("group:{name}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AutomationOptions {
     pub workspace: PathBuf,
     pub report_path: PathBuf,
     pub timeout: Duration,
+    pub scenario: PgoScenario,
 }
 
 #[derive(Debug, Clone)]
@@ -386,12 +423,19 @@ pub struct AutomationController {
     failure: Option<AutomationFailure>,
     report_written: bool,
     hover_last_anchor: Option<(f32, f32)>,
+    /// Ticks seen so far; the headless runner ticks once per frame.
+    frames: u64,
+    finished: bool,
+    scenario_error: Option<String>,
 }
 
 impl AutomationController {
     pub fn new(options: AutomationOptions) -> Self {
         let now = Instant::now();
-        let steps = full_pgo_scenario(&options.workspace);
+        let (steps, scenario_error) = match scenario_steps(&options.scenario, &options.workspace) {
+            Ok(steps) => (steps, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             options,
             steps,
@@ -405,7 +449,18 @@ impl AutomationController {
             failure: None,
             report_written: false,
             hover_last_anchor: None,
+            frames: 0,
+            finished: false,
+            scenario_error,
         }
+    }
+
+    /// `None` while the run is in progress; `Err(step name)` once a step failed or timed out.
+    pub fn outcome(&self) -> Option<Result<(), String>> {
+        if let Some(failure) = &self.failure {
+            return Some(Err(failure.name.clone()));
+        }
+        self.finished.then_some(Ok(()))
     }
 
     pub fn tick(
@@ -414,6 +469,16 @@ impl AutomationController {
         event_loop: &HostLoop,
         now: Instant,
     ) -> AutomationTick {
+        self.frames += 1;
+        if let Some(reason) = self.scenario_error.take() {
+            return self.fail_and_exit(
+                self.options.scenario.as_str(),
+                reason,
+                None,
+                now,
+                AutomationFailureKind::Failed,
+            );
+        }
         if now.saturating_duration_since(self.started_at) > self.options.timeout {
             let step = self.steps.get(self.step_index).cloned();
             let name = step
@@ -607,6 +672,7 @@ impl AutomationController {
     }
 
     fn finish_and_exit(&mut self) -> AutomationTick {
+        self.finished = true;
         self.write_report("success");
         println!(
             "PGO_AUTOMATION_DONE completed={} skipped={} duration_ms={}",
@@ -647,6 +713,8 @@ impl AutomationController {
         let report = json!({
             "status": status,
             "scenario_version": PGO_AUTOMATION_SCENARIO_VERSION,
+            "scenario": self.options.scenario.as_str(),
+            "frames": self.frames,
             "driver": "semantic-internal-actions",
             "platform": std::env::consts::OS,
             "architecture": std::env::consts::ARCH,

@@ -156,6 +156,28 @@ fn fixture_python_tests(workspace: &Path) -> Vec<PathBuf> {
     files.into_iter().map(|(_, path)| path).collect()
 }
 
+fn scenario_steps(
+    scenario: &PgoScenario,
+    workspace: &Path,
+) -> Result<Vec<AutomationStep>, String> {
+    match scenario {
+        PgoScenario::Full => Ok(full_pgo_scenario(workspace)),
+        PgoScenario::Smoke => Ok(vec![
+            AutomationStep::WaitReady,
+            AutomationStep::ResizeWindow {
+                width: 1600,
+                height: 900,
+            },
+            AutomationStep::WaitFrames(3),
+            AutomationStep::Finish,
+        ]),
+        PgoScenario::Startup | PgoScenario::Welcome | PgoScenario::Group(_) => Err(format!(
+            "PGO scenario {} is not implemented",
+            scenario.as_str()
+        )),
+    }
+}
+
 fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
     use AutomationStep as S;
     let mut steps = vec![

@@ -389,6 +389,7 @@
             workspace: root.clone(),
             report_path: root.join("automation-report.json"),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         let first = controller.steps[0].clone();
         assert!(controller.log_step_start(&first));
@@ -409,6 +410,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         controller.step_index = 1;
         controller.completed.push("wait-8-frames".to_string());
@@ -450,6 +452,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(30),
+            scenario: PgoScenario::Full,
         });
         controller.step_index = 2;
         controller.completed.push("previous-step".to_string());
@@ -891,6 +894,7 @@
             workspace: root.clone(),
             report_path: report_path.clone(),
             timeout: Duration::from_secs(1),
+            scenario: PgoScenario::Full,
         });
         controller.write_interrupted_report("test shutdown");
         let report: serde_json::Value =
@@ -902,6 +906,108 @@
                 .is_some_and(|message| message.contains("current_step=wait-ready"))
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pgo_scenario_parses_every_form_and_round_trips() {
+        assert_eq!(PgoScenario::parse("full"), Ok(PgoScenario::Full));
+        assert_eq!(PgoScenario::parse("startup"), Ok(PgoScenario::Startup));
+        assert_eq!(PgoScenario::parse("welcome"), Ok(PgoScenario::Welcome));
+        assert_eq!(PgoScenario::parse("smoke"), Ok(PgoScenario::Smoke));
+        assert_eq!(
+            PgoScenario::parse("group:pdf"),
+            Ok(PgoScenario::Group("pdf".to_string()))
+        );
+        assert!(PgoScenario::parse("group:").is_err());
+        assert!(PgoScenario::parse("").is_err());
+        let error = PgoScenario::parse("bogus").unwrap_err();
+        assert!(error.contains("bogus"), "{error}");
+        for scenario in [
+            PgoScenario::Full,
+            PgoScenario::Startup,
+            PgoScenario::Welcome,
+            PgoScenario::Smoke,
+            PgoScenario::Group("api_mock".to_string()),
+        ] {
+            assert_eq!(PgoScenario::parse(&scenario.as_str()), Ok(scenario));
+        }
+    }
+
+    fn scenario_controller(name: &str, scenario: PgoScenario) -> (AutomationController, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "rriter-pgo-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let controller = AutomationController::new(AutomationOptions {
+            workspace: root.clone(),
+            report_path: root.join("report.json"),
+            timeout: Duration::from_secs(30),
+            scenario,
+        });
+        (controller, root)
+    }
+
+    fn read_report(root: &Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(root.join("report.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn outcome_is_none_until_finish_then_ok_and_report_has_scenario_fields() {
+        let (mut controller, root) = scenario_controller("outcome-ok", PgoScenario::Smoke);
+        assert_eq!(controller.outcome(), None);
+        assert_eq!(controller.finish_and_exit(), AutomationTick::Exit);
+        assert_eq!(controller.outcome(), Some(Ok(())));
+        let report = read_report(&root);
+        assert_eq!(report["status"], "success");
+        assert_eq!(report["scenario_version"], PGO_AUTOMATION_SCENARIO_VERSION);
+        assert_eq!(report["scenario"], "smoke");
+        assert_eq!(report["frames"], 0);
+        assert!(report["failed_step"].is_null());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn outcome_is_err_with_step_name_after_failure() {
+        let (mut controller, root) =
+            scenario_controller("outcome-err", PgoScenario::Group("pdf".to_string()));
+        assert_eq!(controller.outcome(), None);
+        controller.fail_and_exit(
+            "some-step".to_string(),
+            "boom".to_string(),
+            None,
+            Instant::now(),
+            AutomationFailureKind::Failed,
+        );
+        assert_eq!(controller.outcome(), Some(Err("some-step".to_string())));
+        let report = read_report(&root);
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["failed_step"], "boom");
+        assert_eq!(report["scenario"], "group:pdf");
+        assert!(report.get("frames").is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scenario_steps_selects_full_smoke_and_rejects_unimplemented() {
+        let root = Path::new("/nonexistent");
+        let full = scenario_steps(&PgoScenario::Full, root).unwrap();
+        assert_eq!(full.len(), full_pgo_scenario(root).len());
+        let smoke = scenario_steps(&PgoScenario::Smoke, root).unwrap();
+        let names: Vec<String> = smoke.iter().map(AutomationStep::name).collect();
+        assert_eq!(
+            names,
+            ["wait-ready", "resize-1600x900", "wait-3-frames", "finish"]
+        );
+        for scenario in [
+            PgoScenario::Startup,
+            PgoScenario::Welcome,
+            PgoScenario::Group("pdf".to_string()),
+        ] {
+            let error = scenario_steps(&scenario, root).unwrap_err();
+            assert!(error.contains(&scenario.as_str()), "{error}");
+            assert!(error.contains("not implemented"), "{error}");
+        }
     }
 
     #[test]
