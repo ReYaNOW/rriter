@@ -10,6 +10,7 @@ mod headless;
 mod highlighter;
 mod languages;
 mod lsp;
+mod markdown_media;
 mod platform;
 mod pdf;
 mod queries;

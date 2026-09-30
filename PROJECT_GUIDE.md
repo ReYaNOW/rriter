@@ -1427,6 +1427,8 @@ Root:
 * `scripts/lint_baseline.json` -> Clippy warning counts by file/lint and ceilings for files over 1600 lines.
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
+* `src/markdown_media.rs` -> Markdown reader media shared types (`MediaKey`, `MediaSource`, `MediaKind`, `MediaRequest`, `FileStamp`, `MediaPixels`, `MediaError` with Russian `label`, `RenderCommand`, `FetchEnv`); later tasks add decode, helper process and the texture cache as submodules. Background tasks only, no frame-loop I/O.
+* `src/markdown_media/fetch.rs` -> blocking byte acquisition for media: local files (20 MB cap, `FileStamp`), http(s) through the injected client with FNV-1a-named atomic disk cache, Mermaid source passthrough, SVG detection, `trim_disk_cache`. Focused http tests run against a loopback server.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/pdf/mod.rs` -> PDF protocol types, worker channel contracts, document generations, and user-facing errors.
 * `src/pdf/library.rs` -> Pdfium manifest parsing, managed paths, archive URL, and library discovery.
