@@ -199,7 +199,6 @@ impl Renderer {
         panel_y: f32,
         panel_w: f32,
         panel_h: f32,
-        draw_h: f32,
         s: f32,
         ide_panel: &crate::app::IdePanelState,
         lsp: Option<&crate::lsp::LspManager>,
@@ -212,9 +211,9 @@ impl Renderer {
             return;
         }
         // `panel_h` is the interactive viewport (scrolling, scrollbar, hit rects: above the bottom
-        // panel). `draw_h` reaches down to the status bar so the rows stay painted under a
-        // translucent bottom panel (terminal/problems) and show through it.
-        let draw_h = draw_h.max(panel_h);
+        // panel). `draw_h` reaches down to the status bar (`left_panel_overdraw_h`) so the rows
+        // stay painted under the translucent bottom panel and show through it.
+        let draw_h = panel_h + self.left_panel_overdraw_h;
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         self.flush();
@@ -505,7 +504,6 @@ impl Renderer {
         panel_y: f32,
         panel_w: f32,
         panel_h: f32,
-        draw_h: f32,
         s: f32,
         ide_panel: &crate::app::IdePanelState,
         lsp: Option<&crate::lsp::LspManager>,
@@ -523,7 +521,6 @@ impl Renderer {
                 panel_y,
                 panel_w,
                 panel_h,
-                draw_h,
                 s,
                 ide_panel,
                 lsp,
@@ -994,14 +991,19 @@ impl Renderer {
                     0.0
                 };
                 let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                // The translucent bottom panel (terminal/problems) overlays the left panels BY
+                // DESIGN: they extend down to the status bar and their content must show through
+                // it. Do not clip them at its top. The interactive viewport (layout, scrolling,
+                // scrollbars, hit rects, `panel_scroll_rect`) stays above the bottom panel; panels
+                // only paint `left_panel_overdraw_h` more below it.
                 let draw_bottom = ide_bottom_panel_y(real_height, 0.0, s);
+                self.left_panel_overdraw_h = (draw_bottom - content_bottom).max(0.0);
                 self.draw_ide_panel_content(
                     slot.id,
                     panel_x,
                     title_h,
                     panel_left_w,
                     (content_bottom - title_h).max(0.0),
-                    (draw_bottom - title_h).max(0.0),
                     s,
                     ide_panel,
                     lsp,
@@ -1013,6 +1015,7 @@ impl Renderer {
                     blink_alpha,
                     active_api_route,
                 );
+                self.left_panel_overdraw_h = 0.0;
             }
 
             // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)

@@ -670,6 +670,7 @@ impl Renderer {
                 git_logs_layout_cache: GitLogsLayoutCache::default(),
                 git_logs_selecting: false,
                 git_workspace_scrollbar: None,
+                left_panel_overdraw_h: 0.0,
                 git_tooltip_waiting: false,
                 editor_hover_blocked: false,
                 git_tooltip_timer: None,

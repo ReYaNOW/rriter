@@ -18,11 +18,14 @@ impl Renderer {
         if graph_h <= 20.0 * s {
             return;
         }
+        // The pane is the panel's bottom-most region: paint it down to the status bar under the
+        // translucent bottom panel (interactive rects stay at `graph_h`).
+        let overdraw_h = self.left_panel_overdraw_h;
         self.push_rect(
             panel_x,
             graph_y,
             panel_w,
-            graph_h,
+            graph_h + overdraw_h,
             [
                 self.theme.bg[0] + 0.018,
                 self.theme.bg[1] + 0.020,
@@ -152,19 +155,20 @@ impl Renderer {
         let hover_settled = ide_panel.git.graph_scroll.is_settled();
         let rows_clip = crate::ui_system::UiClipRect::new(panel_x, rows_y, panel_w, rows_h);
         let first = (scroll / row_h).floor().max(0.0) as usize;
-        let last = (((scroll + rows_h) / row_h).ceil() as usize + 1).min(commits.len());
+        let rows_paint_h = rows_h + overdraw_h;
+        let last = (((scroll + rows_paint_h) / row_h).ceil() as usize + 1).min(commits.len());
         let active_workspace = ide_panel.git.graph_workspace_idx.unwrap_or(0);
         let mut row_hover_target = None;
 
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (rows_y + rows_h);
+            let scissor_y = self.height - (rows_y + rows_paint_h);
             self.gl.scissor(
                 panel_x as i32,
                 scissor_y.max(0.0) as i32,
                 panel_w as i32,
-                rows_h as i32,
+                rows_paint_h as i32,
             );
         }
 
@@ -918,11 +922,13 @@ impl Renderer {
             self.git_logs_layout_cache.metrics = None;
             return;
         }
+        // Bottom-most region of the panel: paint down to the status bar under the translucent
+        // bottom panel (interactive rects stay at `logs_h`).
         self.push_rect(
             panel_x,
             logs_y,
             panel_w,
-            logs_h,
+            logs_h + self.left_panel_overdraw_h,
             [
                 self.theme.bg[0] + 0.018,
                 self.theme.bg[1] + 0.020,
@@ -1042,19 +1048,20 @@ impl Renderer {
             .selection()
             .and_then(|selection| ide_panel.git.git_logs.normalize_selection(selection));
         let first = (render_scroll / row_h).floor().max(0.0) as usize;
-        let visible_count = (rows_h / row_h).ceil() as usize + 2;
+        let rows_paint_h = rows_h + self.left_panel_overdraw_h;
+        let visible_count = (rows_paint_h / row_h).ceil() as usize + 2;
         let last = (first + visible_count).min(self.git_logs_layout_cache.rows.len());
 
         if text_w > 0.0 {
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
-                let scissor_y = self.height - (rows_y + rows_h);
+                let scissor_y = self.height - (rows_y + rows_paint_h);
                 self.gl.scissor(
                     text_x.round() as i32,
                     scissor_y.max(0.0).round() as i32,
                     text_w.round() as i32,
-                    rows_h.round() as i32,
+                    rows_paint_h.round() as i32,
                 );
             }
 

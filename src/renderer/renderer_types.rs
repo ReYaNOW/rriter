@@ -478,6 +478,11 @@ pub struct Renderer {
     pub(crate) git_logs_layout_cache: GitLogsLayoutCache,
     pub(crate) git_logs_selecting: bool,
     pub(crate) git_workspace_scrollbar: Option<crate::render_view::scrollbar_widget::Scrollbar>,
+    /// Extra pixels a left (Top group) panel paints below its interactive viewport, down to the
+    /// status bar. The translucent bottom panel overlays the left panels by design, so their
+    /// scrolling content must stay painted under it. Set only around
+    /// `draw_ide_panel_content` in `draw_ide_side_panels`; 0 everywhere else.
+    pub(crate) left_panel_overdraw_h: f32,
     pub git_tooltip_waiting: bool,
     /// Frame output: the editor hover is blocked (status bar, bottom panel, modal, ...)
     /// and `App::render_main_frame` must clear `App::hover` after `draw`.

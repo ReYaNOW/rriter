@@ -65,6 +65,9 @@ impl Renderer {
         let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
         let list_y = title_h + controls_h;
         let full_list_h = (content_h - controls_h).max(40.0 * s);
+        // Paint below the interactive viewport (translucent bottom panel overlay). Only the
+        // bottom-most region of the panel may overdraw: the list when no bottom pane is open,
+        // otherwise the graph/logs pane (they read `left_panel_overdraw_h` themselves).
         let (list_h, graph_divider_h, graph_h) = if ide_panel.git.bottom_pane
             != crate::app::git_panel::GitBottomPane::Closed
         {
@@ -75,6 +78,11 @@ impl Renderer {
             )
         } else {
             (full_list_h, 0.0, 0.0)
+        };
+        let list_paint_h = if graph_h > 0.0 {
+            list_h
+        } else {
+            list_h + self.left_panel_overdraw_h
         };
         let graph_divider_y = list_y + list_h;
         let graph_y = graph_divider_y + graph_divider_h;
@@ -382,12 +390,12 @@ impl Renderer {
         ui_registry.push_interactions_enabled(hover_settled);
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (list_y + list_h);
+            let scissor_y = self.height - (list_y + list_paint_h);
             self.gl.scissor(
                 panel_x as i32,
                 scissor_y.max(0.0) as i32,
                 panel_w as i32,
-                list_h as i32,
+                list_paint_h as i32,
             );
         }
 
@@ -403,7 +411,7 @@ impl Renderer {
                 .contains(&workspace.workspace_idx);
 
             drew_any = true;
-            let row_visible = y + workspace_h >= list_y && y <= list_y + list_h;
+            let row_visible = y + workspace_h >= list_y && y <= list_y + list_paint_h;
             if row_visible {
                 let workspace_name_color =
                     git_disabled_color(self.theme.fg, workspace_disabled, 0.38);
@@ -1014,7 +1022,7 @@ impl Renderer {
             }
 
             if let Some(err) = &workspace.error {
-                if y + row_h >= list_y && y <= list_y + list_h {
+                if y + row_h >= list_y && y <= list_y + list_paint_h {
                     self.draw_tree_label_clipped(
                         err,
                         panel_x + pad,
@@ -1038,7 +1046,7 @@ impl Renderer {
                     }
                     collapsed_depth = None;
                 }
-                let visible = y + row_h >= list_y && y <= list_y + list_h;
+                let visible = y + row_h >= list_y && y <= list_y + list_paint_h;
                 let row_collapsed = row.file_idx.is_none()
                     && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_ref()));
                 if visible {

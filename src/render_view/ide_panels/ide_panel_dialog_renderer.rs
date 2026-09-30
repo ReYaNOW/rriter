@@ -209,7 +209,6 @@ impl Renderer {
                     content_y,
                     panel_w,
                     content_h,
-                    content_h,
                     s,
                     ide_panel,
                     lsp,

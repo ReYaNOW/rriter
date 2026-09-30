@@ -40,14 +40,17 @@ impl Renderer {
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
+        // Paint below the interactive viewport (`panel_clip` below stays at `h`) so the content
+        // shows through the translucent bottom panel.
+        let paint_h = h + self.left_panel_overdraw_h;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
                 x.round() as i32,
-                (self.height - (y + h)).round() as i32,
+                (self.height - (y + paint_h)).round() as i32,
                 w.round() as i32,
-                h.round() as i32,
+                paint_h.round() as i32,
             );
         }
 

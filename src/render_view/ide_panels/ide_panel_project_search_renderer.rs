@@ -885,15 +885,17 @@ impl Renderer {
         ));
         let interactions_settled = state.scroll.is_settled();
         ui_registry.push_interactions_enabled(interactions_settled);
+        // Paint below the interactive list viewport too (translucent bottom panel overlay).
+        let paint_h = layout.list.h + self.left_panel_overdraw_h;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (layout.list.y + layout.list.h)).round() as i32;
+            let sy = (self.height - (layout.list.y + paint_h)).round() as i32;
             self.gl.scissor(
                 layout.list.x.round() as i32,
                 sy,
                 layout.list.w.round() as i32,
-                layout.list.h.round() as i32,
+                paint_h.round() as i32,
             );
         }
 
@@ -930,7 +932,7 @@ impl Renderer {
         let scroll = state.scroll.current.round();
         let hover_settled = (state.scroll.current - state.scroll.target).abs() < 0.5;
         let first = (scroll / row_h).floor().max(0.0) as usize;
-        let last = (((scroll + layout.list.h) / row_h).ceil() as usize + 1)
+        let last = (((scroll + paint_h) / row_h).ceil() as usize + 1)
             .min(state.flat_rows.len());
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
         let mut clip_scratch = String::new();

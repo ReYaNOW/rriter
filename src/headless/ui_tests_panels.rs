@@ -648,9 +648,18 @@ fn headless_terminal_overlays_left_panel_and_tree_rows_show_through() {
     let shot = dir.join("terminal-over-tree.png");
     run_script(&mut session, format!("mouse_move 0 0\nscreenshot {}\n", shot.display()).as_bytes());
     let image = image::open(&shot).unwrap().to_rgba8();
-    // Terminal header row right of the "Терминал" tab label, inside the left panel's x range.
-    // The header is a flat fill, so only tree glyphs behind it make neighbouring rows differ
-    // (vertical boundaries between the left panel and the editor do not).
+    let edges = edges_under_terminal_header(&image, body_y);
+    assert!(edges >= 30, "tree rows under the terminal are not drawn (edge pixels: {edges})");
+
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Counts vertical colour edges in the terminal header row right of the "Терминал" tab label,
+/// inside the left panel's x range. The header is a flat fill, so only left-panel glyphs behind
+/// it make neighbouring rows differ (vertical boundaries between the left panel and the editor
+/// do not).
+fn edges_under_terminal_header(image: &image::RgbaImage, body_y: f64) -> u32 {
     let y0 = body_y as u32 + 4;
     let mut edges = 0;
     for y in y0..y0 + 24 {
@@ -659,7 +668,45 @@ fn headless_terminal_overlays_left_panel_and_tree_rows_show_through() {
             edges += ((a - b).abs() >= 6) as u32;
         }
     }
-    assert!(edges >= 30, "tree rows under the terminal are not drawn (edge pixels: {edges})");
+    edges
+}
+
+/// Same overlay for a non-Explorer left panel: project search results lying under the
+/// translucent terminal stay painted and show through it.
+#[test]
+fn headless_terminal_overlays_left_panel_and_search_results_show_through() {
+    let dir = scratch_dir("ui-terminal-over-search");
+    for i in 0..80 {
+        std::fs::write(
+            dir.join(format!("zzzzzzzzzzzzzzzzzzzzzzzzzzzz_{i:02}.txt")),
+            "needle\n",
+        )
+        .unwrap();
+    }
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    click(&mut session, "SidebarSlot(Search)");
+    wait_until(&mut session, 8000, "search input", |session| {
+        has_ui(&dump(session), "ProjectSearchQueryInput")
+    });
+    click(&mut session, "ProjectSearchQueryInput");
+    run_script(&mut session, b"type needle\n");
+    click(&mut session, "ProjectSearchRun");
+    wait_until(&mut session, 8000, "search results", |session| {
+        has_ui(&dump(session), "ProjectSearchFileToggle(0)")
+    });
+    click(&mut session, "SidebarSlot(Terminal)");
+    wait_until(&mut session, 8000, "terminal body", |session| {
+        has_ui(&dump(session), "TerminalBody")
+    });
+    let state = dump(&mut session);
+    let [_, body_y, _, _] = crate::headless::tests_support::ui_rect(&state, "BottomPanelBody");
+
+    let shot = dir.join("terminal-over-search.png");
+    run_script(&mut session, format!("mouse_move 0 0\nscreenshot {}\n", shot.display()).as_bytes());
+    let image = image::open(&shot).unwrap().to_rgba8();
+    let edges = edges_under_terminal_header(&image, body_y);
+    assert!(edges >= 30, "search results under the terminal are not drawn (edge pixels: {edges})");
 
     close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
     let _ = std::fs::remove_dir_all(dir);

@@ -221,14 +221,17 @@ impl Renderer {
 
         let content_y = panel_layout.content_y;
         let content_h = panel_layout.content_h;
+        // Paint below the interactive viewport (`content_clip` stays at `content_h`) so the tree
+        // shows through the translucent bottom panel.
+        let paint_h = content_h + self.left_panel_overdraw_h;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
                 panel_x.max(0.0) as i32,
-                (self.height - content_y - content_h).max(0.0) as i32,
+                (self.height - content_y - paint_h).max(0.0) as i32,
                 panel_w.max(0.0) as i32,
-                content_h.max(0.0) as i32,
+                paint_h.max(0.0) as i32,
             );
         }
 
@@ -244,7 +247,7 @@ impl Renderer {
         let mut logical_row = 0usize;
         for (connection_idx, connection) in database.connections.iter().enumerate() {
             let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
-            if row_y + row_h >= content_y && row_y <= content_y + content_h {
+            if row_y + row_h >= content_y && row_y <= content_y + paint_h {
                 let selected = database.selected_connection == Some(connection.config.id);
                 let hovered = hover_settled
                     && ui_registry.register_rect_clipped(
@@ -366,7 +369,7 @@ impl Renderer {
                 }
                 for (database_idx, database_node) in connection.databases.iter().enumerate() {
                     let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
-                    if row_y + row_h >= content_y && row_y <= content_y + content_h {
+                    if row_y + row_h >= content_y && row_y <= content_y + paint_h {
                         let selected = database
                             .selected_database
                             .as_ref()
@@ -440,7 +443,7 @@ impl Renderer {
                         }
                         for (table_idx, table) in database_node.tables.iter().enumerate() {
                             let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
-                            if row_y + row_h >= content_y && row_y <= content_y + content_h {
+                            if row_y + row_h >= content_y && row_y <= content_y + paint_h {
                                 let hovered = hover_settled
                                     && ui_registry.register_rect_clipped(
                                         UiId::DatabaseTableRow(connection_idx, database_idx, table_idx),

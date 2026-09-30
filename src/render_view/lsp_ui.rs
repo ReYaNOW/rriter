@@ -257,15 +257,18 @@ impl Renderer {
         let lsp_logs_focused = &ide_panel.lsp_logs_focused;
         let lsp_log_filter_text = ide_panel.lsp_log_filter_editor.get_full_text();
 
+        // Paint below the interactive viewport (the ui clip below stays at `content_h`) so the
+        // cards show through the translucent bottom panel.
+        let paint_h = content_h + self.left_panel_overdraw_h;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (content_y + content_h)).round() as i32;
+            let sy = (self.height - (content_y + paint_h)).round() as i32;
             self.gl.scissor(
                 content_x.round() as i32,
                 sy,
                 content_w.round() as i32,
-                content_h.round() as i32,
+                paint_h.round() as i32,
             );
         }
         ui_registry.push_clip(crate::ui_system::UiClipRect::new(
@@ -338,7 +341,7 @@ impl Renderer {
             let row_h = base_h + logs_h;
             let layout_row_h = base_h + layout_logs_h;
 
-            if current_y + row_h > content_y && current_y < content_y + content_h {
+            if current_y + row_h > content_y && current_y < content_y + paint_h {
                 let card_x = content_x + 12.0 * s;
                 let card_w = content_w - 24.0 * s;
 
@@ -871,8 +874,11 @@ impl Renderer {
 
                     self.flush();
                     let inter_y1 = log_bg_y.max(content_y);
-                    let inter_y2 = (log_bg_y + log_bg_h).min(content_y + content_h);
+                    let inter_y2 = (log_bg_y + log_bg_h).min(content_y + paint_h);
                     let inter_h = (inter_y2 - inter_y1).max(0.0);
+                    // Hit-test clip stays within the interactive viewport.
+                    let hit_h = ((log_bg_y + log_bg_h).min(content_y + content_h) - inter_y1)
+                        .max(0.0);
 
                     ui_registry.register_blocker(
                         crate::ui_system::UiId::LspLogArea(server_idx),
@@ -896,7 +902,7 @@ impl Renderer {
                             );
                         }
                         ui_registry.push_clip(crate::ui_system::UiClipRect::new(
-                            log_bg_x, inter_y1, log_bg_w, inter_h,
+                            log_bg_x, inter_y1, log_bg_w, hit_h,
                         ));
 
                         let line_h = 16.0 * s;
@@ -1216,12 +1222,12 @@ impl Renderer {
 
                         ui_registry.pop_clip();
                         unsafe {
-                            let sy = (self.height - (content_y + content_h)).round() as i32;
+                            let sy = (self.height - (content_y + paint_h)).round() as i32;
                             self.gl.scissor(
                                 content_x.round() as i32,
                                 sy,
                                 content_w.round() as i32,
-                                content_h.round() as i32,
+                                paint_h.round() as i32,
                             );
                         }
                     }
