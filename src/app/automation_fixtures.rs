@@ -179,10 +179,8 @@ fn scenario_steps(
             steps.push(AutomationStep::Finish);
             Ok(steps)
         }
-        PgoScenario::Startup | PgoScenario::Welcome => Err(format!(
-            "PGO scenario {} is not implemented",
-            scenario.as_str()
-        )),
+        PgoScenario::Startup => Ok(crate::app::automation_groups::startup_steps()),
+        PgoScenario::Welcome => Ok(crate::app::automation_groups::welcome_steps()),
     }
 }
 

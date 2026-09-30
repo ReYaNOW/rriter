@@ -9,6 +9,54 @@ use crate::app::automation::AutomationStep;
 /// Groups appended to the `full` scenario, in order; each group task adds its own name.
 pub(super) const FULL_GROUPS: &[&str] = &[];
 
+/// Tabs the `startup` scenario expects the restored session to hold.
+const STARTUP_MIN_TABS: usize = 3;
+
+/// `startup`: the IDE entry already ran with a saved session (see
+/// `App::automation_restores_session`); no session, or an unreadable one, fails "restored tabs".
+pub(super) fn startup_steps() -> Vec<AutomationStep> {
+    use AutomationStep as S;
+    vec![
+        S::WaitUntil {
+            what: "restored tabs",
+            check: |app| app.tabs.len() >= STARTUP_MIN_TABS,
+            timeout_ms: 5_000,
+        },
+        S::WaitUntil {
+            what: "active tab highlighted",
+            check: |app| app.startup_editor_pending.is_none() && !app.highlighter.spans.is_empty(),
+            timeout_ms: 15_000,
+        },
+        S::ScrollEditorTimed { duration_secs: 2 },
+        S::Finish,
+    ]
+}
+
+/// `welcome`: starts on the welcome screen (the runner does not enter the IDE for it), then
+/// takes the same path as opening a folder there.
+pub(super) fn welcome_steps() -> Vec<AutomationStep> {
+    use AutomationStep as S;
+    vec![
+        S::WaitUntil {
+            what: "welcome visible",
+            check: |app| app.show_welcome && !app.is_ide_mode,
+            timeout_ms: 15_000,
+        },
+        S::ApplyWorkspace,
+        S::Call {
+            what: "enter ide",
+            run: |app, _| {
+                app.enter_ide_mode_deferred();
+                app.finish_ide_deferred();
+                Ok(())
+            },
+        },
+        S::WaitReady,
+        S::WaitFileTree,
+        S::Finish,
+    ]
+}
+
 type Requires = Option<fn(&App) -> Result<(), String>>;
 
 /// Steps of the group `name` wrapped in `GroupStart`/`GroupEnd`; `None` for an unknown name.

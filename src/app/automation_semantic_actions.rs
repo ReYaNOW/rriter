@@ -18,6 +18,20 @@ impl App {
         self.automation.is_some()
     }
 
+    /// Automation whose scenario reads the saved session (`startup`); false without automation.
+    pub(crate) fn automation_restores_session(&self) -> bool {
+        self.automation
+            .as_ref()
+            .is_some_and(|automation| automation.scenario().restores_session())
+    }
+
+    /// Automation whose scenario leaves its session on exit (`full`); false without automation.
+    pub(crate) fn automation_saves_session(&self) -> bool {
+        self.automation
+            .as_ref()
+            .is_some_and(|automation| automation.scenario().saves_session_on_exit())
+    }
+
     pub(crate) fn write_interrupted_automation_report(&mut self, reason: &str) {
         let Some(mut automation) = self.automation.take() else {
             return;

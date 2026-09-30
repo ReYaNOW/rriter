@@ -164,6 +164,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     let automation_running = if app.automation.is_some() {
         match app.advance_automation(event_loop, now) {
             Some(crate::app::automation::AutomationTick::Exit) => {
+                app.save_tabs_state_on_automation_exit();
                 app.shutdown_background_services();
                 event_loop.exit();
                 return;

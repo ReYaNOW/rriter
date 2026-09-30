@@ -987,7 +987,7 @@
     }
 
     #[test]
-    fn scenario_steps_selects_full_smoke_and_rejects_unimplemented() {
+    fn scenario_steps_selects_every_scenario_and_rejects_an_unknown_group() {
         let root = Path::new("/nonexistent");
         let full = scenario_steps(&PgoScenario::Full, root).unwrap();
         assert_eq!(full.len(), full_pgo_scenario(root).len());
@@ -997,13 +997,40 @@
             names,
             ["wait-ready", "resize-1600x900", "wait-3-frames", "finish"]
         );
-        for scenario in [PgoScenario::Startup, PgoScenario::Welcome] {
-            let error = scenario_steps(&scenario, root).unwrap_err();
-            assert!(error.contains(&scenario.as_str()), "{error}");
-            assert!(error.contains("not implemented"), "{error}");
-        }
+        let startup: Vec<String> = scenario_steps(&PgoScenario::Startup, root)
+            .unwrap()
+            .iter()
+            .map(AutomationStep::name)
+            .collect();
+        assert_eq!(startup.first().map(String::as_str), Some("restored tabs"));
+        assert_eq!(startup.last().map(String::as_str), Some("finish"));
+        let welcome: Vec<String> = scenario_steps(&PgoScenario::Welcome, root)
+            .unwrap()
+            .iter()
+            .map(AutomationStep::name)
+            .collect();
+        // `WaitReady` needs IDE mode, so it must come after the IDE entry.
+        assert_eq!(welcome.first().map(String::as_str), Some("welcome visible"));
+        let enter = welcome.iter().position(|name| name == "enter ide").unwrap();
+        let ready = welcome.iter().position(|name| name == "wait-ready").unwrap();
+        assert!(enter < ready, "{welcome:?}");
         let error = scenario_steps(&PgoScenario::Group("no_such".to_string()), root).unwrap_err();
         assert!(error.contains("unknown PGO group") && error.contains("no_such"), "{error}");
+    }
+
+    #[test]
+    fn session_persistence_is_allowed_only_for_full_save_and_startup_restore() {
+        let table = [
+            (PgoScenario::Full, true, false),
+            (PgoScenario::Startup, false, true),
+            (PgoScenario::Welcome, false, false),
+            (PgoScenario::Smoke, false, false),
+            (PgoScenario::Group("pdf".to_string()), false, false),
+        ];
+        for (scenario, saves, restores) in table {
+            assert_eq!(scenario.saves_session_on_exit(), saves, "{scenario:?}");
+            assert_eq!(scenario.restores_session(), restores, "{scenario:?}");
+        }
     }
 
     #[test]

@@ -19,6 +19,17 @@ static RUN_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Runs `scenario` on a fresh per-process workspace with a git fixture repository; returns
 /// the outcome, the session and the report path (for state checks after the run).
 fn run_pgo_session(scenario: &str, timeout_ms: u64) -> (PgoRunOutcome, HeadlessSession, PathBuf) {
+    run_pgo_session_seeded(scenario, timeout_ms, |_| Vec::new())
+}
+
+/// `run_pgo_session` with a saved session: `seed` gets the workspace and returns the saved tabs.
+/// Tests never read the user's session file, so they hand the tab list to `preload_ide_session`
+/// (as the native `resume` does); an empty list leaves the session unseeded.
+fn run_pgo_session_seeded(
+    scenario: &str,
+    timeout_ms: u64,
+    seed: impl FnOnce(&std::path::Path) -> Vec<crate::OpenTabSnapshot>,
+) -> (PgoRunOutcome, HeadlessSession, PathBuf) {
     let root = ensure_test_profile_root();
     reset_api_test_state();
     let n = RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -42,6 +53,10 @@ fn run_pgo_session(scenario: &str, timeout_ms: u64) -> (PgoRunOutcome, HeadlessS
         Err((code, message)) => panic!("headless session (code {code}): {message}"),
     };
     session.hz_probe = || None;
+    let saved = seed(&workspace);
+    if !saved.is_empty() {
+        session.app.preload_ide_session(saved, 0);
+    }
     session.enter_pgo_scenario(&automation).expect("enter scenario start state");
     let outcome = session.run_automation(None);
     (outcome, session, automation.report_path)
@@ -97,6 +112,54 @@ fn headless_pgo_unknown_group_fails_and_names_itself() {
     assert_eq!(outcome.failed_step.as_deref(), Some("group:does_not_exist"));
     let report = read_report(&report_path);
     assert!(report["failure_reason"].as_str().unwrap_or("").contains("does_not_exist"), "{report}");
+}
+
+/// Three source files under the workspace, as a saved tab list.
+fn three_saved_tabs(workspace: &std::path::Path) -> Vec<crate::OpenTabSnapshot> {
+    let dir = workspace.join("session_seed");
+    std::fs::create_dir_all(&dir).expect("seed dir");
+    ["one", "two", "three"]
+        .iter()
+        .map(|name| {
+            let path = dir.join(format!("{name}.rs"));
+            std::fs::write(&path, format!("fn {name}() -> i32 {{\n    1\n}}\n")).expect("seed file");
+            crate::OpenTabSnapshot::File(path.canonicalize().unwrap_or(path))
+        })
+        .collect()
+}
+
+#[test]
+fn headless_pgo_startup_restores_the_saved_tabs_and_finishes() {
+    let (outcome, session, report_path) =
+        run_pgo_session_seeded("startup", 30_000, three_saved_tabs);
+    assert!(outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step, None);
+    assert_eq!(session.app.tabs.len(), 3);
+    assert!(!session.app.highlighter.spans.is_empty());
+    let completed = read_report(&report_path)["completed_steps"].to_string();
+    assert!(completed.contains("restored tabs"), "{completed}");
+}
+
+#[test]
+fn headless_pgo_startup_without_a_saved_session_fails_on_restored_tabs() {
+    let (outcome, _session, _) = run_pgo_session("startup", 30_000);
+    assert!(!outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step.as_deref(), Some("restored tabs"));
+}
+
+#[test]
+fn headless_pgo_other_scenarios_ignore_a_saved_session() {
+    let (outcome, session, _) = run_pgo_session_seeded("smoke", 20_000, three_saved_tabs);
+    assert!(outcome.success, "{outcome:?}");
+    assert!(session.app.tabs.len() < 3, "smoke restored {} tabs", session.app.tabs.len());
+}
+
+#[test]
+fn headless_pgo_welcome_enters_the_ide_with_the_workspace() {
+    let (outcome, session, _) = run_pgo_session("welcome", 30_000);
+    assert!(outcome.success, "{outcome:?}");
+    assert!(session.app.is_ide_mode && !session.app.show_welcome);
+    assert!(!session.app.ide_panel.file_tree_nodes.is_empty());
 }
 
 fn read_report(path: &std::path::Path) -> serde_json::Value {

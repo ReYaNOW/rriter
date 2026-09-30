@@ -137,6 +137,16 @@ impl PgoScenario {
             Self::Group(name) => format!("group:{name}"),
         }
     }
+
+    /// Only the GUI-equivalent training run leaves its open tabs behind for `startup`.
+    pub fn saves_session_on_exit(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    /// Only `startup` reads the saved session; every other scenario starts from a clean slate.
+    pub fn restores_session(&self) -> bool {
+        matches!(self, Self::Startup)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -543,6 +553,10 @@ impl AutomationController {
             return Some(Err(failure.name.clone()));
         }
         self.finished.then_some(Ok(()))
+    }
+
+    pub fn scenario(&self) -> &PgoScenario {
+        &self.options.scenario
     }
 
     /// Ticks seen so far (one per frame in the headless runner).

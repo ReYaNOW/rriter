@@ -87,7 +87,7 @@ impl App {
         }
 
         let (saved_tabs, saved_active) = if self.scroll_render_bench.is_some()
-            || self.is_automation_mode()
+            || (self.is_automation_mode() && !self.automation_restores_session())
         {
             (Vec::new(), 0)
         } else if let Some(preload) = self.ide_preload.as_mut() {
@@ -277,7 +277,9 @@ impl App {
     /// highlighter `Reset`, so the worker computes it while the window and GL are created.
     /// `enter_ide_mode` reuses the text and the version.
     pub(crate) fn preload_ide_startup(&mut self) {
-        if !self.run_ide_on_startup || self.is_automation_mode() || self.scroll_render_bench.is_some()
+        if !self.run_ide_on_startup
+            || (self.is_automation_mode() && !self.automation_restores_session())
+            || self.scroll_render_bench.is_some()
         {
             return;
         }
