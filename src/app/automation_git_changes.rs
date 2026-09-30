@@ -207,7 +207,17 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
         dx: 0.0,
         dy: -3.0,
     }));
+    // The hunk jumps animate the scroll, so the wheel lands on a moving target and (under load)
+    // can leave no hunk header on screen. Jump once more and wait until the scroll has settled
+    // on a hunk header whose rollback icon is registered before clicking it.
     steps.extend([
+        click_ui(UiId::GitDiffNextHunk),
+        S::WaitUntil {
+            what: "rollback icon visible",
+            check: |app| app.scroll_y.is_settled() && rollback_visible_hunk(app).is_some(),
+            timeout_ms: 10_000,
+        },
+        S::WaitFrames(2),
         click(AutomationTarget::Find(rollback_visible_hunk), 1),
         S::WaitFrames(2),
         S::Key("ctrl+s"),
