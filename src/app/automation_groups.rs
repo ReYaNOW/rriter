@@ -7,7 +7,7 @@ use crate::app::App;
 use crate::app::automation::AutomationStep;
 
 /// Groups appended to the `full` scenario, in order; each group task adds its own name.
-pub(super) const FULL_GROUPS: &[&str] = &["pdf", "api_mock", "git_changes", "editor_ops", "lsp_nav", "input_scroll"];
+pub(super) const FULL_GROUPS: &[&str] = &["pdf", "api_mock", "git_changes", "editor_ops", "lsp_nav", "input_scroll", "terminal_ops"];
 
 /// Tabs the `startup` scenario expects the restored session to hold.
 const STARTUP_MIN_TABS: usize = 3;
