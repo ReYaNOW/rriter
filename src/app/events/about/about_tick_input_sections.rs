@@ -91,6 +91,12 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
     let open_y = (window_height - h) / 2.0;
     let target_y = if app.show_settings { open_y } else { start_y };
 
+    if !app.show_settings && app.settings_y > start_y {
+        // Closed panel still parked below the window (initial 10000.0): snap instead of
+        // animating ~0.9 s of invisible redraws after every launch.
+        app.settings_y = start_y;
+        app.settings_anim_progress = 0.0;
+    }
     let diff = target_y - app.settings_y;
     if diff.abs() > 1.5 {
         app.settings_y += diff * 10.0 * dt;
