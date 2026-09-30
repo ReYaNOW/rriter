@@ -24,6 +24,7 @@ mod automation_git_changes;
 mod automation_input_scroll;
 mod automation_lsp_nav;
 mod automation_pdf;
+mod automation_terminal_ops;
 pub(crate) mod context_menu;
 mod dart_settings;
 pub mod database;

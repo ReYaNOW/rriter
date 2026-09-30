@@ -90,6 +90,11 @@ fn lookup(
         "input_scroll" => {
             Some(("input_scroll", None, super::automation_input_scroll::steps(workspace)))
         }
+        "terminal_ops" => Some((
+            "terminal_ops",
+            Some(super::automation_terminal_ops::requires),
+            super::automation_terminal_ops::steps(workspace),
+        )),
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]

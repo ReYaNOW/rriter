@@ -236,6 +236,17 @@ fn pgo_group_input_scroll() {
     assert!(outcome.success, "{outcome:?}");
 }
 
+#[test]
+fn pgo_group_terminal_ops() {
+    let (outcome, _session, report_path) = run_pgo_session("group:terminal_ops", 60_000);
+    assert!(outcome.success, "{outcome:?}");
+    let report = read_report(&report_path);
+    if cfg!(unix) {
+        assert_eq!(report["skipped_groups"], serde_json::json!([]), "{report}");
+        assert!(report["completed_steps"].to_string().contains("output done"), "{report}");
+    }
+}
+
 /// With `ty` the group runs to the end; without it the group is skipped (like `skip_without_ty`
 /// in the goto-definition tests) and the skip is reported.
 #[test]
