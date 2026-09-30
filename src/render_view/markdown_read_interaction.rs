@@ -90,7 +90,7 @@ impl MarkdownReadLayoutCache {
                         selection,
                     );
                 }
-                ReadBlockKind::Rule { .. } => {}
+                ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {}
             }
             if block_text.is_empty() {
                 continue;
@@ -645,7 +645,9 @@ impl Renderer {
                 styled_source_boundary(&cell.styled, visual)
                     .or_else(|| Some(row.source_range.start))
             }
-            ReadBlockKind::Rule { .. } => Some(block.source_range.start),
+            ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {
+                Some(block.source_range.start)
+            }
         }
     }
 
@@ -1001,19 +1003,34 @@ pub(crate) fn build_test_markdown_read_layout(
     source: &str,
     width: f32,
 ) -> MarkdownReadLayoutCache {
+    build_test_markdown_read_layout_with_media(source, width, 1.0, None)
+}
+
+/// Same, with media blocks: `media` is the cache to read and the folder of the document.
+#[cfg(test)]
+pub(crate) fn build_test_markdown_read_layout_with_media(
+    source: &str,
+    width: f32,
+    scale: f32,
+    media: Option<(&MarkdownMedia, &std::path::Path)>,
+) -> MarkdownReadLayoutCache {
     let document = crate::languages::markdown::MarkdownParseState::default()
         .parse(source)
         .expect("markdown parse");
-    let mut builder = LayoutBuilder::new(source, width, 1.0, test_layout_text_metrics(1.0), |_, _, _| 8.0);
+    let input = media.map(|(m, dir)| MediaInput::new(&document, source, dir, m));
+    let mut builder =
+        LayoutBuilder::new(source, width, scale, test_layout_text_metrics(scale), |_, _, _| 8.0 * scale)
+            .with_media(input);
     builder.append_blocks(&document.blocks, 0.0, 0, None);
     let (blocks, content_height) = builder.finish();
     let mut cache = MarkdownReadLayoutCache::default();
     cache.replace_layout(
-        LayoutKey::new(1, width, 1.0, 16.0),
+        LayoutKey::new(1, width, scale, 16.0),
         blocks,
         content_height,
         source.len(),
     );
+    cache.media_gen = media.map(|(m, _)| m.media_gen());
     cache
 }
 

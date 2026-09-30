@@ -446,6 +446,7 @@ impl Renderer {
         let stage_start = telemetry_frame_start.map(|_| Instant::now());
         self.draw_markdown_read(
             markdown,
+            None,
             editor,
             scroll_y_state,
             spans,

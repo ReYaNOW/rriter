@@ -58,7 +58,7 @@ impl Renderer {
             Some(anchor)
         } else if transition.from == crate::app::MarkdownMode::Read {
             transition.origin_read_width.and_then(|width| {
-                self.prepare_markdown_read_layout(markdown, editor.version, width)
+                self.prepare_markdown_read_layout(markdown, None, editor.version, width)
                     .then(|| {
                         markdown
                             .read_layout

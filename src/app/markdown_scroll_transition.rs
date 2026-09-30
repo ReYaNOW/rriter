@@ -833,6 +833,7 @@ impl App {
                 };
                 if !renderer.prepare_markdown_read_layout_preserving_current_ownership(
                     &mut self.markdown,
+                    None,
                     &mut self.scroll_y,
                     self.editor.version,
                     content_width,

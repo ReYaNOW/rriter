@@ -1727,6 +1727,8 @@ Rendering:
 * `src/render_view/core_text_tests.rs` -> `core_text.rs` test chunk: glyph geometry pixel-stability regressions.
 * `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
 * `src/render_view/markdown_read_text_layout.rs` -> `markdown_read.rs` include chunk: heading scale, inline-code geometry, text colours, visual char metrics. Hot path.
+* `src/render_view/markdown_read_media.rs` -> `markdown_read.rs` include chunk: media blocks of the Reader (image-only paragraphs, Mermaid blocks): pure row layout over `(natural, state)` per element, `PlacedMedia`, `MediaInput` (elements found per layout build), cache `media_gen`/`media_blocks()`, texture/placeholder/error-frame drawing without I/O. Hot path.
+* `src/render_view/markdown_read_media_tests.rs` -> `markdown_read_media.rs` test chunk: media layout (sizes, wrapping, degenerate sizes), media-backed layouts, cache generation, failed Mermaid regressions.
 * `src/render_view/markdown_read_tests.rs` -> `markdown_read.rs` test chunk: Reader layout, baseline and table draw regressions.
 * `src/render_view/markdown_read_interaction_tests.rs` -> `markdown_read_interaction.rs` test chunk: visual/source mapping and hit-testing regressions.
 * `src/render_view/ide_panels/ide_panel_dialog_renderer.rs` -> bottom panel and file/Git dialogs.

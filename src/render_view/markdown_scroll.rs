@@ -220,7 +220,7 @@ fn build_read_source_indices(
                     }
                 }
             }
-            ReadBlockKind::Rule { .. } => {
+            ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {
                 push_anchor_line(
                     &mut anchors,
                     block.source_range.clone(),
@@ -585,6 +585,7 @@ impl Renderer {
     pub(crate) fn prepare_markdown_read_layout_preserving_current_ownership(
         &mut self,
         markdown: &mut MarkdownTabState,
+        media: Option<&MarkdownMedia>,
         scroll: &mut crate::scroll::ScrollState,
         editor_version: u64,
         content_width: f32,
@@ -606,7 +607,7 @@ impl Renderer {
             None
         };
 
-        if !self.prepare_markdown_read_layout(markdown, editor_version, content_width) {
+        if !self.prepare_markdown_read_layout(markdown, media, editor_version, content_width) {
             return false;
         }
         let Some(anchor) = applied_anchor else {

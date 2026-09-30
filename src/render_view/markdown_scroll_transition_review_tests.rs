@@ -45,6 +45,7 @@ pub(crate) mod reviewer_stage2_integration {
         let renderer = app.renderer.as_mut().unwrap();
         renderer.draw_markdown_read(
             &mut app.markdown,
+            None,
             &app.editor,
             &mut app.scroll_y,
             &[],
