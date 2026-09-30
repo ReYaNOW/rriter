@@ -1,0 +1,191 @@
+//! Headless `--pgo-train` runner: scenario runs, CLI parsing and exit codes.
+
+use crate::app::automation::{AutomationOptions, PgoScenario};
+use crate::headless::frame::{PgoRunOutcome, next_frame_deadline};
+use crate::headless::profile::{HeadlessOptions, parse_args};
+use crate::headless::tests_support::{ensure_test_profile_root, reset_api_test_state, scratch_dir};
+use crate::headless::{HeadlessSession, run};
+use crate::startup_trace::StartupTrace;
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+const TEST_SIZE: (u32, u32) = (1280, 720);
+const TEST_SCALE: f64 = 4.0 / 3.0;
+
+static RUN_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Runs `scenario` on a fresh per-process workspace with a git fixture repository; returns
+/// the outcome, the session and the report path (for state checks after the run).
+fn run_pgo_session(scenario: &str, timeout_ms: u64) -> (PgoRunOutcome, HeadlessSession, PathBuf) {
+    let root = ensure_test_profile_root();
+    reset_api_test_state();
+    let n = RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let workspace = scratch_dir(&format!("pgo-{}-{n}", scenario.replace(':', "-")));
+    crate::app::automation::ensure_fixture_repository(&workspace).expect("fixture repository");
+    let automation = AutomationOptions {
+        workspace: workspace.clone(),
+        report_path: workspace.join("report.json"),
+        timeout: Duration::from_millis(timeout_ms),
+        scenario: PgoScenario::parse(scenario).expect("known scenario"),
+    };
+    let options = HeadlessOptions {
+        size: TEST_SIZE,
+        scale: TEST_SCALE,
+        allow_writes: true,
+        automation: Some(automation.clone()),
+        ..HeadlessOptions::default()
+    };
+    let mut session = match HeadlessSession::new(&options, root) {
+        Ok(session) => session,
+        Err((code, message)) => panic!("headless session (code {code}): {message}"),
+    };
+    session.hz_probe = || None;
+    session.enter_pgo_scenario(&automation).expect("enter scenario start state");
+    let outcome = session.run_automation(None);
+    (outcome, session, automation.report_path)
+}
+
+/// Shared entry of the scenario tests (Tasks 3-11): runs `scenario` to its end.
+pub(crate) fn run_pgo_scenario(scenario: &str, timeout_ms: u64) -> PgoRunOutcome {
+    run_pgo_session(scenario, timeout_ms).0
+}
+
+fn os(args: &[&str]) -> Vec<OsString> {
+    args.iter().map(OsString::from).collect()
+}
+
+fn automation_of(args: &[&str]) -> AutomationOptions {
+    parse_args(&os(args)).expect("valid args").automation.expect("automation options")
+}
+
+#[test]
+fn headless_pgo_smoke_runs_to_the_end_and_resizes_the_pbuffer() {
+    let (outcome, session, _) = run_pgo_session("smoke", 20_000);
+    assert!(outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step, None);
+    assert!(outcome.frames > 3, "{outcome:?}");
+    // The `Resize 1600x900` step reaches the pbuffer, not only the window model.
+    assert_eq!(session.gl.size(), (1600, 900));
+    let window = session.app.window.as_ref().expect("window").inner_size();
+    assert_eq!((window.width, window.height), (1600, 900));
+}
+
+#[test]
+fn headless_pgo_report_names_the_scenario_and_frames() {
+    let (outcome, _session, report_path) = run_pgo_session("smoke", 20_000);
+    assert!(outcome.success, "{outcome:?}");
+    let text = std::fs::read_to_string(&report_path).expect("report file");
+    let report: serde_json::Value = serde_json::from_str(&text).expect("report json");
+    assert_eq!(report["scenario"], "smoke");
+    assert!(report["frames"].as_u64().unwrap_or(0) > 3, "{report}");
+}
+
+#[test]
+fn headless_pgo_zero_timeout_fails_with_the_step_name() {
+    let (outcome, _session, _) = run_pgo_session("smoke", 0);
+    assert!(!outcome.success, "{outcome:?}");
+    let step = outcome.failed_step.expect("failed step");
+    assert!(!step.is_empty());
+}
+
+#[test]
+fn headless_pgo_unimplemented_scenario_fails_and_names_itself() {
+    let (outcome, _session, _) = run_pgo_session("group:nope", 20_000);
+    assert!(!outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step.as_deref(), Some("group:nope"));
+}
+
+#[test]
+fn headless_pgo_cli_parses_scenario_and_pgo_window_defaults() {
+    let opts = parse_args(&os(&["--headless", "--pgo-train", "--pgo-scenario", "group:x"]))
+        .expect("valid args");
+    let automation = opts.automation.expect("automation");
+    assert_eq!(automation.scenario, PgoScenario::Group("x".to_string()));
+    assert_eq!(automation.timeout, Duration::from_secs(240));
+    assert!(automation.report_path.ends_with("rriter-pgo-automation-report.json"));
+    assert!(automation.workspace.is_absolute());
+    assert!(opts.allow_writes, "--pgo-train implies --allow-writes");
+    assert_eq!(opts.size, (2560, 1440));
+    assert_eq!(opts.scale, 1.333);
+
+    assert_eq!(automation_of(&["--pgo-train"]).scenario, PgoScenario::Full);
+    let explicit = parse_args(&os(&[
+        "--pgo-train",
+        "--size",
+        "800x600",
+        "--scale",
+        "1.5",
+        "--pgo-workspace",
+        "/tmp/ws",
+        "--pgo-report",
+        "/tmp/r.json",
+        "--pgo-timeout-seconds",
+        "31",
+    ]))
+    .expect("valid args");
+    assert_eq!((explicit.size, explicit.scale), ((800, 600), 1.5));
+    let automation = explicit.automation.expect("automation");
+    assert_eq!(automation.workspace, PathBuf::from("/tmp/ws"));
+    assert_eq!(automation.report_path, PathBuf::from("/tmp/r.json"));
+    assert_eq!(automation.timeout, Duration::from_secs(31));
+}
+
+#[test]
+fn headless_pgo_cli_without_pgo_train_keeps_the_interactive_defaults() {
+    let opts = parse_args(&os(&["--headless"])).expect("valid args");
+    assert_eq!(opts.automation, None);
+    assert!(!opts.allow_writes);
+    assert_eq!(opts.size, (1920, 1080));
+}
+
+#[test]
+fn headless_pgo_cli_rejects_bad_arguments() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["--pgo-train", "--pgo-scenario", "nope"], "nope"),
+        (&["--pgo-train", "--pgo-scenario", "group:"], "no group name"),
+        (&["--pgo-train", "--pgo-scenario"], "missing value for --pgo-scenario"),
+        (&["--pgo-train", "--pgo-workspace"], "missing value for --pgo-workspace"),
+        (&["--pgo-train", "--pgo-report", "--pgo-scenario", "smoke"], "missing value for --pgo-report"),
+        (&["--pgo-train", "--pgo-timeout-seconds", "abc"], "--pgo-timeout-seconds"),
+        (&["--pgo-train", "--pgo-timeout-seconds", "-1"], "--pgo-timeout-seconds"),
+        (&["--pgo-train", "--pgo-timeout-seconds", "5"], "at least 30"),
+        (&["--pgo-scenario", "smoke"], "--pgo-scenario requires --pgo-train"),
+        (&["--pgo-workspace", "/tmp"], "--pgo-workspace requires --pgo-train"),
+        (&["--pgo-timeout-seconds", "60"], "--pgo-timeout-seconds requires --pgo-train"),
+        (&["--pgo-train", "--script", "/tmp/s.txt"], "neither --script nor"),
+        (&["--pgo-train", "/tmp/project"], "neither --script nor"),
+    ];
+    for (args, needle) in cases {
+        let err = parse_args(&os(args)).expect_err(&format!("{args:?} must be rejected"));
+        assert!(err.contains(needle), "{args:?}: {err:?} does not contain {needle:?}");
+    }
+}
+
+#[test]
+fn headless_pgo_cli_exits_2_for_a_missing_workspace_and_bad_arguments() {
+    let missing = std::env::temp_dir()
+        .join(format!("rriter-pgo-no-such-workspace-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&missing);
+    let missing = missing.to_string_lossy().into_owned();
+    let bad_workspace = ["--headless", "--pgo-train", "--pgo-workspace", missing.as_str()];
+    assert_eq!(run(&os(&bad_workspace), StartupTrace::disabled()), 2);
+    let file = std::env::current_exe().expect("test binary path");
+    let file = file.to_string_lossy().into_owned();
+    let workspace_is_a_file = ["--headless", "--pgo-train", "--pgo-workspace", file.as_str()];
+    assert_eq!(run(&os(&workspace_is_a_file), StartupTrace::disabled()), 2);
+    let bad_scenario = ["--headless", "--pgo-train", "--pgo-scenario", "nope"];
+    assert_eq!(run(&os(&bad_scenario), StartupTrace::disabled()), 2);
+}
+
+#[test]
+fn headless_pgo_frame_deadline_keeps_the_pace_and_does_not_burst_after_a_late_frame() {
+    let pace = Duration::from_millis(16);
+    let start = Instant::now();
+    // On time: the next frame is one pace after the previous deadline.
+    assert_eq!(next_frame_deadline(start, pace, start), start + pace);
+    // Late by five paces: the next frame is due now, not five frames in a row.
+    let late = start + pace * 5;
+    assert_eq!(next_frame_deadline(start, pace, late), late);
+}

@@ -138,7 +138,7 @@ impl PgoScenario {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AutomationOptions {
     pub workspace: PathBuf,
     pub report_path: PathBuf,
@@ -461,6 +461,16 @@ impl AutomationController {
             return Some(Err(failure.name.clone()));
         }
         self.finished.then_some(Ok(()))
+    }
+
+    /// Ticks seen so far (one per frame in the headless runner).
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// The global timeout the controller enforces itself.
+    pub fn timeout(&self) -> Duration {
+        self.options.timeout
     }
 
     pub fn tick(

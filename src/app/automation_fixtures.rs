@@ -29,7 +29,7 @@ fn fixture_head_commit_count(repository: &git2::Repository) -> usize {
     walk.filter_map(Result::ok).count()
 }
 
-fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
+pub(crate) fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
     if workspace.join(".git").exists() {
         let repository = git2::Repository::open(workspace)
             .map_err(|error| format!("failed to open fixture Git repository: {error}"))?;

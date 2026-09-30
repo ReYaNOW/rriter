@@ -4,10 +4,14 @@ use crate::app::App;
 use crate::app::events::about;
 use crate::app::events::host_loop::{HeadlessLoopState, HostLoop};
 use crate::app::events::main_frame::FrameOutcome;
+use crate::headless::HeadlessSession;
+use crate::platform::offscreen_gl::OffscreenContext;
 use glow::HasContext;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
+use winit::dpi::PhysicalSize;
 use winit::event_loop::ControlFlow;
 
 /// Pause after an idle `Wait` step, so background threads (highlighter, LSP, watcher) can
@@ -66,10 +70,52 @@ pub(crate) fn control_flow_label(flow: ControlFlow, now: Instant) -> (&'static s
     }
 }
 
+/// Resizes the pbuffer, the window model and the renderer to `size`; the one path of the
+/// `resize` command and of an automation-requested window size.
+pub(crate) fn resize_surface(
+    app: &mut App,
+    gl: &mut OffscreenContext,
+    size: PhysicalSize<u32>,
+) -> Result<(), String> {
+    gl.resize(size.width, size.height)?;
+    if let Some(window) = app.window.as_ref().and_then(|window| window.headless()) {
+        window.set_size(size);
+    }
+    // `handle_main_resized` also resizes the renderer, as the window branch does.
+    app.handle_main_resized(size);
+    Ok(())
+}
+
+/// The window model changed size (`request_inner_size` from an automation step): brings the
+/// pbuffer along before the frame is drawn. On failure the window goes back to the pbuffer
+/// size, so the next frame does not retry the same resize.
+fn sync_surface_to_window(app: &mut App, gl: &mut OffscreenContext) {
+    let Some(size) = app.window.as_ref().map(|window| window.inner_size()) else {
+        return;
+    };
+    let (w, h) = gl.size();
+    if (size.width, size.height) == (w, h) {
+        return;
+    }
+    if let Err(error) = resize_surface(app, gl, size) {
+        eprintln!("headless: window resize {}x{}: {error}", size.width, size.height);
+        if let Some(window) = app.window.as_ref().and_then(|window| window.headless()) {
+            window.set_size(PhysicalSize::new(w, h));
+        }
+    }
+}
+
 /// One iteration of the headless event loop: the same `about_to_wait` the window runs, then
 /// a frame if the app asked for one (or `force`). Never sleeps. Returns true when a frame was drawn.
-pub(crate) fn step_frame(app: &mut App, loop_state: &HeadlessLoopState, force: bool) -> bool {
+pub(crate) fn step_frame(
+    app: &mut App,
+    gl: &mut OffscreenContext,
+    loop_state: &HeadlessLoopState,
+    force: bool,
+) -> bool {
     about::about_to_wait(app, &HostLoop::headless(loop_state));
+    // An automation tick may have asked for another window size; the frame is drawn at it.
+    sync_surface_to_window(app, gl);
     // Always consume the request, also on forced frames, so it does not trigger a second frame.
     if !take_redraw_request(app) && !force {
         return false;
@@ -103,6 +149,73 @@ pub(crate) fn render_frame(app: &mut App) -> FrameOutcome {
 pub(crate) fn finish_gl(app: &App) {
     if let Some(renderer) = app.renderer.as_ref() {
         unsafe { renderer.gl.finish() };
+    }
+}
+
+/// Extra time the runner gives the controller past its own global timeout before it gives up.
+const RUN_TIMEOUT_GRACE: Duration = Duration::from_secs(10);
+
+/// Result of `HeadlessSession::run_automation`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PgoRunOutcome {
+    pub(crate) success: bool,
+    /// Controller ticks (one per frame).
+    pub(crate) frames: u64,
+    /// Name of the failed step; `None` on success.
+    pub(crate) failed_step: Option<String>,
+}
+
+/// Deadline of the frame after the one due at `previous`. A frame that ran late does not queue a
+/// burst of catch-up frames: the schedule restarts from `now`.
+pub(crate) fn next_frame_deadline(previous: Instant, pace: Duration, now: Instant) -> Instant {
+    previous.checked_add(pace).map_or(now, |next| next.max(now))
+}
+
+impl HeadlessSession {
+    /// Steps frames until the automation controller asks to exit or the run outlives the
+    /// controller's timeout plus a grace period. `pace` sets the frame period (`None`: back to
+    /// back). Service shutdown is `about_to_wait`'s job on the exit tick.
+    pub(crate) fn run_automation(&mut self, pace: Option<Duration>) -> PgoRunOutcome {
+        let start = Instant::now();
+        let limit = self.app.automation.as_ref().map(|automation| automation.timeout());
+        let hard_deadline = limit.and_then(|limit| start.checked_add(limit + RUN_TIMEOUT_GRACE));
+        let mut due = start;
+        let mut runner_timed_out = false;
+        while !self.loop_state.exit_requested.load(Ordering::Relaxed) {
+            if hard_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                runner_timed_out = true;
+                break;
+            }
+            let drew = self.step(false);
+            match pace {
+                Some(pace) => {
+                    due = next_frame_deadline(due, pace, Instant::now());
+                    sleep_until(due, due);
+                }
+                None if !drew => thread::yield_now(),
+                None => {}
+            }
+        }
+        if runner_timed_out {
+            // The exit tick never came, so `about_to_wait` did not stop the services.
+            self.app.shutdown_background_services();
+        }
+        let Some(automation) = self.app.automation.as_ref() else {
+            return PgoRunOutcome {
+                success: false,
+                frames: 0,
+                failed_step: Some("no-automation".to_string()),
+            };
+        };
+        let frames = automation.frames();
+        match automation.outcome() {
+            Some(Ok(())) => PgoRunOutcome { success: true, frames, failed_step: None },
+            Some(Err(step)) => PgoRunOutcome { success: false, frames, failed_step: Some(step) },
+            None => {
+                let reason = if runner_timed_out { "runner-timeout" } else { "exit-before-finish" };
+                PgoRunOutcome { success: false, frames, failed_step: Some(reason.to_string()) }
+            }
+        }
     }
 }
 

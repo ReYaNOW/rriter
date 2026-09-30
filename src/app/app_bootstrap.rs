@@ -71,7 +71,7 @@ pub(crate) struct AppInitOptions {
 }
 
 impl AppInitOptions {
-    pub(crate) fn headless() -> Self {
+    pub(crate) fn headless(automation: Option<AutomationOptions>) -> Self {
         Self {
             editor: None,
             title: None,
@@ -81,7 +81,7 @@ impl AppInitOptions {
             recent_files: None,
             has_file_arg: false,
             run_ide_on_startup: false,
-            automation_options: None,
+            automation_options: automation,
             scroll_bench_idx: None,
             scroll_bench_seconds: None,
             headless: true,
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn app_bootstrap_headless_init() {
-        let app = App::new_from_config(crate::Config::default(), AppInitOptions::headless());
+        let app = App::new_from_config(crate::Config::default(), AppInitOptions::headless(None));
 
         assert!(app.headless_mode);
         assert!(app.clipboard.as_ref().is_some_and(crate::platform::Clipboard::is_in_memory));
