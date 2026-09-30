@@ -6,7 +6,7 @@ pub(crate) mod tests_support {
     use crate::headless::profile::HeadlessOptions;
     use crate::platform::{self, ToolKind};
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
-    use std::net::{SocketAddr, TcpListener, TcpStream};
+    use std::net::{TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
     use std::process::{ChildStdin, Command, Stdio};
     use std::sync::mpsc;

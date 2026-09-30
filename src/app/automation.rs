@@ -303,6 +303,7 @@ pub(super) enum AutomationStep {
 }
 
 /// Where a mouse step acts, in physical pixels.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub(super) enum AutomationTarget {
     /// Centre of the element's rectangle in the last frame's `ui_registry`.
@@ -312,6 +313,7 @@ pub(super) enum AutomationTarget {
     Find(fn(&App) -> Option<(f32, f32)>),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AutomationButton {
     Left,
