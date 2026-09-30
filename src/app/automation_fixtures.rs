@@ -171,7 +171,15 @@ fn scenario_steps(
             AutomationStep::WaitFrames(3),
             AutomationStep::Finish,
         ]),
-        PgoScenario::Startup | PgoScenario::Welcome | PgoScenario::Group(_) => Err(format!(
+        PgoScenario::Group(name) => {
+            let group = crate::app::automation_groups::group_steps(name, workspace)
+                .ok_or_else(|| format!("unknown PGO group {name:?}"))?;
+            let mut steps = vec![AutomationStep::WaitReady];
+            steps.extend(group);
+            steps.push(AutomationStep::Finish);
+            Ok(steps)
+        }
+        PgoScenario::Startup | PgoScenario::Welcome => Err(format!(
             "PGO scenario {} is not implemented",
             scenario.as_str()
         )),
@@ -406,8 +414,11 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
         S::WaitFrames(5),
         S::ShowSettings(false),
         S::WaitFrames(5),
-        S::Finish,
     ]);
+    for group in crate::app::automation_groups::FULL_GROUPS {
+        steps.extend(crate::app::automation_groups::group_steps(group, workspace).unwrap_or_default());
+    }
+    steps.push(S::Finish);
     steps
 }
 

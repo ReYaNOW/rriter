@@ -2,7 +2,7 @@ impl AutomationController {
     fn run_step(
         &mut self,
         app: &mut App,
-        _event_loop: &HostLoop,
+        event_loop: &HostLoop,
         step: &AutomationStep,
         now: Instant,
     ) -> StepResult {
@@ -942,6 +942,14 @@ impl AutomationController {
                 request_redraw(app);
                 StepResult::Done
             }
+            AutomationStep::WaitUntil { .. }
+            | AutomationStep::Call { .. }
+            | AutomationStep::Key(_)
+            | AutomationStep::Wheel { .. }
+            | AutomationStep::Click { .. }
+            | AutomationStep::Drag { .. }
+            | AutomationStep::GroupStart { .. }
+            | AutomationStep::GroupEnd => self.run_group_step(app, event_loop, step),
             AutomationStep::Finish => StepResult::Exit,
         }
     }

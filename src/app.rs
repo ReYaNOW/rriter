@@ -16,6 +16,7 @@ pub(crate) use protected_save::{ProtectedSaveCompletion, ProtectedSaves, Protect
 pub mod automation;
 mod automation_dart;
 mod automation_database;
+mod automation_groups;
 mod automation_markdown;
 pub(crate) mod context_menu;
 mod dart_settings;

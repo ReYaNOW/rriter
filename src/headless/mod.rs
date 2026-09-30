@@ -462,14 +462,11 @@ impl HeadlessSession {
                 self.frame_ok()
             }
             Command::Key { input, mods, .. } => {
-                let saved = self.app.modifiers;
-                self.app.modifiers = mods;
-                let release = input.released();
-                self.app.handle_main_key_input(&HostLoop::headless(&self.loop_state), input);
+                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input, mods);
                 self.step(true);
-                self.app.handle_main_key_input(&HostLoop::headless(&self.loop_state), release);
+                self.app.release_key_combo(&HostLoop::headless(&self.loop_state), &hold);
                 self.step(true);
-                self.app.modifiers = saved;
+                self.app.end_key_combo(hold);
                 Response::Ok(None)
             }
             Command::Type(text) => {

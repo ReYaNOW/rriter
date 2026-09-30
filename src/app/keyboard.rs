@@ -15,7 +15,7 @@ mod editor_keys;
 mod key_input;
 mod main_keys;
 pub(crate) use editor_keys::paired_editor_insert_text;
-pub(crate) use key_input::KeyInput;
+pub(crate) use key_input::{KeyComboHold, KeyInput};
 
 #[cfg(target_os = "linux")]
 fn terminal_clipboard_paste_bytes(

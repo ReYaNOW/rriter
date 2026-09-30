@@ -6,6 +6,7 @@ use winit::dpi::PhysicalSize;
 use crate::app::events::host_loop::HostLoop;
 
 use crate::app::api_client::ApiFocus;
+use crate::app::keyboard::KeyInput;
 use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
 use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
 use crate::app::automation_markdown::{MarkdownAutomationStep, MarkdownStepResult};
@@ -250,7 +251,71 @@ pub(super) enum AutomationStep {
     AddSettingsIgnore(&'static str),
     RemoveSettingsIgnore(&'static str),
     RefreshSettingsTools,
+    /// Polled once per frame until `check` holds; the step fails with name `what` after `timeout_ms`.
+    #[allow(dead_code)] // built by the group tasks; the registry is empty until then
+    WaitUntil {
+        what: &'static str,
+        check: fn(&App) -> bool,
+        timeout_ms: u64,
+    },
+    /// Runs once and must not block the frame for long: slow work goes to a thread and a
+    /// following `WaitUntil` waits for the feature state. `Err(e)` fails the step as `what: e`.
+    #[allow(dead_code)]
+    Call {
+        what: &'static str,
+        run: fn(&mut App, &Path) -> Result<(), String>,
+    },
+    /// A key combo in `KeyInput::parse_combo` syntax, delivered like the driver's `key` command.
+    #[allow(dead_code)]
+    Key(&'static str),
+    #[allow(dead_code)]
+    Wheel {
+        at: AutomationTarget,
+        dx: f32,
+        dy: f32,
+    },
+    /// `mods` is a `+`-separated modifier list (`""`, `"ctrl"`, `"ctrl+shift"`).
+    #[allow(dead_code)]
+    Click {
+        at: AutomationTarget,
+        button: AutomationButton,
+        mods: &'static str,
+        clicks: u8,
+    },
+    #[allow(dead_code)]
+    Drag {
+        from: AutomationTarget,
+        to: AutomationTarget,
+        steps: u16,
+    },
+    /// Opens a group; a `requires` returning `Err(reason)` skips everything up to `GroupEnd`.
+    #[allow(dead_code)]
+    GroupStart {
+        name: &'static str,
+        requires: Option<fn(&App) -> Result<(), String>>,
+    },
+    #[allow(dead_code)]
+    GroupEnd,
     Finish,
+}
+
+/// Where a mouse step acts, in physical pixels.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum AutomationTarget {
+    /// Centre of the element's rectangle in the last frame's `ui_registry`.
+    Ui(crate::ui_system::UiId),
+    Point(f32, f32),
+    /// Computed from the app state each time the step needs it; `None` fails the step.
+    Find(fn(&App) -> Option<(f32, f32)>),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AutomationButton {
+    Left,
+    Right,
+    Middle,
 }
 
 impl AutomationStep {
@@ -347,6 +412,13 @@ impl AutomationStep {
             Self::AddSettingsIgnore(pattern) => format!("add-settings-ignore:{pattern}"),
             Self::RemoveSettingsIgnore(pattern) => format!("remove-settings-ignore:{pattern}"),
             Self::RefreshSettingsTools => "refresh-settings-tools".to_string(),
+            Self::WaitUntil { what, .. } | Self::Call { what, .. } => (*what).to_string(),
+            Self::Key(combo) => format!("key:{combo}"),
+            Self::Wheel { .. } => "wheel".to_string(),
+            Self::Click { .. } => "click".to_string(),
+            Self::Drag { .. } => "drag".to_string(),
+            Self::GroupStart { name, .. } => (*name).to_string(),
+            Self::GroupEnd => "group-end".to_string(),
             Self::Finish => "finish".to_string(),
         }
     }
@@ -368,6 +440,7 @@ impl AutomationStep {
             | Self::WaitApiResponse { .. }
             | Self::TriggerAutocomplete(_)
             | Self::ShowHover { .. } => Duration::from_secs(30),
+            Self::WaitUntil { timeout_ms, .. } => Duration::from_millis(*timeout_ms),
             Self::Dart(step) => step.timeout(),
             Self::Database(step) => step.timeout(),
             Self::Markdown(step) => step.timeout(),
@@ -427,6 +500,12 @@ pub struct AutomationController {
     frames: u64,
     finished: bool,
     scenario_error: Option<String>,
+    /// `(group, reason)` of every group whose `requires` failed.
+    skipped_groups: Vec<(String, String)>,
+    /// Combo pressed by a `Key` step and released on its next tick.
+    key_hold: Option<crate::app::keyboard::KeyComboHold>,
+    /// Where the running `Drag` step pressed the button.
+    drag_from: Option<(f32, f32)>,
 }
 
 impl AutomationController {
@@ -452,6 +531,9 @@ impl AutomationController {
             frames: 0,
             finished: false,
             scenario_error,
+            skipped_groups: Vec::new(),
+            key_hold: None,
+            drag_from: None,
         }
     }
 
@@ -735,6 +817,11 @@ impl AutomationController {
             "duration_ms": self.started_at.elapsed().as_millis(),
             "completed_steps": self.completed,
             "skipped_steps": self.skipped,
+            "skipped_groups": self
+                .skipped_groups
+                .iter()
+                .map(|(group, reason)| json!({ "group": group, "reason": reason }))
+                .collect::<Vec<_>>(),
             "failed_step": failure.map(|failure| failure.reason.as_str()),
             "failed_step_index": failure.map(|failure| failure.index),
             "failed_step_name": failure.map(|failure| failure.name.as_str()),

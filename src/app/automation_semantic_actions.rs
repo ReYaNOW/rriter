@@ -27,6 +27,166 @@ impl App {
     }
 }
 
+fn resolve_target(app: &App, target: AutomationTarget) -> Result<(f32, f32), String> {
+    match target {
+        AutomationTarget::Point(x, y) => Ok((x, y)),
+        AutomationTarget::Find(find) => {
+            find(app).ok_or_else(|| "find target returned no position".to_string())
+        }
+        AutomationTarget::Ui(id) => app
+            .ui_registry
+            .element_hits()
+            .find_map(|(hit_id, _, rect, _)| if hit_id == id { rect } else { None })
+            .map(|rect| (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0))
+            .ok_or_else(|| format!("ui element not found: {id:?}")),
+    }
+}
+
+fn move_pointer(app: &mut App, (x, y): (f32, f32)) {
+    app.handle_main_cursor_moved(winit::dpi::PhysicalPosition::new(f64::from(x), f64::from(y)));
+}
+
+fn winit_button(button: AutomationButton) -> winit::event::MouseButton {
+    match button {
+        AutomationButton::Left => winit::event::MouseButton::Left,
+        AutomationButton::Right => winit::event::MouseButton::Right,
+        AutomationButton::Middle => winit::event::MouseButton::Middle,
+    }
+}
+
+impl AutomationController {
+    /// Executes `WaitUntil`, `Call`, the input steps and the group markers. Input steps take
+    /// two or more ticks (pointer move / key press first, the rest after a rendered frame),
+    /// the same order as the headless driver commands.
+    fn run_group_step(
+        &mut self,
+        app: &mut App,
+        event_loop: &HostLoop,
+        step: &AutomationStep,
+    ) -> StepResult {
+        let progress = self.step_progress;
+        match step {
+            AutomationStep::WaitUntil { check, .. } => {
+                if check(app) {
+                    StepResult::Done
+                } else {
+                    StepResult::Pending
+                }
+            }
+            AutomationStep::Call { what, run } => match run(app, &self.options.workspace) {
+                Ok(()) => StepResult::Done,
+                Err(error) => StepResult::Failed(format!("{what}: {error}")),
+            },
+            AutomationStep::Key(combo) => match self.key_hold.take() {
+                None => {
+                    let (input, mods) = match KeyInput::parse_combo(combo) {
+                        Ok(parsed) => parsed,
+                        Err(error) => return StepResult::Failed(format!("key {combo:?}: {error}")),
+                    };
+                    self.key_hold = Some(app.press_key_combo(event_loop, input, mods));
+                    StepResult::Pending
+                }
+                Some(hold) => {
+                    app.release_key_combo(event_loop, &hold);
+                    app.end_key_combo(hold);
+                    StepResult::Done
+                }
+            },
+            AutomationStep::Wheel { at, dx, dy } => {
+                if progress == 0 {
+                    match resolve_target(app, *at) {
+                        Ok(point) => move_pointer(app, point),
+                        Err(error) => return StepResult::Failed(error),
+                    }
+                    self.step_progress = 1;
+                    return StepResult::Pending;
+                }
+                app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::LineDelta(*dx, *dy));
+                StepResult::Done
+            }
+            AutomationStep::Click { at, button, mods, clicks } => {
+                if progress == 0 {
+                    match resolve_target(app, *at) {
+                        Ok(point) => move_pointer(app, point),
+                        Err(error) => return StepResult::Failed(error),
+                    }
+                    self.step_progress = 1;
+                    return StepResult::Pending;
+                }
+                let mods = match KeyInput::parse_modifiers(mods) {
+                    Ok(mods) => mods,
+                    Err(error) => return StepResult::Failed(format!("click {mods:?}: {error}")),
+                };
+                let saved = std::mem::replace(&mut app.modifiers, mods);
+                let button = winit_button(*button);
+                for _ in 0..*clicks {
+                    for state in [winit::event::ElementState::Pressed, winit::event::ElementState::Released] {
+                        app.handle_main_mouse_input(event_loop, state, button);
+                    }
+                }
+                app.modifiers = saved;
+                StepResult::Done
+            }
+            AutomationStep::Drag { from, to, steps } => {
+                let steps = u32::from((*steps).max(1));
+                if progress == 0 {
+                    match resolve_target(app, *from) {
+                        Ok(point) => {
+                            move_pointer(app, point);
+                            self.drag_from = Some(point);
+                        }
+                        Err(error) => return StepResult::Failed(error),
+                    }
+                } else if progress == 1 {
+                    app.handle_main_mouse_input(
+                        event_loop,
+                        winit::event::ElementState::Pressed,
+                        winit::event::MouseButton::Left,
+                    );
+                } else {
+                    let (Some(start), Ok(end)) = (self.drag_from, resolve_target(app, *to)) else {
+                        return StepResult::Failed("drag target returned no position".to_string());
+                    };
+                    let done = progress - 1;
+                    let t = done.min(steps) as f32 / steps as f32;
+                    move_pointer(
+                        app,
+                        (start.0 + (end.0 - start.0) * t, start.1 + (end.1 - start.1) * t),
+                    );
+                    if done >= steps {
+                        app.handle_main_mouse_input(
+                            event_loop,
+                            winit::event::ElementState::Released,
+                            winit::event::MouseButton::Left,
+                        );
+                        self.drag_from = None;
+                        return StepResult::Done;
+                    }
+                }
+                self.step_progress = progress + 1;
+                StepResult::Pending
+            }
+            AutomationStep::GroupStart { name, requires } => {
+                let Some(Err(reason)) = requires.map(|requires| requires(app)) else {
+                    return StepResult::Done;
+                };
+                let end = self.steps[self.step_index..]
+                    .iter()
+                    .position(|step| matches!(step, AutomationStep::GroupEnd));
+                let Some(end) = end else {
+                    return StepResult::Failed(format!("group {name} has no GroupEnd"));
+                };
+                println!("PGO_AUTOMATION_GROUP_SKIPPED group={name} reason={reason:?}");
+                self.skipped_groups.push(((*name).to_string(), reason));
+                // `advance` steps over the `GroupEnd` this lands on.
+                self.step_index += end;
+                StepResult::Done
+            }
+            _ => StepResult::Done,
+        }
+    }
+}
+
 #[derive(Debug)]
 enum StepResult {
     Pending,

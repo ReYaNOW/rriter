@@ -606,11 +606,9 @@
             include_str!("automation_semantic_actions.rs"),
             include_str!("automation_fixtures.rs"),
         );
+        // The `Click`/`Wheel`/`Drag` steps go through the real `handle_main_*` input handlers
+        // with `AutomationTarget` coordinates; the semantic steps must not click by hand.
         assert!(!source.contains(concat!("handle_", "ui_click")));
-        assert!(!source.contains(concat!("Physical", "Position")));
-        assert!(!source.contains(concat!("Mouse", "Button")));
-        assert!(!source.contains(concat!("MouseScroll", "Delta")));
-        assert!(!source.contains(concat!("ui_", "registry")));
         assert!(!source.contains(concat!("rect_", "for")));
     }
 
@@ -999,15 +997,24 @@
             names,
             ["wait-ready", "resize-1600x900", "wait-3-frames", "finish"]
         );
-        for scenario in [
-            PgoScenario::Startup,
-            PgoScenario::Welcome,
-            PgoScenario::Group("pdf".to_string()),
-        ] {
+        for scenario in [PgoScenario::Startup, PgoScenario::Welcome] {
             let error = scenario_steps(&scenario, root).unwrap_err();
             assert!(error.contains(&scenario.as_str()), "{error}");
             assert!(error.contains("not implemented"), "{error}");
         }
+        let error = scenario_steps(&PgoScenario::Group("no_such".to_string()), root).unwrap_err();
+        assert!(error.contains("unknown PGO group") && error.contains("no_such"), "{error}");
+    }
+
+    #[test]
+    fn group_scenario_wraps_registered_group_between_wait_ready_and_finish() {
+        let root = Path::new("/nonexistent");
+        let steps = scenario_steps(&PgoScenario::Group("test_skip".to_string()), root).unwrap();
+        let names: Vec<String> = steps.iter().map(AutomationStep::name).collect();
+        assert_eq!(
+            names,
+            ["wait-ready", "test_skip", "test-skip-body", "group-end", "finish"]
+        );
     }
 
     #[test]

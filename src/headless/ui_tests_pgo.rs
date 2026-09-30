@@ -91,10 +91,56 @@ fn headless_pgo_zero_timeout_fails_with_the_step_name() {
 }
 
 #[test]
-fn headless_pgo_unimplemented_scenario_fails_and_names_itself() {
-    let (outcome, _session, _) = run_pgo_session("group:nope", 20_000);
+fn headless_pgo_unknown_group_fails_and_names_itself() {
+    let (outcome, _session, report_path) = run_pgo_session("group:does_not_exist", 20_000);
     assert!(!outcome.success, "{outcome:?}");
-    assert_eq!(outcome.failed_step.as_deref(), Some("group:nope"));
+    assert_eq!(outcome.failed_step.as_deref(), Some("group:does_not_exist"));
+    let report = read_report(&report_path);
+    assert!(report["failure_reason"].as_str().unwrap_or("").contains("does_not_exist"), "{report}");
+}
+
+fn read_report(path: &std::path::Path) -> serde_json::Value {
+    let text = std::fs::read_to_string(path).expect("report file");
+    serde_json::from_str(&text).expect("report json")
+}
+
+#[test]
+fn headless_pgo_wait_until_never_satisfied_fails_within_its_timeout() {
+    let started = Instant::now();
+    let outcome = run_pgo_scenario("group:test_never", 20_000);
+    assert!(!outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step.as_deref(), Some("test-never-satisfied"));
+    assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+}
+
+#[test]
+fn headless_pgo_input_steps_edit_select_and_scroll_the_editor() {
+    let (outcome, session, _) = run_pgo_session("group:test_input", 30_000);
+    assert!(outcome.success, "{outcome:?}");
+    assert!(session.app.scroll_y.target > 0.0);
+    // The undo restored the file; the double click left a selection on it.
+    assert!(session.app.editor.get_full_text().starts_with("line 00 = 0\n"));
+    assert!(session.app.editor.selection_anchor.is_some());
+}
+
+#[test]
+fn headless_pgo_group_with_failing_requires_is_skipped_and_reported() {
+    let (outcome, _session, report_path) = run_pgo_session("group:test_skip", 20_000);
+    assert!(outcome.success, "{outcome:?}");
+    let report = read_report(&report_path);
+    assert_eq!(report["status"], "success");
+    assert_eq!(report["skipped_groups"], serde_json::json!([{ "group": "test_skip", "reason": "no tool" }]));
+    let completed = report["completed_steps"].to_string();
+    assert!(!completed.contains("test-skip-body"), "{completed}");
+}
+
+#[test]
+fn headless_pgo_find_target_without_a_position_fails_the_step() {
+    let (outcome, _session, report_path) = run_pgo_session("group:test_find_none", 20_000);
+    assert!(!outcome.success, "{outcome:?}");
+    assert_eq!(outcome.failed_step.as_deref(), Some("click"));
+    let report = read_report(&report_path);
+    assert!(report["failure_reason"].as_str().unwrap_or("").contains("no position"), "{report}");
 }
 
 #[test]
