@@ -261,12 +261,23 @@ pub(crate) fn prepare_mermaid_font_cache(cache_root: &Path) -> std::io::Result<(
     if seeded {
         return Ok(());
     }
-    // The reader needs both files; write the meta first and publish the font by rename, so
-    // a concurrent helper never sees a half-written font.
-    std::fs::write(&meta_path, "0")?;
-    let tmp_path = dir.join(format!("{name}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp_path, INTER_FONT)?;
-    std::fs::rename(&tmp_path, &font_path)
+    // The reader needs both files; publish the meta first and the font last, each by rename
+    // from a temp name unique per call (several editor worker threads may seed at once), so
+    // a concurrent helper never sees a half-written file.
+    write_atomic(&dir, &name, &meta_path, b"0")?;
+    write_atomic(&dir, &name, &font_path, INTER_FONT)
+}
+
+fn write_atomic(dir: &Path, name: &str, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = dir.join(format!("{name}.{}.{seq}.tmp", std::process::id()));
+    let result = std::fs::write(&tmp_path, bytes).and_then(|()| std::fs::rename(&tmp_path, target));
+    if result.is_err() {
+        std::fs::remove_file(&tmp_path).ok();
+    }
+    result
 }
 
 /// Dark theme for the editor background: light text, grey lines, transparent canvas.
@@ -571,6 +582,33 @@ mod tests {
                 MediaError::Decode
             );
         }
+    }
+
+    #[test]
+    fn font_cache_seeding_is_thread_safe() {
+        let root = std::env::temp_dir().join(format!("rriter_mmdr_seed_race_{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let root = root.clone();
+                std::thread::spawn(move || prepare_mermaid_font_cache(&root))
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+        let dir = root.join("mmdr").join("font-cache");
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names.len(), 2, "{names:?}");
+        let font = names.iter().find(|name| name.ends_with(".font")).unwrap();
+        let meta = names.iter().find(|name| name.ends_with(".meta")).unwrap();
+        assert_eq!(std::fs::read(dir.join(font)).unwrap(), INTER_FONT);
+        assert_eq!(std::fs::read_to_string(dir.join(meta)).unwrap(), "0");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Points `XDG_CACHE_HOME` of this test process at a per-process directory seeded by
