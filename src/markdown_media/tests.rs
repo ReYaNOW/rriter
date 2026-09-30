@@ -518,6 +518,88 @@ fn tall_image_is_not_rerendered_forever() {
 }
 
 #[test]
+fn ui_scale_change_rerenders_a_known_key_once() {
+    let waker = UiWaker::counting();
+    let scales = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let loader: Loader = {
+        let scales = Arc::clone(&scales);
+        Arc::new(move |req| {
+            scales.lock().expect("scales").push(req.scale);
+            let (w, h) = super::decode::raster_target_size(400.0, 300.0, req.scale, req.max_raster_w);
+            Ok(pixels((400.0, 300.0), (w, h)))
+        })
+    };
+    let mut media = MarkdownMedia::with_loader(loader);
+    let req = mermaid_req(1, 1000);
+    media.request(req.clone(), &waker);
+    let mut host = FakeHost::default();
+    pump(&mut media, &waker, &mut host, &[visible(&req.key, 400)], |m| has_texture(m, &req.key));
+    // The UI scale goes 1 -> 2: the layout asks again and draws the image 800 wide.
+    media.request(MediaRequest { scale: 2.0, ..req.clone() }, &waker);
+    let scaled = [visible(&req.key, 800)];
+    pump(&mut media, &waker, &mut host, &scaled, |m| m.stats().loads_started == 2 && m.tasks.is_empty() && m.pending_uploads.is_empty());
+    for _ in 0..30 {
+        media.poll(&waker);
+        media.request(MediaRequest { scale: 2.0, ..req.clone() }, &waker);
+        media.prepare_with(&mut host, &scaled, &waker);
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(media.stats().loads_started, 2, "exactly one re-render after the scale change");
+    assert_eq!(*scales.lock().expect("scales"), vec![1.0, 2.0]);
+    assert_eq!(host.uploaded, vec![(400, 300), (800, 600)]);
+}
+
+#[test]
+fn request_does_not_requeue_an_evicted_invisible_key() {
+    const IMAGES: u64 = 30;
+    let waker = UiWaker::counting();
+    // 2048 x 2048 x 4 = 16 MiB each, 480 MiB in total: most of them get evicted.
+    let mut media = MarkdownMedia::with_loader(Arc::new(|_| Ok(pixels((2048.0, 2048.0), (2048, 2048)))));
+    let reqs: Vec<MediaRequest> = (0..IMAGES).map(|n| mermaid_req(n, 2048)).collect();
+    for req in &reqs {
+        media.request(req.clone(), &waker);
+    }
+    let mut host = FakeHost::default();
+    for req in &reqs {
+        let shown = [visible(&req.key, 2048)];
+        pump(&mut media, &waker, &mut host, &shown, |m| has_texture(m, &req.key));
+    }
+    let last = [visible(&reqs[IMAGES as usize - 1].key, 2048)];
+    media.prepare_with(&mut host, &last, &waker);
+    let evicted: Vec<&MediaRequest> = reqs.iter().filter(|req| !has_texture(&media, &req.key)).collect();
+    assert!(evicted.len() >= 15, "a large part is evicted: {}", evicted.len());
+    let loads = media.stats().loads_started;
+
+    // The editor refreshes the read model and asks for every key again; only the last is visible.
+    for _ in 0..5 {
+        for req in &reqs {
+            media.request(req.clone(), &waker);
+        }
+        media.poll(&waker);
+        media.prepare_with(&mut host, &last, &waker);
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    media.poll(&waker);
+    assert_eq!(media.stats().loads_started, loads, "evicted invisible keys are not loaded again");
+
+    // Scrolling one of them into view queues it exactly once.
+    let back = evicted[0].key.clone();
+    let shown = [visible(&back, 2048)];
+    for _ in 0..5 {
+        media.request(evicted[0].clone(), &waker);
+    }
+    pump(&mut media, &waker, &mut host, &shown, |m| has_texture(m, &back));
+    for _ in 0..20 {
+        media.poll(&waker);
+        media.request(evicted[0].clone(), &waker);
+        media.prepare_with(&mut host, &shown, &waker);
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    media.poll(&waker);
+    assert_eq!(media.stats().loads_started, loads + 1, "the visible evicted key loads once");
+}
+
+#[test]
 fn rerender_requests_display_width_once() {
     let waker = UiWaker::counting();
     let widths = Arc::new(Mutex::new(Vec::<u32>::new()));

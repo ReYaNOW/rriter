@@ -24,7 +24,7 @@ mod tests;
 use fetch::{load_media, trim_disk_cache};
 use texture_budget::{
     BudgetItem, QueueFacts, INVISIBLE_TEXTURE_BUDGET, enqueue_indices, eviction_plan,
-    needs_rerender, should_enqueue, should_trim_disk_cache, texture_totals, upload_order,
+    needs_rerender, should_trim_disk_cache, texture_totals, upload_order,
 };
 
 pub(crate) use render_helper::run_media_helper_if_requested;
@@ -319,16 +319,17 @@ impl MarkdownMedia {
         MediaStats { loads_started: self.loads_started, texture_bytes, visible_texture_bytes }
     }
 
-    /// Asks for a key. Unknown keys become `Pending` and join the queue; a known key is
-    /// queued again only when it has no texture, is not loading and did not fail.
+    /// Asks for a key. Unknown keys become `Pending` and join the queue. A known key only
+    /// stores the latest request (scale, column width), so the next render and the re-render
+    /// check use the current target; it is queued again by `prepare_gpu` when it is visible,
+    /// never from here (an evicted invisible image must not be rendered again).
     pub(crate) fn request(&mut self, req: MediaRequest, waker: &UiWaker) {
         if let Some(entry) = self.entries.get_mut(&req.key) {
-            let facts = Self::queue_facts(entry, true);
-            if should_enqueue(&facts) {
-                let key = req.key.clone();
-                entry.request = req;
-                entry.queued = true;
-                self.queue.push_back(key);
+            // A queued re-render already carries the width it was queued for.
+            let rerender_width = (entry.queued && entry.texture.is_some()).then_some(entry.request.max_raster_w);
+            entry.request = req;
+            if let Some(width) = rerender_width {
+                entry.request.max_raster_w = width;
             }
         } else if self.supported {
             let key = req.key.clone();
