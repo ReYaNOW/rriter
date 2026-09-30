@@ -240,6 +240,7 @@ pub(crate) fn test_app() -> Option<App> {
         ide_preload: None,
         ide_deferred: crate::app::IdeDeferred::None,
         startup_editor_pending: None,
+        startup_editor_reveal_at: None,
     })
 }
 

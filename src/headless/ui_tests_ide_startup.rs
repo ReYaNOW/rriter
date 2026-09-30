@@ -333,6 +333,29 @@ fn headless_ide_startup_pointer_gate_yields_to_overlays() {
 }
 
 #[test]
+fn headless_ide_startup_tabs_follow_a_chrome_only_frame_after_the_reveal_delay() {
+    let dir = scratch_dir("ui-ide-startup-reveal");
+    let paths = write_sources(&dir, &["main.rs"]);
+    let tabs = paths.into_iter().map(OpenTabSnapshot::File).collect();
+    let (mut session, _) = entered_session(tabs, 0);
+
+    // A highlight ready before the first frame shows the tabs at once; otherwise the first
+    // frame is the chrome alone and the tabs wait for both the highlight and the delay.
+    match session.app.startup_editor_reveal_at {
+        None => assert!(session.app.startup_editor_pending.is_none()),
+        Some(reveal_at) => {
+            wait_until(&mut session, 1500, "editor shown after the chrome frame", |s| {
+                s.app.startup_editor_pending.is_none()
+            });
+            assert!(std::time::Instant::now() >= reveal_at);
+            assert!(session.app.startup_editor_reveal_at.is_none());
+        }
+    }
+    assert!(session.app.is_highlighted_once);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn headless_ide_startup_plain_text_file_does_not_wait_for_the_deadline() {
     let dir = scratch_dir("ui-ide-startup-txt");
     let notes = dir.join("notes.txt");

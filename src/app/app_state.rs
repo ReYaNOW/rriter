@@ -1454,6 +1454,9 @@ pub struct App {
     /// the deadline after which `App::poll_startup_editor_wait` highlights synchronously.
     /// Set only by `begin_startup_editor_wait`, cleared only by `clear_startup_editor_wait`.
     pub(crate) startup_editor_pending: Option<std::time::Instant>,
+    /// Set when the first frame showed the chrome without the tabs: they are not shown before
+    /// this instant. Cleared together with `startup_editor_pending`.
+    pub(crate) startup_editor_reveal_at: Option<std::time::Instant>,
 }
 
 /// Stage of the IDE restore work that runs after the first content frame.

@@ -265,7 +265,10 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             background_wake_at,
             earliest_optional_wake(
                 app.ide_panel.database.cancel_deadline(),
-                earliest_optional_wake(database_refresh_wake_at, app.startup_editor_pending),
+                earliest_optional_wake(
+                    database_refresh_wake_at,
+                    earliest_optional_wake(app.startup_editor_pending, app.startup_editor_reveal_at),
+                ),
             ),
         ),
     );

@@ -249,25 +249,28 @@ impl App {
         }
         self.run_ide_on_startup = false;
         self.enter_ide_mode_deferred();
-        self.startup_editor_grace();
+        self.startup_editor_before_first_frame();
     }
 
-    /// Before the first frame: waits briefly for the active highlight so the tabs and the
-    /// editor appear together with the chrome. On a miss the normal wait continues unchanged.
-    fn startup_editor_grace(&mut self) {
+    /// Before the first frame: a highlight already computed during window/GL creation is taken
+    /// now, so the first frame has the tabs. Otherwise the first frame is the chrome alone and
+    /// the tabs follow no sooner than `STARTUP_EDITOR_REVEAL_DELAY` after it.
+    fn startup_editor_before_first_frame(&mut self) {
         if self.startup_editor_pending.is_none() {
             return;
         }
-        let started = std::time::Instant::now();
+        // Takes a queued result without waiting for one still being computed.
         let version = self.editor.version;
-        if self.highlighter.wait_for_first_result(version, STARTUP_EDITOR_GRACE) {
+        if self.highlighter.wait_for_first_result(version, std::time::Duration::from_millis(1)) {
             self.apply_highlight_results();
             if self.startup_editor_ready() {
                 self.clear_startup_editor_wait();
+                return;
             }
         }
-        self.startup_trace
-            .mark(&format!("editor-grace {:.1}ms", started.elapsed().as_secs_f64() * 1000.0));
+        self.startup_editor_reveal_at =
+            Some(std::time::Instant::now() + STARTUP_EDITOR_REVEAL_DELAY);
+        self.startup_trace.mark("editor-hidden");
     }
 
     /// Before the window exists: reads the saved tab list and the active file and sends its
@@ -654,6 +657,9 @@ impl App {
             }
             self.highlight_current_version_sync();
         }
+        if self.startup_editor_reveal_at.is_some_and(|at| std::time::Instant::now() < at) {
+            return false;
+        }
         self.clear_startup_editor_wait();
         true
     }
@@ -675,6 +681,7 @@ impl App {
 
     fn clear_startup_editor_wait(&mut self) {
         self.startup_editor_pending = None;
+        self.startup_editor_reveal_at = None;
         self.startup_trace.mark("editor-shown");
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
