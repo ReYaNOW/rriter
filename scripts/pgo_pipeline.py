@@ -35,10 +35,12 @@ from pgo_coverage import (
     check_markers,
     count_pgo_warnings,
     demangled_functions,
+    check_new_raw_profiles,
     find_cxxfilt,
     format_coverage,
     module_summary,
     unrequired_groups,
+    verify_raw_profiles,
     zero_modules,
 )
 from pgo_fixtures import (  # noqa: F401  (re-exported for tests and self-test)
@@ -231,6 +233,8 @@ class PgoConfig:
 
 
 STDERR_TAIL_LINES = 30
+# The marker is printed by RRiter to stdout, which the pipeline does not capture.
+STEP_HINT = "inspect the last PGO_AUTOMATION_STEP_START line in the output above (none: it failed before step 0)"
 
 
 def _start_stderr_pump(stream: IO[str] | None, lines: collections.deque[str]) -> threading.Thread:
@@ -892,8 +896,11 @@ def run_scenario(
     report_path: Path,
     *,
     profile_dir: Path | None = None,
+    check_raw: bool = False,
 ) -> dict[str, object]:
     print(f"[rriter-pgo] scenario {name}", flush=True)
+    raw_dir = paths.profile_dir if profile_dir is None else profile_dir
+    raw_before = set(raw_dir.glob("*.profraw"))
     result = runner.run_process_tree(
         training_command(config, paths, executable, name, report_path),
         cwd=paths.fixture_dir,
@@ -913,24 +920,19 @@ def run_scenario(
             else:
                 message += "; " + automation_failure_message(report, report_path)
         elif report_error is not None:
-            message += (
-                f"; structured automation report is invalid: {report_error}; "
-                "inspect the last PGO_AUTOMATION_STEP_START printed above"
-            )
+            message += f"; structured automation report is invalid: {report_error}; {STEP_HINT}"
         else:
-            message += (
-                f"; structured automation report is absent: {report_path}; "
-                "inspect the last PGO_AUTOMATION_STEP_START printed above"
-            )
+            message += f"; structured automation report is absent: {report_path}; {STEP_HINT}"
         tail = _stderr_tail(result)
         if tail:
             message += f"\nlast {STDERR_TAIL_LINES} stderr lines:\n{tail}"
         raise PgoError(message)
+    if check_raw:
+        check_new_raw_profiles(raw_dir, raw_before, name)
     if report_error is None and report is None:
         raise PgoError(
             f"{where}RRiter exited with code 0 before writing the structured automation report; "
-            "inspect the last PGO_AUTOMATION_STEP_START printed above: "
-            f"{report_path}"
+            f"{STEP_HINT}: {report_path}"
         )
     if report_error is not None or report is None:
         raise PgoError(f"{where}invalid automation report: {report_error}") from report_error
@@ -970,11 +972,13 @@ def run_training(
     runner: Runner,
     *,
     profile_dir: Path | None = None,
+    check_raw: bool = False,
 ) -> dict[str, object]:
     """Run every active scenario in order against one set of fixtures.
 
     The result is the `full` report when it ran (else the last one), with the skipped groups
     of all scenarios merged in `skipped_groups` and the report files in `report_files`.
+    `check_raw` requires every run to leave its own .profraw (instrumented binaries only).
     """
 
     names = active_scenarios(config)
@@ -984,7 +988,7 @@ def run_training(
         for name in names:
             reports[name] = run_scenario(
                 config, paths, executable, runner, fixtures, name,
-                report_path_for(paths, name), profile_dir=profile_dir,
+                report_path_for(paths, name), profile_dir=profile_dir, check_raw=check_raw,
             )
     finally:
         fixtures.stop()
@@ -1019,7 +1023,11 @@ def existing_run_executable(config: PgoConfig, paths: PgoPaths) -> Path:
             f"run `{rebuild_command}` before `make pgo-script`"
         )
     automation_sources = [
-        *sorted((paths.root / "src" / "app").glob("automation*.rs")),
+        *sorted(
+            source
+            for source in (paths.root / "src" / "app").glob("automation*.rs")
+            if not source.stem.endswith("_tests")
+        ),
         *sorted((paths.root / "src" / "headless").glob("*.rs")),
     ]
     stale_source = next(
@@ -1043,18 +1051,6 @@ def llvm_profdata_command(
     *arguments: str | os.PathLike[str],
 ) -> list[str | os.PathLike[str]]:
     return ["rustup", "run", "nightly", "llvm-profdata", *arguments]
-
-
-def verify_raw_profiles(paths: PgoPaths) -> list[Path]:
-    """Every .profraw must be non-empty: an empty one is a process that died before its dump."""
-
-    every = sorted(path for path in paths.profile_dir.glob("*.profraw") if path.is_file())
-    if not every:
-        raise PgoError(f"no .profraw files were created in {paths.profile_dir}")
-    empty = [path.name for path in every if path.stat().st_size == 0]
-    if empty:
-        raise PgoError(f"empty .profraw files in {paths.profile_dir}: {', '.join(empty)}")
-    return every
 
 
 def install_binary(source: Path, destination: Path) -> None:
@@ -1123,7 +1119,7 @@ def log_pgo_warnings(build_log: str) -> None:
 
 
 def merge_profiles(config: PgoConfig, paths: PgoPaths, runner: Runner) -> list[Path]:
-    profiles = verify_raw_profiles(paths)
+    profiles = verify_raw_profiles(paths.profile_dir)
     paths.merged_profile.parent.mkdir(parents=True, exist_ok=True)
     runner.run(
         llvm_profdata_command(
@@ -1300,7 +1296,7 @@ def run_pipeline(config: PgoConfig, *, runner: Runner | None = None) -> Path | N
         paths.profile_dir.mkdir(parents=True, exist_ok=True)
         create_fixture(paths)
         executable = build_instrumented(config, paths, runner)
-        report = run_training(config, paths, executable, runner)
+        report = run_training(config, paths, executable, runner, check_raw=True)
         profiles = merge_profiles(config, paths, runner)
         if cxxfilt is not None:
             check_profile_coverage(config, paths, runner, cxxfilt, report)

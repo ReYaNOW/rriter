@@ -237,8 +237,11 @@ arguments, workspace). The report JSON carries `status`, `scenario`, `scenario_v
 Scenarios (`--pgo-scenario`): `full` (all groups, saves the session on exit), `startup`
 (restores that session), `welcome` (welcome screen), `smoke`, and `group:<name>` for iterating on
 one group (`pdf`, `api_mock`, `git_changes`, `editor_ops`, `lsp_nav`, `input_scroll`,
-`terminal_ops`), e.g. `make pgo-script` or the focused test
-`make test TEST_FILTER=headless::ui_tests_pgo`.
+`terminal_ops`). `make pgo-script` always runs the default list (`full,startup,welcome`); to run
+one group through the script use
+`python3 scripts/pgo_pipeline.py --run-only --run-executable <binary> --scenarios group:<name>`
+(`--scenarios` accepts `group:<name>` on Linux and is ignored on other hosts). The focused test
+is `make test TEST_FILTER=headless::ui_tests_pgo`.
 
 A group whose external tool is missing (`requires` returns `Err`, e.g. `pdf` without pdfium) is
 skipped and listed in `skipped_groups`; the run still succeeds. The pipeline treats a skipped

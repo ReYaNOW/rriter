@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 
@@ -34,7 +35,7 @@ GROUP_MARKERS: dict[str, list[str]] = {
     "lsp_nav": ["jump_to_definition_target", "parse_definition_target"],
     "input_scroll": ["app::mouse::drag_scrollbar", "apply_scrollbar_drag_target", "move_page_down"],
     "terminal_ops": ["close_terminal_tab_at", "update_terminal_search"],
-    "startup": ["preload_ide_session"],
+    "startup": ["state_persistence::load_open_tabs"],
     "welcome": ["draw_welcome", "get_welcome_buttons"],
     "markdown": ["refresh_read_model", "scroll_markdown_read"],
     "database": ["execute_simple_query", "rollback_database_table_transaction"],
@@ -42,9 +43,12 @@ GROUP_MARKERS: dict[str, list[str]] = {
     "git_graph": ["ensure_git_graph_loaded", "apply_git_graph_lanes"],
     "terminal": ["TerminalProcess::write_input"],
     "settings": ["save_current_config"],
-    "project_search": ["stream_project_search", "run_project_search"],
+    "project_search": ["stream_project_search", "run_project_search_roots"],
 }
 _SCENARIO_ONLY = {"startup", "welcome"}
+
+# Markers are matched against names with `<` and `>` removed, so the v0 form of an inherent
+# method, `<rriter::terminal::TerminalProcess>::write_input`, matches `TerminalProcess::write_input`.
 
 # Modules whose functions missing from the profile are listed separately in the log.
 HOT_MODULES = ("render_view", "renderer", "editor", "highlighter", "scroll", "app::mouse", "app::keyboard")
@@ -157,7 +161,7 @@ def module_of(demangled: str) -> str:
     """
 
     # Internal-linkage functions are profiled as `<cgu name>;<symbol>`; drop the file prefix.
-    text = re.sub(r"^[^;]*;", "", demangled.strip(), count=1).strip()
+    text = strip_cgu_prefix(demangled.strip()).strip()
     if not text or text.startswith(("_R", "_Z", "$")):
         return OTHER_MODULE
     from_type = text.startswith("<")
@@ -222,6 +226,10 @@ def unrequired_groups(scenarios: Sequence[str]) -> set[str]:
     return set(GROUP_MARKERS) - required
 
 
+def _plain(name: str) -> str:
+    return name.replace("<", "").replace(">", "")
+
+
 def check_markers(
     functions: Sequence[FunctionProfile],
     markers: Mapping[str, Sequence[str]],
@@ -235,7 +243,7 @@ def check_markers(
         if group in skip:
             continue
         for marker in substrings:
-            matching = [function for function in functions if marker in function.name]
+            matching = [function for function in functions if marker in _plain(function.name)]
             if not matching:
                 problems.append(f"{group}: {marker} (not in the profile)")
             elif not any(function.count > 0 for function in matching):
@@ -243,9 +251,38 @@ def check_markers(
     return problems
 
 
-def _legacy_path(name: str) -> str:
-    """Itanium/legacy Rust mangled name -> `a::b::c`; other names come back unchanged."""
+_V0_SKIP = re.compile(r"[sB][0-9a-zA-Z]*_")
 
+
+def _v0_path(name: str) -> str:
+    """v0 (`_R…`) mangled name -> `a::b::c`, read from its length-prefixed identifiers.
+
+    Disambiguators (`s<base62>_`) and back-references (`B<base62>_`) are skipped; generic
+    arguments are not decoded. This is a heuristic for the hot-module match only.
+    """
+
+    index, parts = 2, []
+    while index < len(name):
+        skip = _V0_SKIP.match(name, index)
+        if skip:
+            index = skip.end()
+        elif name[index].isdigit():
+            end = index
+            while end < len(name) and name[end].isdigit():
+                end += 1
+            start = end + 1 if name[end:end + 1] == "_" else end
+            parts.append(name[start:start + int(name[index:end])])
+            index = start + int(name[index:end])
+        else:
+            index += 1
+    return "::".join(parts)
+
+
+def _legacy_path(name: str) -> str:
+    """Itanium/legacy or v0 Rust mangled name -> `a::b::c`; other names come back unchanged."""
+
+    if name.startswith("_RN"):
+        return _v0_path(name)
     if not name.startswith("_ZN"):
         return name
     index, parts = 3, []
@@ -312,7 +349,38 @@ def demangle(names: Sequence[str], cxxfilt: str) -> list[str]:
     return lines
 
 
+def strip_cgu_prefix(name: str) -> str:
+    """Internal-linkage functions are profiled as `<cgu name>;<symbol>`; keep the symbol."""
+
+    return re.sub(r"^[^;]*;", "", name, count=1)
+
+
 def demangled_functions(show_text: str, cxxfilt: str) -> list[FunctionProfile]:
     functions = parse_profdata_show(show_text)
-    names = demangle([function.name for function in functions], cxxfilt)
+    # llvm-cxxfilt leaves `<cgu>;_RN…` whole, so the prefix must go before demangling.
+    names = demangle([strip_cgu_prefix(function.name) for function in functions], cxxfilt)
     return [FunctionProfile(name, function.count) for name, function in zip(names, functions)]
+
+
+def verify_raw_profiles(directory: Path) -> list[Path]:
+    """Every .profraw must be non-empty: an empty one is a process that died before its dump."""
+
+    every = sorted(path for path in directory.glob("*.profraw") if path.is_file())
+    if not every:
+        raise PgoError(f"no .profraw files were created in {directory}")
+    empty = [path.name for path in every if path.stat().st_size == 0]
+    if empty:
+        raise PgoError(f"empty .profraw files in {directory}: {', '.join(empty)}")
+    return every
+
+
+def check_new_raw_profiles(directory: Path, before: Iterable[Path], scenario: str) -> None:
+    """The run must have left its own non-empty .profraw beside the `before` snapshot."""
+
+    known = set(before)
+    fresh = [path for path in directory.glob("*.profraw") if path.is_file() and path not in known]
+    if not fresh:
+        raise PgoError(f"scenario {scenario}: the run wrote no new .profraw in {directory}")
+    empty = sorted(path.name for path in fresh if path.stat().st_size == 0)
+    if empty:
+        raise PgoError(f"scenario {scenario}: empty .profraw in {directory}: {', '.join(empty)}")

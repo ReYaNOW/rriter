@@ -72,6 +72,19 @@ class ProfdataParsingTests(unittest.TestCase):
         )
         self.assertEqual(pgo_coverage.module_of("rriter.abc-cgu.03;_ZN4fake"), pgo_coverage.OTHER_MODULE)
 
+    def test_demangled_functions_strips_the_cgu_prefix_before_demangling(self) -> None:
+        show = "  rriter.abc-cgu.03;_RNvCs1_6rriter4work:\n    Hash: 0x1\n    Block counts: [5]\n"
+        seen: list[list[str]] = []
+
+        def fake_demangle(names, cxxfilt):
+            seen.append(list(names))
+            return ["rriter::work"]
+
+        with mock.patch.object(pgo_coverage, "demangle", fake_demangle):
+            functions = pgo_coverage.demangled_functions(show, "llvm-cxxfilt")
+        self.assertEqual(seen, [["_RNvCs1_6rriter4work"]])
+        self.assertEqual(functions, [FunctionProfile("rriter::work", 5)])
+
     def test_garbage_output_yields_no_functions_and_never_raises(self) -> None:
         for text in ("", "\x00\x01 garbage\n::::\n", "error: no profile\n", "Counters:\n  :\n  \n"):
             self.assertEqual(pgo_coverage.parse_profdata_show(text), [], text)
@@ -143,6 +156,18 @@ class MarkerTests(unittest.TestCase):
     def test_skipped_group_is_not_required(self) -> None:
         self.assertEqual(pgo_coverage.check_markers([], self.markers, {"pdf", "api_mock"}), [])
 
+    def test_markers_match_v0_demangled_inherent_methods(self) -> None:
+        functions = [FunctionProfile("<rriter::terminal::TerminalProcess>::write_input", 3)]
+        markers = {"terminal": pgo_coverage.GROUP_MARKERS["terminal"]}
+        self.assertEqual(pgo_coverage.check_markers(functions, markers, set()), [])
+        functions = [FunctionProfile("<rriter::terminal::TerminalProcess>::write_input", 0)]
+        self.assertEqual(len(pgo_coverage.check_markers(functions, markers, set())), 1)
+
+    def test_startup_and_project_search_markers_name_production_functions(self) -> None:
+        self.assertEqual(pgo_coverage.GROUP_MARKERS["startup"], ["state_persistence::load_open_tabs"])
+        self.assertNotIn("run_project_search", pgo_coverage.GROUP_MARKERS["project_search"])
+        self.assertIn("run_project_search_roots", pgo_coverage.GROUP_MARKERS["project_search"])
+
     def test_shipped_markers_cover_every_full_group_and_both_extra_scenarios(self) -> None:
         for group in (
             "pdf", "api_mock", "git_changes", "editor_ops", "lsp_nav", "input_scroll",
@@ -181,6 +206,22 @@ class WarningTests(unittest.TestCase):
         self.assertIn("mouse", joined)
         self.assertIn("editor", joined)
         self.assertNotIn("cold", joined)
+
+    def test_v0_mangled_and_demangled_names_count_as_hot(self) -> None:
+        log = (
+            "warning: no profile data available for function _RNvNtCs1a2B_6rriter11render_view4draw of module x\n"
+            "warning: no profile data available for function _RNvNtNtCs1a2B_6rriter3app5mouse7handlerB4_ of module x\n"
+            "warning: no profile data available for function _RNvMs_NtCs1a2B_6rriter6editorNtB4_6Editor6insert of module x\n"
+            "warning: no profile data available for function _RNvNtCs1a2B_6rriter5other4cold of module x\n"
+            "warning: no profile data available for function <rriter::render_view::Frame>::paint of module x\n"
+        )
+        warnings = pgo_coverage.count_pgo_warnings(log)
+        self.assertEqual(warnings.missing, 5)
+        self.assertEqual(len(warnings.hot), 4)
+        self.assertNotIn("_RNvNtCs1a2B_6rriter5other4cold", warnings.hot)
+        self.assertEqual(
+            pgo_coverage._legacy_path("_RNvNtCs1a2B_6rriter11render_view4draw"), "rriter::render_view::draw"
+        )
 
     def test_empty_and_garbage_logs(self) -> None:
         for text in ("", "nothing relevant\n\x00"):
@@ -359,14 +400,14 @@ class RunTrainingFlowTests(unittest.TestCase):
         database.telemetry.return_value = full_database_telemetry()
         return config, paths, database
 
-    def run_flow(self, config, paths, database, runner):
+    def run_flow(self, config, paths, database, runner, **training_options):
         api = FakeApi()
         with (
             mock.patch.object(pgo_pipeline.LocalApiServer, "start", return_value=api),
             mock.patch.object(pgo_pipeline, "LocalPostgresFixture", return_value=database),
         ):
             try:
-                return pgo_pipeline.run_training(config, paths, Path("/bin/rriter"), runner), api
+                return pgo_pipeline.run_training(config, paths, Path("/bin/rriter"), runner, **training_options), api
             finally:
                 self.assertTrue(api.stopped)
                 database.stop.assert_called_once_with()
@@ -484,7 +525,43 @@ class RawProfileTests(unittest.TestCase):
             (paths.profile_dir / "rriter-1-2.profraw").write_bytes(b"data")
             (paths.profile_dir / "rriter-3-4.profraw").write_bytes(b"")
             with self.assertRaisesRegex(pgo_pipeline.PgoError, "rriter-3-4.profraw"):
-                pgo_pipeline.verify_raw_profiles(paths)
+                pgo_coverage.verify_raw_profiles(paths.profile_dir)
+
+
+class PerRunRawProfileTests(unittest.TestCase):
+    def test_each_run_must_leave_its_own_non_empty_profraw(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "old.profraw").write_bytes(b"data")
+            before = {root / "old.profraw"}
+            with self.assertRaisesRegex(pgo_coverage.PgoError, "scenario startup: .*no new"):
+                pgo_coverage.check_new_raw_profiles(root, before, "startup")
+            (root / "new.profraw").write_bytes(b"")
+            with self.assertRaisesRegex(pgo_coverage.PgoError, "empty .*new.profraw"):
+                pgo_coverage.check_new_raw_profiles(root, before, "startup")
+            (root / "new.profraw").write_bytes(b"data")
+            pgo_coverage.check_new_raw_profiles(root, before, "startup")
+
+    def test_training_with_check_raw_fails_when_a_later_scenario_writes_no_profile(self) -> None:
+        flow = RunTrainingFlowTests()
+        with tempfile.TemporaryDirectory() as directory:
+            config, paths, database = flow.prepare(directory, scenarios=("full", "startup"))
+            paths.profile_dir.mkdir(parents=True)
+
+            class Runner:
+                def run_process_tree(self, command, **kwargs):
+                    argv = [str(part) for part in command]
+                    name = argv[argv.index("--pgo-scenario") + 1]
+                    if name == "full":
+                        (paths.profile_dir / "rriter-1-1.profraw").write_bytes(b"data")
+                    Path(argv[argv.index("--pgo-report") + 1]).write_text(
+                        json.dumps({"status": "success", "scenario_version": pgo_pipeline.SCENARIO_VERSION}),
+                        encoding="utf-8",
+                    )
+                    return mock.Mock(returncode=0, stderr="")
+
+            with self.assertRaisesRegex(pgo_pipeline.PgoError, "scenario startup: .*no new"):
+                flow.run_flow(config, paths, database, Runner(), check_raw=True)
 
 
 class InstallBinaryTests(unittest.TestCase):

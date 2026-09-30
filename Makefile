@@ -272,15 +272,15 @@ pgo-gen:
 	@echo "✅ Инструментированный RRiter: $(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)"
 
 pgo-run: pdfium
-	@echo "🏃 Headless-тренировка инструментированного RRiter (сценарий full)."
-	@mkdir -p "$(PGO_TRAINING_DIR)/manual-workspace" "$(PGO_TRAINING_DIR)/manual-profile"
-	LLVM_PROFILE_FILE="$(PROF_DIR)/manual_%p_%m.profraw" \
-	RRITER_PDFIUM_PATH="$$(cat target/pdfium.path)" \
-		"$(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)" \
-		--headless --pgo-train --pgo-scenario full \
-		--pgo-workspace "$(PGO_TRAINING_DIR)/manual-workspace" \
-		--pgo-report "$(PGO_TRAINING_DIR)/manual-report.json" \
-		--profile "$(PGO_TRAINING_DIR)/manual-profile"
+	@echo "🏃 Тренировка инструментированного RRiter через pipeline (фикстуры, БД, API; без merge и сборки)."
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--run-only \
+		--run-executable "$(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)" \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)"
+	@mkdir -p "$(PROF_DIR)"
+	rm -f "$(PROF_DIR)"/*.profraw
+	cp "$(PGO_TRAINING_DIR)"/script-profiles/*.profraw "$(PROF_DIR)/"
 
 pgo-merge:
 	@echo "🔗 Слияние профилей..."
