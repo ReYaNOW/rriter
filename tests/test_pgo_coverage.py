@@ -20,23 +20,21 @@ import pgo_pipeline
 import postgres_fixture
 from pgo_coverage import FunctionProfile
 
-# Shape of `llvm-profdata show --all-functions --counts` from the LLVM documentation.
+# Shape of `llvm-profdata show --all-functions --counts` for an IR profile (LLVM 22): no
+# `Function count:` line, only `Block counts:`; internal-linkage names carry a `<cgu>;` prefix.
 SHOW_FRAGMENT = """\
 Counters:
   _ZN6rriter3app8git_diff15build_diff_view17h0123456789abcdefE:
     Hash: 0x0a2b1c3d4e5f6071
     Counters: 3
-    Function count: 12
-    Block counts: [0, 7, 0]
+    Block counts: [12, 7, 0]
   _ZN6rriter3pdf6worker17search_one_page17hfedcba9876543210E:
     Hash: 0x1111222233334444
     Counters: 2
-    Function count: 0
     Block counts: [0, 0]
   main:
     Hash: 0x0000000000000001
     Counters: 1
-    Function count: 1
     Block counts: [1]
 Instrumentation level: IR  entry_first = 0
 Functions shown: 3
@@ -56,8 +54,23 @@ class ProfdataParsingTests(unittest.TestCase):
         self.assertEqual(by_name["_ZN6rriter3pdf6worker17search_one_page17hfedcba9876543210E"], 0)
 
     def test_block_counts_alone_mark_a_function_as_executed(self) -> None:
-        text = "  f:\n    Function count: 0\n    Block counts: [0, 4]\n"
+        text = "  f:\n    Hash: 0x1\n    Counters: 2\n    Block counts: [0, 4]\n"
         self.assertEqual(pgo_coverage.parse_profdata_show(text), [FunctionProfile("f", 4)])
+
+    def test_older_output_with_a_function_count_line_is_still_read(self) -> None:
+        text = "  f:\n    Function count: 6\n    Block counts: [0, 4]\n"
+        self.assertEqual(pgo_coverage.parse_profdata_show(text), [FunctionProfile("f", 6)])
+
+    def test_module_of_ignores_the_internal_linkage_cgu_prefix(self) -> None:
+        self.assertEqual(
+            pgo_coverage.module_of("rriter.abc-cgu.03;rriter::app::git_diff::build_diff_view"),
+            "rriter::app::git_diff",
+        )
+        self.assertEqual(
+            pgo_coverage.module_of("rriter.abc-cgu.03;<rriter::pdf::worker::Worker>::run"),
+            "rriter::pdf::worker",
+        )
+        self.assertEqual(pgo_coverage.module_of("rriter.abc-cgu.03;_ZN4fake"), pgo_coverage.OTHER_MODULE)
 
     def test_garbage_output_yields_no_functions_and_never_raises(self) -> None:
         for text in ("", "\x00\x01 garbage\n::::\n", "error: no profile\n", "Counters:\n  :\n  \n"):
@@ -271,6 +284,22 @@ class TrainingCommandTests(unittest.TestCase):
             self.assertNotIn("--headless", argv)
             self.assertNotIn("--pgo-scenario", argv)
             self.assertEqual(pgo_pipeline.active_scenarios(config, host="win32"), ("full",))
+
+
+class SkippedPdfGroupTests(unittest.TestCase):
+    def test_skipped_pdf_group_is_an_error_on_linux_only(self) -> None:
+        report = {"skipped_groups": [{"group": "pdf", "reason": "pdfium not found"}]}
+        with self.assertRaises(pgo_pipeline.PgoError) as raised:
+            pgo_pipeline.reject_skipped_pdf_group(report, "full", host="linux")
+        self.assertIn("pdfium", str(raised.exception))
+        self.assertIn("full", str(raised.exception))
+        pgo_pipeline.reject_skipped_pdf_group(report, "full", host="win32")
+
+    def test_other_skipped_groups_and_empty_reports_are_fine_on_linux(self) -> None:
+        pgo_pipeline.reject_skipped_pdf_group({}, "full", host="linux")
+        pgo_pipeline.reject_skipped_pdf_group({"skipped_groups": None}, "full", host="linux")
+        other = {"skipped_groups": [{"group": "lsp_nav", "reason": "ty not found"}]}
+        pgo_pipeline.reject_skipped_pdf_group(other, "full", host="linux")
 
 
 class ScenarioOrderTests(unittest.TestCase):

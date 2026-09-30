@@ -6,11 +6,25 @@ use std::path::Path;
 use crate::app::App;
 use crate::app::automation::{AutomationButton, AutomationStep, AutomationTarget};
 use crate::app::pdf_tab::PdfPhase;
+use crate::pdf::library::LocateResult;
 use crate::ui_system::UiId;
 
 const WHEEL_STEPS: usize = 20;
 /// Frames the viewer gets to re-rasterize after a dark-page toggle.
 const RERASTER_FRAMES: u16 = 20;
+
+/// pdfium must be locatable the way the viewer locates it (override env, exe dir, managed dir);
+/// the headless Linux pipeline provides it, GUI runs on other hosts may not have it.
+pub(super) fn requires(_app: &App) -> Result<(), String> {
+    requires_with(crate::pdf::library::locate())
+}
+
+fn requires_with(located: LocateResult) -> Result<(), String> {
+    match located {
+        LocateResult::Found(_) => Ok(()),
+        LocateResult::NotInstalled | LocateResult::Missing { .. } => Err("pdfium not found".to_string()),
+    }
+}
 
 fn write_and_open(app: &mut App, workspace: &Path) -> Result<(), String> {
     let dir = workspace.join("pgo_pdf");
@@ -62,4 +76,20 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
         S::WaitUntil { what: "pdf search done", check: search_found_both_matches, timeout_ms: 10_000 },
     ]);
     steps
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn missing_pdfium_skips_the_group_with_a_reason() {
+        let missing = Err("pdfium not found".to_string());
+        assert_eq!(requires_with(LocateResult::NotInstalled), missing);
+        let bad_path = LocateResult::Missing { message: "x".to_string(), installable: false };
+        assert_eq!(requires_with(bad_path), missing);
+        assert_eq!(requires_with(LocateResult::Found(PathBuf::from("/lib/pdfium.so"))), Ok(()));
+    }
 }

@@ -22,6 +22,10 @@ OTHER_MODULE = "<other>"
 
 # Substrings of demangled function names that run only on the path of one scenario part.
 # A marker with a zero count (or no entry at all) means the group did not reach its code.
+# A marker must be reached only on its own group's path. `move_page_down` (editor PageDown; the
+# pdf viewer handles PageDown itself), `update_terminal_search` (every caller is terminal search,
+# which only `terminal_ops` opens) and `draw_welcome` (headless enters the IDE before the first
+# frame of every scenario but `welcome`) are shared functions that qualify for that reason.
 GROUP_MARKERS: dict[str, list[str]] = {
     "pdf": ["pdf::worker::search_one_page", "pdf::pdfium_backend::render"],
     "api_mock": ["api_mock::server::run_server_thread", "api_mock::server::request_to_mock"],
@@ -152,7 +156,8 @@ def module_of(demangled: str) -> str:
     and generic arguments to the enclosing function's module.
     """
 
-    text = demangled.strip()
+    # Internal-linkage functions are profiled as `<cgu name>;<symbol>`; drop the file prefix.
+    text = re.sub(r"^[^;]*;", "", demangled.strip(), count=1).strip()
     if not text or text.startswith(("_R", "_Z", "$")):
         return OTHER_MODULE
     from_type = text.startswith("<")

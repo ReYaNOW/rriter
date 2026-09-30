@@ -340,7 +340,8 @@ class Runner:
         lines: collections.deque[str] = collections.deque()
         pump = _start_stderr_pump(process.stderr, lines)
         return_code = process.wait()
-        pump.join()
+        # A daemon that inherited stderr keeps the pipe open; do not wait for EOF forever.
+        pump.join(timeout=5)
         if return_code != 0:
             raise subprocess.CalledProcessError(return_code, arguments)
         return "".join(lines)
@@ -866,6 +867,21 @@ def _stderr_tail(result: object) -> str:
     return "".join(text.splitlines(keepends=True)[-STDERR_TAIL_LINES:]) if isinstance(text, str) else ""
 
 
+def reject_skipped_pdf_group(
+    report: Mapping[str, object], scenario: str, *, host: str | None = None
+) -> None:
+    """On Linux pdfium is a preflight requirement, so a skipped `pdf` group is a setup error."""
+
+    if not (sys.platform if host is None else host).startswith("linux"):
+        return
+    for item in report.get("skipped_groups") or []:
+        if isinstance(item, dict) and item.get("group") == "pdf":
+            raise PgoError(
+                f"scenario {scenario}: the pdf group was skipped ({item.get('reason')}); pdfium is "
+                "a required Linux dependency of headless PGO (check RRITER_PDFIUM_PATH, `make pdfium`)"
+            )
+
+
 def run_scenario(
     config: PgoConfig,
     paths: PgoPaths,
@@ -929,6 +945,7 @@ def run_scenario(
                 f"{skipped.get('group')}: {skipped.get('reason')}",
                 flush=True,
             )
+    reject_skipped_pdf_group(report, name)
     if name == "full":
         telemetry = fixtures.database.telemetry()
         validate_database_fixture_telemetry(telemetry)

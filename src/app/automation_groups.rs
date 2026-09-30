@@ -74,7 +74,11 @@ fn lookup(
     workspace: &Path,
 ) -> Option<(&'static str, Requires, Vec<AutomationStep>)> {
     match name {
-        "pdf" => Some(("pdf", None, super::automation_pdf::steps(workspace))),
+        "pdf" => Some((
+            "pdf",
+            Some(super::automation_pdf::requires),
+            super::automation_pdf::steps(workspace),
+        )),
         "api_mock" => Some(("api_mock", None, super::automation_api_mock::steps(workspace))),
         "git_changes" => {
             Some(("git_changes", None, super::automation_git_changes::steps(workspace)))
