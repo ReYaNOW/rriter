@@ -910,6 +910,7 @@ class PgoPipelineTests(unittest.TestCase):
                 root=root,
                 target="x86_64-unknown-linux-gnu",
                 timeout_seconds=30,
+                scenarios=("full",),
             )
             paths = pgo_pipeline.paths_for(config)
             paths.fixture_dir.mkdir(parents=True)
@@ -1034,6 +1035,7 @@ class PgoPipelineTests(unittest.TestCase):
                 root=root,
                 target="x86_64-unknown-linux-gnu",
                 timeout_seconds=30,
+                scenarios=("full",),
             )
             paths = pgo_pipeline.paths_for(config)
             paths.fixture_dir.mkdir(parents=True)
@@ -1101,6 +1103,7 @@ class PgoPipelineTests(unittest.TestCase):
                 root=root,
                 target="x86_64-unknown-linux-gnu",
                 timeout_seconds=30,
+                scenarios=("full",),
             )
             paths = pgo_pipeline.paths_for(config)
             paths.fixture_dir.mkdir(parents=True)
@@ -1149,6 +1152,7 @@ class PgoPipelineTests(unittest.TestCase):
                 root=root,
                 target="x86_64-unknown-linux-gnu",
                 timeout_seconds=30,
+                scenarios=("full",),
             )
             paths = pgo_pipeline.paths_for(config)
             paths.fixture_dir.mkdir(parents=True)

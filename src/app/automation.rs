@@ -12,7 +12,7 @@ use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult
 use crate::app::automation_markdown::{MarkdownAutomationStep, MarkdownStepResult};
 use crate::app::{App, PanelId};
 
-pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 17;
+pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 18;
 
 const TIMED_SCROLL_HZ: f32 = 120.0;
 const TIMED_SCROLL_PAUSE_SECS: f32 = 2.0;
