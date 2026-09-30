@@ -249,6 +249,25 @@ impl App {
         }
         self.run_ide_on_startup = false;
         self.enter_ide_mode_deferred();
+        self.startup_editor_grace();
+    }
+
+    /// Before the first frame: waits briefly for the active highlight so the tabs and the
+    /// editor appear together with the chrome. On a miss the normal wait continues unchanged.
+    fn startup_editor_grace(&mut self) {
+        if self.startup_editor_pending.is_none() {
+            return;
+        }
+        let started = std::time::Instant::now();
+        let version = self.editor.version;
+        if self.highlighter.wait_for_first_result(version, STARTUP_EDITOR_GRACE) {
+            self.apply_highlight_results();
+            if self.startup_editor_ready() {
+                self.clear_startup_editor_wait();
+            }
+        }
+        self.startup_trace
+            .mark(&format!("editor-grace {:.1}ms", started.elapsed().as_secs_f64() * 1000.0));
     }
 
     /// Before the window exists: reads the saved tab list and the active file and sends its

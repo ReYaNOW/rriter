@@ -62,6 +62,9 @@ const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::fr
 // highlight (`begin_startup_editor_wait`).
 pub(crate) const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(1200);
+// `--ide` startup: how long the first frame waits for the active highlight (hides the
+// tabs-appear-a-frame-later flicker when highlighting lands shortly after GL).
+pub(crate) const STARTUP_EDITOR_GRACE: std::time::Duration = std::time::Duration::from_millis(70);
 const FILE_OPEN_BLOCKING_HIGHLIGHT_MAX_BYTES: usize = TREE_SITTER_HIGHLIGHT_MAX_BYTES;
 
 fn apply_initial_import_folds(editor: &mut Editor, ext: &str, text: &str) {
