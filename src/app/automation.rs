@@ -559,6 +559,13 @@ impl AutomationController {
         &self.options.scenario
     }
 
+    /// Whether the exit path may write the user's tab list: only a headless run of a
+    /// session-leaving scenario that succeeded. The GUI `--pgo-train` run (also `Full`)
+    /// must never touch the real `tabs_ide.txt`, and a failed run must not leave a partial one.
+    pub fn saves_session_now(&self, headless: bool) -> bool {
+        headless && self.options.scenario.saves_session_on_exit() && self.outcome() == Some(Ok(()))
+    }
+
     /// Ticks seen so far (one per frame in the headless runner).
     pub fn frames(&self) -> u64 {
         self.frames

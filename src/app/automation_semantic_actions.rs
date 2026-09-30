@@ -25,11 +25,12 @@ impl App {
             .is_some_and(|automation| automation.scenario().restores_session())
     }
 
-    /// Automation whose scenario leaves its session on exit (`full`); false without automation.
+    /// Exit-time session save allowed (see `AutomationController::saves_session_now`);
+    /// false without automation and in the GUI.
     pub(crate) fn automation_saves_session(&self) -> bool {
         self.automation
             .as_ref()
-            .is_some_and(|automation| automation.scenario().saves_session_on_exit())
+            .is_some_and(|automation| automation.saves_session_now(self.headless_mode))
     }
 
     pub(crate) fn write_interrupted_automation_report(&mut self, reason: &str) {

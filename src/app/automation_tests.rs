@@ -1034,6 +1034,30 @@
     }
 
     #[test]
+    fn session_save_on_exit_needs_headless_full_and_success() {
+        let (mut ok, root) = scenario_controller("save-ok", PgoScenario::Full);
+        assert!(!ok.saves_session_now(true), "unfinished run");
+        assert_eq!(ok.finish_and_exit(), AutomationTick::Exit);
+        assert!(ok.saves_session_now(true));
+        assert!(!ok.saves_session_now(false), "GUI must not write the user's session");
+        let (mut failed, failed_root) = scenario_controller("save-failed", PgoScenario::Full);
+        failed.fail_and_exit(
+            "some-step".to_string(),
+            "boom".to_string(),
+            None,
+            Instant::now(),
+            AutomationFailureKind::Failed,
+        );
+        assert!(!failed.saves_session_now(true), "failed run");
+        let (mut smoke, smoke_root) = scenario_controller("save-smoke", PgoScenario::Smoke);
+        assert_eq!(smoke.finish_and_exit(), AutomationTick::Exit);
+        assert!(!smoke.saves_session_now(true), "non-Full scenario");
+        for dir in [root, failed_root, smoke_root] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn group_scenario_wraps_registered_group_between_wait_ready_and_finish() {
         let root = Path::new("/nonexistent");
         let steps = scenario_steps(&PgoScenario::Group("test_skip".to_string()), root).unwrap();
