@@ -109,7 +109,9 @@ impl Renderer {
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
         let sb_w = (48.0 * s).round();
-        let panel_x = sb_w + ide_panel.visible_left_width(s);
+        // The bottom panel spans the whole window right of the sidebar icons and overlays the
+        // left panel (matches the hit-test rects in `panel_scroll_rect` and `ResizeBottom`).
+        let panel_x = sb_w;
         let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
         let panel_w = (self.width - panel_x).max(0.0);
 
@@ -206,6 +208,7 @@ impl Renderer {
                     panel_x,
                     content_y,
                     panel_w,
+                    content_h,
                     content_h,
                     s,
                     ide_panel,

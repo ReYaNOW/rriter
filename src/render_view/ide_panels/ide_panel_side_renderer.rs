@@ -199,6 +199,7 @@ impl Renderer {
         panel_y: f32,
         panel_w: f32,
         panel_h: f32,
+        draw_h: f32,
         s: f32,
         ide_panel: &crate::app::IdePanelState,
         lsp: Option<&crate::lsp::LspManager>,
@@ -210,17 +211,21 @@ impl Renderer {
         if panel_w <= 0.0 || panel_h <= 0.0 {
             return;
         }
+        // `panel_h` is the interactive viewport (scrolling, scrollbar, hit rects: above the bottom
+        // panel). `draw_h` reaches down to the status bar so the rows stay painted under a
+        // translucent bottom panel (terminal/problems) and show through it.
+        let draw_h = draw_h.max(panel_h);
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         self.flush();
-        let scissor_y = (self.height - (panel_y + panel_h)).round().max(0.0) as i32;
+        let scissor_y = (self.height - (panel_y + draw_h)).round().max(0.0) as i32;
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
                 panel_x.round() as i32,
                 scissor_y,
                 panel_w.round().max(0.0) as i32,
-                panel_h.round().max(0.0) as i32,
+                draw_h.round().max(0.0) as i32,
             );
         }
         ui_registry.push_clip(crate::ui_system::UiClipRect::new(
@@ -265,7 +270,7 @@ impl Renderer {
         } else {
             let first_vis = (scroll / row_h).floor() as usize;
             let last_vis =
-                (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+                (((scroll + draw_h) / row_h).ceil() as usize + 1).min(total_nodes);
             let mut label_scratch = String::new();
 
             for i in first_vis..last_vis {
@@ -500,6 +505,7 @@ impl Renderer {
         panel_y: f32,
         panel_w: f32,
         panel_h: f32,
+        draw_h: f32,
         s: f32,
         ide_panel: &crate::app::IdePanelState,
         lsp: Option<&crate::lsp::LspManager>,
@@ -517,6 +523,7 @@ impl Renderer {
                 panel_y,
                 panel_w,
                 panel_h,
+                draw_h,
                 s,
                 ide_panel,
                 lsp,
@@ -987,12 +994,14 @@ impl Renderer {
                     0.0
                 };
                 let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                let draw_bottom = ide_bottom_panel_y(real_height, 0.0, s);
                 self.draw_ide_panel_content(
                     slot.id,
                     panel_x,
                     title_h,
                     panel_left_w,
                     (content_bottom - title_h).max(0.0),
+                    (draw_bottom - title_h).max(0.0),
                     s,
                     ide_panel,
                     lsp,

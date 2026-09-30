@@ -619,6 +619,52 @@ fn headless_bug_terminal_sidebar_slot_opens_panel() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The translucent terminal spans the window right of the sidebar icons and overlays the left
+/// panel; file tree rows lying under it stay painted and show through it.
+#[test]
+fn headless_terminal_overlays_left_panel_and_tree_rows_show_through() {
+    let dir = scratch_dir("ui-terminal-over-tree");
+    for i in 0..80 {
+        std::fs::write(dir.join(format!("zzzzzzzzzzzzzzzzzzzzzzzzzzzz_{i:02}.txt")), "x").unwrap();
+    }
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    let explorer_open = dump(&mut session)["ide_panel"]["open"]
+        .as_array()
+        .is_some_and(|panels| panels.iter().any(|panel| panel == "explorer"));
+    if !explorer_open {
+        click(&mut session, "SidebarSlot(Explorer)");
+    }
+    click(&mut session, "SidebarSlot(Terminal)");
+    wait_until(&mut session, 8000, "terminal body", |session| {
+        has_ui(&dump(session), "TerminalBody")
+    });
+    let state = dump(&mut session);
+    let [body_x, body_y, _, _] = crate::headless::tests_support::ui_rect(&state, "BottomPanelBody");
+    let scale = 1.0;
+    let sidebar_w = 48.0 * scale;
+    assert_eq!(body_x, sidebar_w, "terminal must overlay the left panel: {state}");
+
+    let shot = dir.join("terminal-over-tree.png");
+    run_script(&mut session, format!("mouse_move 0 0\nscreenshot {}\n", shot.display()).as_bytes());
+    let image = image::open(&shot).unwrap().to_rgba8();
+    // Terminal header row right of the "Терминал" tab label, inside the left panel's x range.
+    // The header is a flat fill, so only tree glyphs behind it make neighbouring rows differ
+    // (vertical boundaries between the left panel and the editor do not).
+    let y0 = body_y as u32 + 4;
+    let mut edges = 0;
+    for y in y0..y0 + 24 {
+        for x in 170..270 {
+            let (a, b) = (image.get_pixel(x, y)[2] as i32, image.get_pixel(x, y + 1)[2] as i32);
+            edges += ((a - b).abs() >= 6) as u32;
+        }
+    }
+    assert!(edges >= 30, "tree rows under the terminal are not drawn (edge pixels: {edges})");
+
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn headless_bug_api_mock_guide_wheel_scrolls_content() {
     let dir = scratch_dir("ui-bug-api-guide");
