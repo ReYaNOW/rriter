@@ -1,7 +1,7 @@
 pub mod library;
 pub mod worker;
 mod pdfium_backend;
-#[cfg(test)] pub mod fixture;
+pub mod fixture;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};

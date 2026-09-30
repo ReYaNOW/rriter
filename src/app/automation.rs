@@ -262,7 +262,6 @@ pub(super) enum AutomationStep {
     RemoveSettingsIgnore(&'static str),
     RefreshSettingsTools,
     /// Polled once per frame until `check` holds; the step fails with name `what` after `timeout_ms`.
-    #[allow(dead_code)] // built by the group tasks; the registry is empty until then
     WaitUntil {
         what: &'static str,
         check: fn(&App) -> bool,
@@ -270,22 +269,18 @@ pub(super) enum AutomationStep {
     },
     /// Runs once and must not block the frame for long: slow work goes to a thread and a
     /// following `WaitUntil` waits for the feature state. `Err(e)` fails the step as `what: e`.
-    #[allow(dead_code)]
     Call {
         what: &'static str,
         run: fn(&mut App, &Path) -> Result<(), String>,
     },
     /// A key combo in `KeyInput::parse_combo` syntax, delivered like the driver's `key` command.
-    #[allow(dead_code)]
     Key(&'static str),
-    #[allow(dead_code)]
     Wheel {
         at: AutomationTarget,
         dx: f32,
         dy: f32,
     },
     /// `mods` is a `+`-separated modifier list (`""`, `"ctrl"`, `"ctrl+shift"`).
-    #[allow(dead_code)]
     Click {
         at: AutomationTarget,
         button: AutomationButton,
@@ -299,12 +294,10 @@ pub(super) enum AutomationStep {
         steps: u16,
     },
     /// Opens a group; a `requires` returning `Err(reason)` skips everything up to `GroupEnd`.
-    #[allow(dead_code)]
     GroupStart {
         name: &'static str,
         requires: Option<fn(&App) -> Result<(), String>>,
     },
-    #[allow(dead_code)]
     GroupEnd,
     Finish,
 }

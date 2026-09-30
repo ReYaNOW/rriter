@@ -71,9 +71,10 @@ pub(super) fn group_steps(name: &str, workspace: &Path) -> Option<Vec<Automation
 
 fn lookup(
     name: &str,
-    _workspace: &Path,
+    workspace: &Path,
 ) -> Option<(&'static str, Requires, Vec<AutomationStep>)> {
     match name {
+        "pdf" => Some(("pdf", None, super::automation_pdf::steps(workspace))),
         #[cfg(test)]
         "test_never" => Some(("test_never", None, test_groups::never_steps())),
         #[cfg(test)]
@@ -87,6 +88,23 @@ fn lookup(
         #[cfg(test)]
         "test_find_none" => Some(("test_find_none", None, test_groups::find_none_steps())),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use std::path::Path;
+
+    use super::{FULL_GROUPS, group_steps};
+
+    /// An unknown name in `FULL_GROUPS` would be dropped silently when the `full` scenario is built.
+    #[test]
+    fn every_full_group_resolves_to_wrapped_steps() {
+        for name in FULL_GROUPS {
+            let steps = group_steps(name, Path::new("/tmp/pgo-registry-test"))
+                .unwrap_or_else(|| panic!("FULL_GROUPS entry {name:?} is not in the registry"));
+            assert!(steps.len() > 2, "group {name:?} has no steps");
+        }
     }
 }
 

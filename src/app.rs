@@ -18,6 +18,7 @@ mod automation_dart;
 mod automation_database;
 mod automation_groups;
 mod automation_markdown;
+mod automation_pdf;
 pub(crate) mod context_menu;
 mod dart_settings;
 pub mod database;

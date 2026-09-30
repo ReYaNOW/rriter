@@ -6,6 +6,7 @@ pub fn write_fixture_pdf(dir: &Path) -> PathBuf {
     write_fixture_pdf_with_target_height(dir, "rriter-fixture.pdf", 792.0, 792.0)
 }
 
+#[cfg(test)]
 pub fn write_fixture_pdf_mixed(dir: &Path) -> PathBuf {
     write_fixture_pdf_with_target_height(dir, "rriter-fixture-mixed.pdf", 612.0, 500.0)
 }
@@ -40,6 +41,7 @@ fn write_fixture_pdf_with_target_height(
 /// filled path (`1 1 0 rg … re f`) under black text. The yellow box spans
 /// x 72..540, y 300..700 (PDF points, origin bottom-left); the text sits at
 /// x 150..~420, y 450..~560, so the box corners are highlight without text.
+#[cfg(test)]
 pub fn write_fixture_pdf_highlight(dir: &Path) -> PathBuf {
     let content = b"1 1 0 rg 72 300 468 400 re f 0 0 0 rg BT /F1 150 Tf 150 450 Td (HH) Tj ET";
     let objects = vec![
@@ -83,6 +85,7 @@ fn stream_object(bytes: &[u8]) -> String {
     object
 }
 
+#[cfg(test)]
 pub fn write_garbage(dir: &Path) -> PathBuf {
     let path = dir.join("rriter-garbage.pdf");
     let _ = fs::create_dir_all(dir);
@@ -90,6 +93,7 @@ pub fn write_garbage(dir: &Path) -> PathBuf {
     path
 }
 
+#[cfg(test)]
 pub fn write_empty(dir: &Path) -> PathBuf {
     let path = dir.join("rriter-empty.pdf");
     let _ = fs::create_dir_all(dir);
