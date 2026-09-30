@@ -21,6 +21,7 @@ pub(crate) mod reviewer_stage2_integration {
             scale,
             app.theme.clone(),
             context.requested_context(),
+            &mut crate::startup_trace::StartupTrace::disabled(),
         )
         .expect("production Renderer");
         renderer.width = width;

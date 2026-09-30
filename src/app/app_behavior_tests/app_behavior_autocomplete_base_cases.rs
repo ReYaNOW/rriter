@@ -85,7 +85,7 @@ pub(crate) fn test_app() -> Option<App> {
         tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor: Editor::new(128),
-        clipboard: Clipboard::new().ok(),
+        clipboard: Some(Clipboard::deferred_system()),
         theme: test_theme(),
         base_title: "Безымянный".to_string(),
         file_path: None,
@@ -156,7 +156,6 @@ pub(crate) fn test_app() -> Option<App> {
         is_ready: false,
         is_highlighted_once: false,
         is_highlight_complete: false,
-        tried_maximize: false,
         should_maximize: false,
         autocomplete_active: false,
         autocomplete_options: Vec::new(),
@@ -235,6 +234,8 @@ pub(crate) fn test_app() -> Option<App> {
         run_ide_on_startup: false,
         headless_mode: false,
         ui_waker: crate::ui_waker::UiWaker::counting(),
+        startup_trace: crate::startup_trace::StartupTrace::disabled(),
+        startup_deferred_pending: false,
     })
 }
 

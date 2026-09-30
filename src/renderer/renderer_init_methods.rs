@@ -230,6 +230,7 @@ impl Renderer {
         scale_factor: f32,
         theme: Theme,
         requested_context: String,
+        trace: &mut crate::startup_trace::StartupTrace,
     ) -> Result<Self, String> {
         unsafe {
             let version = gl.get_parameter_string(glow::VERSION);
@@ -382,6 +383,7 @@ impl Renderer {
 
             gl.delete_shader(v_shader);
             gl.delete_shader(f_shader);
+            trace.mark("shaders");
 
             let vao = gl
                 .create_vertex_array()
@@ -440,6 +442,7 @@ impl Renderer {
                 glow::PixelUnpackData::Slice(None),
             );
 
+            trace.mark("atlas");
             gl.enable(glow::BLEND);
             gl.blend_func_separate(
                 glow::SRC_ALPHA,
@@ -524,8 +527,9 @@ impl Renderer {
                 ui_fonts.push(f.clone());
             }
 
-            let load_icon_from_memory = |data: &[u8], _name: &str| -> Option<glow::Texture> {
-                let img = image::load_from_memory(data).ok()?.into_rgba8();
+            trace.mark("fonts");
+            let load_icon_from_memory =|decoded: Option<image::RgbaImage>, _name: &str| -> Option<glow::Texture> {
+                let img = decoded?;
                 let (w, h) = img.dimensions();
                 let tex = gl.create_texture().ok()?;
 
@@ -566,7 +570,8 @@ impl Renderer {
                 Some(tex)
             };
 
-            let icon_logo = load_icon_from_memory(include_bytes!("../icons/icon.png"), "icon");
+            let icon_logo = load_icon_from_memory(trace.take_logo(crate::startup_trace::LOGO_PNG), "icon");
+            trace.mark("logo");
 
             let mut renderer = Self {
                 gl,
@@ -701,7 +706,8 @@ impl Renderer {
                 }
             }
 
-            renderer.load_builtin_icons();
+            trace.mark("glyph-warmup");
+            trace.mark("icons");
 
             // #[cfg(target_os = "linux")]
             // extern "C" { fn malloc_trim(pad: usize) -> i32; }

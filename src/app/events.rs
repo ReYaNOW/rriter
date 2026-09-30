@@ -592,37 +592,29 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                     return;
                 }
 
-                if !self.is_ready {
-                    unsafe {
-                        use glow::HasContext;
-                        let gl = &self.renderer.as_ref().unwrap().gl;
-                        gl.clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
-                        gl.clear(glow::COLOR_BUFFER_BIT);
+                if self.run_ide_on_startup {
+                    // IDE restore runs in the first `about_to_wait`, after this redraw: show the
+                    // background instead of a bare editor until the session is loaded.
+                    if let Some(renderer) = self.renderer.as_ref() {
+                        unsafe {
+                            use glow::HasContext;
+                            let gl = &renderer.gl;
+                            gl.clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
+                            gl.clear(glow::COLOR_BUFFER_BIT);
+                        }
                     }
                     if !self.present_main_surface() {
                         event_loop.set_control_flow(ControlFlow::Wait);
                         return;
                     }
                     crate::platform::finish_present();
-                    self.renderer
-                        .as_mut()
-                        .unwrap()
-                        .record_presented_frame(self.show_fps, Instant::now());
-
                     self.is_ready = true;
-                    // Применяем максимизацию, если сохранено
-                    if !self.tried_maximize {
-                        self.tried_maximize = true;
-                        if self.should_maximize {
-                            if let Some(w) = self.window.as_ref() {
-                                w.set_maximized(true);
-                            }
-                        }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
                     }
-                    self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-
+                self.is_ready = true;
                 let outcome = self.render_main_frame();
 
                 let present_start = Instant::now();
@@ -636,6 +628,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                     .as_mut()
                     .unwrap()
                     .record_presented_frame(self.show_fps, Instant::now());
+                self.startup_trace.first_frame();
                 if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
                 {
                     crate::render_view::record_swap_telemetry(

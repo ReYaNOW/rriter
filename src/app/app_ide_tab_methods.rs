@@ -591,6 +591,7 @@ impl App {
                 }
             }
 
+            self.startup_trace.mark("ide-tabs-open");
             if loaded_any {
                 let target = if has_startup_file {
                     0
@@ -599,6 +600,7 @@ impl App {
                 };
                 self.switch_to_tab(target);
                 self.save_tabs_state();
+                self.startup_trace.mark("ide-switch");
                 if !self.is_highlighted_once {
                     self.wait_for_current_highlight();
                 }
@@ -634,6 +636,7 @@ impl App {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
+        self.startup_trace.mark("ide-done");
     }
     pub fn save_tabs_state(&mut self) {
         if !self.is_ide_mode || self.is_automation_mode() {

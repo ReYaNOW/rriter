@@ -67,6 +67,7 @@ pub(crate) struct AppInitOptions {
     pub headless: bool,
     /// Background tasks spawned by the App wake the UI through clones of this handle.
     pub(crate) ui_waker: crate::ui_waker::UiWaker,
+    pub(crate) startup_trace: crate::startup_trace::StartupTrace,
 }
 
 impl AppInitOptions {
@@ -85,6 +86,7 @@ impl AppInitOptions {
             scroll_bench_seconds: None,
             headless: true,
             ui_waker: crate::ui_waker::UiWaker::counting(),
+            startup_trace: crate::startup_trace::StartupTrace::disabled(),
         }
     }
 }
@@ -153,7 +155,7 @@ impl App {
             clipboard: if options.headless {
                 Some(crate::platform::Clipboard::in_memory())
             } else {
-                crate::platform::Clipboard::new().ok()
+                Some(crate::platform::Clipboard::deferred_system())
             },
             theme: crate::load_dracula(),
             base_title: title,
@@ -232,7 +234,6 @@ impl App {
             is_ready: false,
             is_highlighted_once: false,
             is_highlight_complete: false,
-            tried_maximize: false,
             should_maximize: config.maximized,
 
             autocomplete_active: false,
@@ -320,11 +321,9 @@ impl App {
             run_ide_on_startup: options.run_ide_on_startup,
             headless_mode: options.headless,
             ui_waker: options.ui_waker,
+            startup_trace: options.startup_trace,
+            startup_deferred_pending: !options.headless,
         };
-
-        if !options.headless {
-            app.refresh_dart_tool_state();
-        }
 
         app.highlighter.reset(
             app.editor.version,

@@ -1322,7 +1322,6 @@ pub struct App {
     pub is_ready: bool,
     pub is_highlighted_once: bool,
     pub is_highlight_complete: bool,
-    pub tried_maximize: bool,
     pub should_maximize: bool,
 
     pub autocomplete_active: bool,
@@ -1422,6 +1421,9 @@ pub struct App {
     pub headless_mode: bool,
     /// Wakes the event loop when a background task delivers a result (see `ui_waker`).
     pub(crate) ui_waker: crate::ui_waker::UiWaker,
+    /// Startup stage timing (`RRITER_STARTUP_TRACE`); the first content frame is marked on it.
+    pub(crate) startup_trace: crate::startup_trace::StartupTrace,
+    pub(crate) startup_deferred_pending: bool,
 }
 
 #[cfg(test)]

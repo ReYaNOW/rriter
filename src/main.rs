@@ -21,6 +21,7 @@ mod round2_regression_tests;
 mod round3_regression_tests;
 mod scroll;
 mod startup_environment;
+mod startup_trace;
 mod state_persistence;
 mod headless_ty_mem_probe;
 mod ui_system;
@@ -127,13 +128,15 @@ fn event_loop_error_message(stage: &str, error: &impl std::fmt::Display) -> Stri
 }
 
 fn main() {
+    let mut startup_trace = startup_trace::StartupTrace::new();
     let startup_args = std::env::args_os().collect::<Vec<_>>();
     if let Some(exit_code) = crate::platform::handle_startup_helper(&startup_args) {
         std::process::exit(exit_code);
     }
+    startup_trace.start_logo_decode(startup_trace::LOGO_PNG);
     if startup_args.iter().skip(1).any(|arg| arg == "--headless") {
         #[cfg(target_os = "linux")]
-        std::process::exit(i32::from(headless::run(&startup_args[1..])));
+        std::process::exit(i32::from(headless::run(&startup_args[1..], startup_trace)));
         #[cfg(not(target_os = "linux"))]
         {
             eprintln!("headless mode is supported on Linux only");
@@ -255,9 +258,11 @@ fn main() {
             return;
         }
     };
+    startup_trace.mark("event-loop");
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
+    startup_trace.mark("config");
     crate::platform::configure_tool_paths(config.tool_paths.clone());
     crate::render_view::TELEMETRY_ENABLED.store(
         config.enable_telemetry || scroll_bench_idx.is_some() || pgo_train,
@@ -277,8 +282,10 @@ fn main() {
         scroll_bench_seconds: Some(scroll_bench_seconds),
         headless: false,
         ui_waker: ui_waker::UiWaker::native(event_loop.create_proxy()),
+        startup_trace,
     };
     let mut app = App::new_from_config(config, options);
+    app.startup_trace.mark("app");
 
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!(

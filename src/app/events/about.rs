@@ -118,6 +118,11 @@ fn update_markdown_read_selection_autoscroll(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
+    if app.startup_deferred_pending && (app.is_ready || app.run_ide_on_startup) {
+        app.startup_deferred_pending = false;
+        app.refresh_dart_tool_state();
+    }
+
     if app.run_ide_on_startup {
         app.run_ide_on_startup = false;
         app.enter_ide_mode();

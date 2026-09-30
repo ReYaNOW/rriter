@@ -123,6 +123,7 @@ use crate::app::{App, AppInitOptions};
 use crate::platform::offscreen_gl::OffscreenContext;
 use crate::platform::{self, HeadlessPolicy, HeadlessWindow, WindowHost};
 use crate::renderer::Renderer;
+use crate::startup_trace::StartupTrace;
 use frame::{NativeWake, StepState, WakeCause};
 use profile::{BudgetChoice, HeadlessOptions, Profile};
 use protocol::{ClickPhase, Command, DialogAnswer, MouseButtonArg, Response, WheelUnit};
@@ -149,7 +150,8 @@ const NATIVE_WAKE_SLICE: Duration = Duration::from_millis(1);
 
 /// Headless entry point (arguments without the program name). Returns the process exit code:
 /// 0 all `ok`, 1 at least one `err`, 2 arguments, 3 GL context or `Renderer`.
-pub(crate) fn run(args: &[OsString]) -> u8 {
+pub(crate) fn run(args: &[OsString], trace: StartupTrace) -> u8 {
+    trace.mark("headless-run");
     let options = match profile::parse_args(args) {
         Ok(options) => options,
         Err(reason) => {
@@ -164,13 +166,14 @@ pub(crate) fn run(args: &[OsString]) -> u8 {
             return 2;
         }
     };
+    trace.mark("profile");
     // `Profile` has no Drop: every path after `prepare` must reach `finish`.
-    let code = run_prepared(&options, profile.root());
+    let code = run_prepared(&options, profile.root(), trace);
     profile.finish();
     code
 }
 
-fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
+fn run_prepared(options: &HeadlessOptions, root: &Path, trace: StartupTrace) -> u8 {
     if let Err(existing) = platform::set_app_root_override(root.to_path_buf()) {
         eprintln!("headless: profile root is already set to {}", existing.display());
         return 2;
@@ -178,7 +181,9 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
     platform::set_headless(HeadlessPolicy { allow_writes: options.allow_writes });
     // Env-only (honours RRITER_EGL_VENDOR) and still single-threaded here, as in `main`.
     crate::prefer_egl_vendor();
+    trace.mark("egl-vendor");
     crate::init_rayon_global_pool();
+    trace.mark("rayon");
     let protocol = match split_protocol_fd(libc::STDOUT_FILENO, libc::STDERR_FILENO) {
         Ok(file) => file,
         Err(error) => {
@@ -196,7 +201,7 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
         },
         _ => Box::new(io::stdin().lock()),
     };
-    let mut session = match HeadlessSession::new(options, root.to_path_buf()) {
+    let mut session = match HeadlessSession::with_trace(options, root.to_path_buf(), trace) {
         Ok(session) => session,
         Err((code, message)) => {
             eprintln!("{message}");
@@ -208,6 +213,7 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
         session.open_startup_path(path);
     }
     session.settle(STARTUP_SETTLE);
+    session.app.startup_trace.mark("settled");
     session.run_loop(input, io::LineWriter::new(protocol));
     session.app.shutdown_background_services();
     let code = session.exit_code();
@@ -255,19 +261,36 @@ pub(crate) struct HeadlessSession {
 }
 
 impl HeadlessSession {
+    #[cfg(test)]
     pub(crate) fn new(options: &HeadlessOptions, profile_root: PathBuf) -> Result<Self, (u8, String)> {
+        Self::with_trace(options, profile_root, StartupTrace::disabled())
+    }
+
+    fn with_trace(
+        options: &HeadlessOptions,
+        profile_root: PathBuf,
+        trace: StartupTrace,
+    ) -> Result<Self, (u8, String)> {
         let (w, h) = options.size;
-        let gl = OffscreenContext::new(w, h).map_err(egl_failure)?;
+        let gl = OffscreenContext::new_traced(w, h, &trace).map_err(egl_failure)?;
+        trace.mark("offscreen-gl");
         let config = crate::load_config();
+        trace.mark("config");
         platform::configure_tool_paths(config.tool_paths.clone());
-        let mut app = App::new_from_config(config, AppInitOptions::headless());
+        let mut app = App::new_from_config(
+            config,
+            AppInitOptions { startup_trace: trace, ..AppInitOptions::headless() },
+        );
+        app.startup_trace.mark("app");
         let mut renderer = Renderer::new(
             gl.glow(),
             options.scale as f32,
             app.theme.clone(),
             gl.requested_context(),
+            &mut app.startup_trace,
         )
         .map_err(|error| egl_failure(format!("Renderer: {error}")))?;
+        app.startup_trace.mark("renderer");
         renderer.resize(w, h);
         app.window = Some(Arc::new(WindowHost::Headless(HeadlessWindow::new(
             PhysicalSize::new(w, h),
@@ -276,7 +299,6 @@ impl HeadlessSession {
         app.renderer = Some(renderer);
         // No first-frame clear/present or maximize pass: those are window-only.
         app.is_ready = true;
-        app.tried_maximize = true;
         app.is_focused = true;
         Ok(Self {
             app,
@@ -530,6 +552,7 @@ impl HeadlessSession {
         frame::settle_loop(budget, || {
             *drew_last_step = frame::step_frame(app, loop_state, false);
             if *drew_last_step {
+                app.startup_trace.first_frame();
                 StepState::Redrawn
             } else {
                 let flow = loop_state.last_control_flow.get();
