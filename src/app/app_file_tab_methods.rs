@@ -366,6 +366,7 @@ impl App {
             } else if wait_highlight {
                 self.switch_to_tab(i);
             }
+            self.revalidate_markdown_media(true);
             return;
         }
         if is_pdf {

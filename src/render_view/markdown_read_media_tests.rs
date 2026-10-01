@@ -251,7 +251,7 @@ mod markdown_read_media_tests {
         let cache = build_test_markdown_read_layout(source, 1000.0);
         assert!(cache.media_blocks().next().is_none());
         assert!(matches!(cache.blocks[0].kind, ReadBlockKind::Text(_)));
-        assert_eq!(cache.media_gen(), None);
+        assert_eq!(cache.media_gen(), 0);
     }
 
     #[test]
@@ -260,15 +260,14 @@ mod markdown_read_media_tests {
         let media = loaded_media(source, ok_loader(400.0, 300.0));
         let mut cache = layout_with(source, 1000.0, 1.0, &media);
         let key = LayoutKey::new(1, 1000.0, 1.0, 16.0);
-        cache.media_gen = Some(1);
-        assert!(cache.is_current(key, Some(1)));
-        assert!(!cache.is_current(key, Some(2)));
-        assert!(!cache.is_current(key, None));
-        cache.media_gen = None;
-        assert!(cache.is_current(key, None));
-        assert!(!cache.is_current(key, Some(0)));
-        cache.media_gen = Some(1);
-        assert!(!cache.is_current(LayoutKey::new(2, 1000.0, 1.0, 16.0), Some(1)));
+        cache.media_gen = 1;
+        assert!(cache.is_current(key, 1));
+        assert!(!cache.is_current(key, 2));
+        assert!(!cache.is_current(key, 0));
+        assert!(!cache.is_current(LayoutKey::new(2, 1000.0, 1.0, 16.0), 1));
+        assert!(cache.media_relayout_pending(1, 1000.0, 1.0, 16.0, 2));
+        assert!(!cache.media_relayout_pending(1, 1000.0, 1.0, 16.0, 1));
+        assert!(!cache.media_relayout_pending(2, 1000.0, 1.0, 16.0, 2));
     }
 
     #[test]
@@ -276,9 +275,9 @@ mod markdown_read_media_tests {
         let mut cache = build_test_markdown_read_layout("text\n", 400.0);
         let key = LayoutKey::new(1, 400.0, 1.0, 16.0);
         cache.set_media_dir(Path::new(""));
-        assert!(cache.is_current(key, None));
+        assert!(cache.is_current(key, 0));
         cache.set_media_dir(Path::new("/docs"));
-        assert!(!cache.is_current(key, None));
+        assert!(!cache.is_current(key, 0));
     }
 
     #[test]
@@ -332,6 +331,132 @@ mod markdown_read_media_tests {
                 panic!("a failed mermaid block must stay a code block ({label})");
             };
             assert_eq!(code.error.as_deref(), Some(label));
+        }
+    }
+
+    // Scroll anchoring when an image changes size (`media_gen`): the real renderer and the
+    // production draw path; the loader waits on a gate so the test decides when it finishes.
+    mod anchoring {
+        use super::*;
+        use crate::app::{App, MarkdownMode};
+        use crate::platform::offscreen_gl::OffscreenContext;
+        use crate::render_view::reviewer_stage2_integration::{fixture, read_frame};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        fn document(image_first: bool) -> String {
+            let paragraphs: String = (0..60)
+                .map(|i| format!("paragraph{i:03} alpha beta gamma delta\n\n"))
+                .collect();
+            if image_first {
+                format!("![pic](pic.png)\n\n{paragraphs}")
+            } else {
+                format!("{paragraphs}![pic](pic.png)\n")
+            }
+        }
+
+        fn rig(source: &str) -> (OffscreenContext, App, Arc<AtomicBool>) {
+            let (context, mut app) = fixture(source, 600.0, 1.0);
+            let gate = Arc::new(AtomicBool::new(false));
+            let loader_gate = gate.clone();
+            app.markdown_media = MarkdownMedia::with_loader(Arc::new(move |_| {
+                while !loader_gate.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Ok(pixels(100.0, 400.0))
+            }));
+            app.set_markdown_mode(MarkdownMode::Read);
+            let (version, waker) = (app.editor.version, app.ui_waker.clone());
+            app.markdown.read_layout.set_media_dir(Path::new("/tmp"));
+            app.markdown.request_media(&mut app.markdown_media, Path::new("/tmp"), version, 600.0, 1.0, &waker);
+            read_frame(&mut app);
+            (context, app, gate)
+        }
+
+        fn finish_image(app: &mut App, gate: &AtomicBool) {
+            let before = app.markdown_media.media_gen();
+            gate.store(true, Ordering::SeqCst);
+            let waker = app.ui_waker.clone();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while app.markdown_media.media_gen() == before {
+                app.markdown_media.poll(&waker);
+                assert!(Instant::now() < deadline, "the image did not finish");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn line_y(app: &App, needle: &str) -> f32 {
+            let byte = app.editor.get_full_text().find(needle).expect("needle");
+            app.markdown.read_layout.source_anchor_y(&(byte..byte + 1)).expect("anchor y")
+        }
+
+        fn at_rest_on(app: &mut App, needle: &str) -> f32 {
+            let y = line_y(app, needle);
+            app.scroll_y.jump_to(y + 3.0);
+            read_frame(app);
+            y
+        }
+
+        #[test]
+        fn a_block_under_the_viewport_top_keeps_its_screen_y_when_an_image_above_grows() {
+            let (_context, mut app, gate) = rig(&document(true));
+            let y0 = at_rest_on(&mut app, "paragraph010");
+            let screen = line_y(&app, "paragraph010") - app.scroll_y.current;
+            finish_image(&mut app, &gate);
+            read_frame(&mut app);
+            assert!(line_y(&app, "paragraph010") - y0 > 50.0, "the image must have grown");
+            assert!((line_y(&app, "paragraph010") - app.scroll_y.current - screen).abs() < 0.5);
+        }
+
+        #[test]
+        fn an_image_below_the_screen_growing_leaves_the_scroll_alone() {
+            let (_context, mut app, gate) = rig(&document(false));
+            at_rest_on(&mut app, "paragraph010");
+            let (current, height) = (app.scroll_y.current, app.markdown.read_layout.content_height());
+            finish_image(&mut app, &gate);
+            read_frame(&mut app);
+            assert!(app.markdown.read_layout.content_height() > height + 50.0);
+            assert!((app.scroll_y.current - current).abs() < 0.01);
+        }
+
+        #[test]
+        fn wheel_animation_keeps_its_speed_and_target_moves_by_the_growth() {
+            let (_context, mut app, gate) = rig(&document(true));
+            let y0 = at_rest_on(&mut app, "paragraph010");
+            app.scroll_y.target = app.scroll_y.current + 100.0;
+            app.scroll_y.velocity = 24.0;
+            app.scroll_y.anim_speed = 7.0;
+            let target = app.scroll_y.target;
+            finish_image(&mut app, &gate);
+            read_frame(&mut app);
+            let growth = line_y(&app, "paragraph010") - y0;
+            assert!(growth > 50.0);
+            assert!((app.scroll_y.target - target - growth).abs() < 0.5);
+            assert!((app.scroll_y.target - app.scroll_y.current - 100.0).abs() < 0.01);
+            assert_eq!(app.scroll_y.velocity, 24.0);
+        }
+
+        #[test]
+        fn an_anchor_jump_still_reaches_its_heading_after_the_layout_grows() {
+            let source = document(true);
+            let (_context, mut app, gate) = rig(&source);
+            let byte = source.find("paragraph040").expect("needle");
+            let range = byte..byte + 12;
+            let target = app.markdown.read_layout.source_target_y(&range).expect("target");
+            app.markdown.mark_absolute_source_scroll_target_navigation(range.clone(), 0.0);
+            app.scroll_y.animate_to(target);
+            read_frame(&mut app);
+            for _ in 0..5 {
+                app.scroll_y.update(0.016);
+                read_frame(&mut app);
+            }
+            finish_image(&mut app, &gate);
+            for _ in 0..1200 {
+                app.scroll_y.update(0.016);
+                read_frame(&mut app);
+            }
+            let end = app.markdown.read_layout.source_target_y(&range).expect("target after growth");
+            assert!(end > target + 50.0, "the image must have grown");
+            assert!((app.scroll_y.current - end.round()).abs() < 1.5, "current={} end={end}", app.scroll_y.current);
         }
     }
 }

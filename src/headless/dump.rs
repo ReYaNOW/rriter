@@ -164,12 +164,19 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             json!({"start": [start.0, start.1], "end": [end.0, end.1]})
         },
     );
+    let media_stats = app.markdown_media.stats();
     json!({
         "size": [w, h],
         "scale": scale,
         "cursor_icon": format!("{:?}", app.current_cursor),
         "mode": mode,
         "tabs": tabs_json(app),
+        "markdown_media_stats": {
+            "media_gen": app.markdown_media.media_gen(),
+            "loads_started": media_stats.loads_started,
+            "texture_bytes": media_stats.texture_bytes,
+            "visible_texture_bytes": media_stats.visible_texture_bytes,
+        },
         "editor": {
             "lines": app.editor.line_offsets.len(),
             "cursor": app.editor.cursor,
@@ -251,6 +258,11 @@ fn tabs_json(app: &App) -> Value {
                     scroll_y: &tab.scroll_y,
                     scroll_x: &tab.scroll_x,
                     markdown: tab.markdown.mode != MarkdownMode::Edit,
+                    markdown_media: tab.markdown.media_dump(
+                        &app.markdown_media,
+                        tab.editor.version,
+                        tab.file_path.as_deref().and_then(Path::parent),
+                    ),
                     kind: tab_kind_name(tab),
                     pdf: tab.pdf.as_deref(),
                     engine: &app.pdf_engine,
@@ -273,6 +285,15 @@ fn active_tab_json(app: &App, index: usize) -> Value {
         scroll_y: &app.scroll_y,
         scroll_x: &app.scroll_x,
         markdown: app.markdown_mode() != MarkdownMode::Edit,
+        markdown_media: if app.active_document_is_markdown() {
+            app.markdown.media_dump(
+                &app.markdown_media,
+                app.editor.version,
+                app.file_path.as_deref().and_then(Path::parent),
+            )
+        } else {
+            None
+        },
         kind: app.tabs.get(index).map(tab_kind_name).unwrap_or("normal"),
         pdf: app.tabs.get(index).and_then(|tab| tab.pdf.as_deref()),
         engine: &app.pdf_engine,
@@ -290,6 +311,8 @@ struct TabView<'a> {
     scroll_y: &'a ScrollState,
     scroll_x: &'a ScrollState,
     markdown: bool,
+    /// Media elements of a Markdown tab in Read mode (`null` otherwise).
+    markdown_media: Option<Value>,
     kind: &'static str,
     pdf: Option<&'a crate::app::pdf_tab::PdfTabState>,
     engine: &'a crate::app::pdf_tab::PdfEngineState,
@@ -344,6 +367,7 @@ fn tab_json(tab: TabView<'_>) -> Value {
         "scroll_y": scroll_y,
         "scroll_x": tab.scroll_x.current,
         "markdown": tab.markdown,
+        "markdown_media": tab.markdown_media,
         "kind": tab.kind,
     });
     if let Some(pdf) = pdf { value["pdf"] = pdf; }

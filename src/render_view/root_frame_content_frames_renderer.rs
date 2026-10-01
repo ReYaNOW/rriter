@@ -376,6 +376,7 @@ impl Renderer {
     fn draw_root_markdown_read_frame(
         &mut self,
         markdown: &mut crate::app::MarkdownTabState,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
         editor: &Editor,
         editor_title: &str,
         editor_path: Option<&std::path::PathBuf>,
@@ -446,7 +447,7 @@ impl Renderer {
         let stage_start = telemetry_frame_start.map(|_| Instant::now());
         self.draw_markdown_read(
             markdown,
-            None,
+            markdown_media,
             editor,
             scroll_y_state,
             spans,

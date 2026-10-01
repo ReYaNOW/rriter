@@ -647,6 +647,7 @@ impl App {
         self.pdf_tab_activated(new_idx);
         self.sync_active_tab();
         self.markdown.clear_code_copy_transient();
+        self.revalidate_markdown_media(false);
         self.prefetch_active_tab_git_graph();
 
         if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() {

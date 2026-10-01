@@ -1028,7 +1028,7 @@ mod markdown_code_scroll_gl_tests {
                 },
                 50.0,
                 clip,
-                None,
+                &app.markdown_media,
             );
             let mut actual = [0i32; 4];
             renderer

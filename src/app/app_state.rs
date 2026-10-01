@@ -1261,6 +1261,7 @@ pub struct App {
     pub text_file_format: crate::platform::TextFileFormat,
     pub file_extension: String,
     pub markdown: MarkdownTabState,
+    pub markdown_media: crate::markdown_media::MarkdownMedia,
     pub highlighter: Highlighter,
     pub closing_hint_state: crate::languages::dart::ClosingHintState,
     pub closing_hint_settings: crate::languages::dart::ClosingHintSettings,

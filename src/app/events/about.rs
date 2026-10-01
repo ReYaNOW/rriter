@@ -218,6 +218,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     let (polls_redraw, background_wake_at) = about_to_wait_background_polls(app, now);
     needs_redraw |= polls_redraw;
     needs_redraw |= about_to_wait_file_watcher(app);
+    needs_redraw |= app.poll_markdown_media();
     needs_redraw |= about_to_wait_panel_scrolls(app, dt);
     let (tab_content_redraw, database_refresh_wake_at) =
         about_to_wait_tab_content_scrolls(app, dt, now, wall_ms);

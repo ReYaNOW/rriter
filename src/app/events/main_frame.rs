@@ -123,6 +123,7 @@ impl App {
                     self.pdf_prepare_frame(&mut renderer);
                     self.renderer = Some(renderer);
                 }
+                self.markdown_media_prepare_frame();
                 let ctrl_definition_range = self.ctrl_definition_highlight_range();
                 let python_inlay_hints = if self.python_inlay_hint_path.as_ref()
                     == self.file_path.as_ref()
@@ -183,6 +184,7 @@ impl App {
                     self.inline_git_popup.as_ref(),
                     &self.pdf_engine,
                     self.pdf_dark_pages,
+                    &self.markdown_media,
                 );
 
                 self.target_sticky_lines = target_sticky;

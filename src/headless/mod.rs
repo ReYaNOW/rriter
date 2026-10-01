@@ -76,6 +76,8 @@ mod ui_tests_lsp_servers;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_markdown;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_markdown_media;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_pickers;

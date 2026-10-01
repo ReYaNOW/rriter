@@ -1030,7 +1030,7 @@ pub(crate) fn build_test_markdown_read_layout_with_media(
         content_height,
         source.len(),
     );
-    cache.media_gen = media.map(|(m, _)| m.media_gen());
+    cache.media_gen = media.map_or(0, |(m, _)| m.media_gen());
     cache
 }
 

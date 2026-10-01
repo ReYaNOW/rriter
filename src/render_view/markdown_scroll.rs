@@ -585,19 +585,38 @@ impl Renderer {
     pub(crate) fn prepare_markdown_read_layout_preserving_current_ownership(
         &mut self,
         markdown: &mut MarkdownTabState,
-        media: Option<&MarkdownMedia>,
+        media: &MarkdownMedia,
         scroll: &mut crate::scroll::ScrollState,
         editor_version: u64,
         content_width: f32,
     ) -> bool {
         let content_width = content_width.max(1.0);
+        // A media generation change (an image got its size) moves the text under the viewport
+        // exactly like a resize does, so it takes the same anchoring paths.
+        let media_relayout = markdown.read_layout.media_relayout_pending(
+            editor_version,
+            content_width,
+            self.scale_factor,
+            self.font_size,
+            media.media_gen(),
+        );
         let reproject_applied_current = scroll.deferred_current_rebase_applied() == Some(true)
-            && !markdown.deferred_current_geometry_matches_read(
-                editor_version,
-                content_width,
-                self.scale_factor,
-                self.font_size,
-            );
+            && (media_relayout
+                || !markdown.deferred_current_geometry_matches_read(
+                    editor_version,
+                    content_width,
+                    self.scale_factor,
+                    self.font_size,
+                ));
+        // Free scrolling (also a wheel animation or an anchor jump in flight): keep the text at
+        // the top of the viewport. Not at the very top of the document, where the page grows
+        // downwards under the reader, and not while the scrollbar thumb is dragged.
+        let media_anchor = (media_relayout
+            && scroll.deferred_current_rebase_applied().is_none()
+            && !scroll.is_dragging
+            && scroll.current > 0.5)
+            .then(|| markdown.read_layout.viewport_source_anchor(scroll.current))
+            .flatten();
         let applied_anchor = if reproject_applied_current {
             let Some(anchor) = markdown.applied_read_current_anchor(scroll, editor_version) else {
                 return false;
@@ -611,6 +630,12 @@ impl Renderer {
             return false;
         }
         let Some(anchor) = applied_anchor else {
+            if let Some(anchor) = media_anchor
+                && let Some(line_y) = markdown.read_layout.source_anchor_y(&anchor.source_range)
+            {
+                // Same delta for `current` and `target`: the motion continues to the same text.
+                scroll.rebase_current_preserving_motion(anchor.projected_scroll_y(line_y));
+            }
             return true;
         };
         let Some(line_y) = markdown.read_layout.source_anchor_y(&anchor.source_range) else {

@@ -60,7 +60,7 @@ pub(crate) struct MarkdownReadLayoutCache {
     source_lines: Vec<ReadSourceLine>,
     source_prefix_max_end: Vec<usize>,
     source_scopes: Vec<ReadSourceScope>,
-    media_gen: Option<u64>,
+    media_gen: u64,
     media_dir: std::path::PathBuf,
 }
 
@@ -916,7 +916,7 @@ impl Renderer {
     pub(crate) fn prepare_markdown_read_layout(
         &mut self,
         markdown: &mut MarkdownTabState,
-        media: Option<&MarkdownMedia>,
+        media: &MarkdownMedia,
         editor_version: u64,
         content_width: f32,
     ) -> bool {
@@ -927,7 +927,7 @@ impl Renderer {
             self.scale_factor,
             self.font_size,
         );
-        let media_gen = media.map(MarkdownMedia::media_gen);
+        let media_gen = media.media_gen();
         if markdown.read_layout.is_current(key, media_gen) {
             return true;
         }
@@ -945,11 +945,10 @@ impl Renderer {
             let mut advance = |ch: char, mono: bool, final_size_scale: Option<f32>| {
                 self.markdown_read_char_advance(ch, mono, final_size_scale)
             };
-            let input = media
-                .map(|m| MediaInput::new(document, source, &markdown.read_layout.media_dir, m));
+            let input = MediaInput::new(document, source, &markdown.read_layout.media_dir, media);
             let mut builder =
                 LayoutBuilder::new(source, content_width, scale, text_metrics, &mut advance)
-                    .with_media(input);
+                    .with_media(Some(input));
             builder.append_blocks(&document.blocks, 0.0, 0, None);
             let (blocks, content_height) = builder.finish();
             (blocks, content_height, source.len())
@@ -964,7 +963,7 @@ impl Renderer {
     pub(crate) fn draw_markdown_read(
         &mut self,
         markdown: &mut MarkdownTabState,
-        media: Option<&MarkdownMedia>,
+        media: &MarkdownMedia,
         editor: &crate::editor::Editor,
         scroll: &mut crate::scroll::ScrollState,
         spans: &[ColorSpan],
@@ -1182,7 +1181,7 @@ impl Renderer {
         highlights: ReadHighlights<'_>,
         code_scroll_x: f32,
         reader_clip: (f32, f32, f32, f32),
-        media: Option<&MarkdownMedia>,
+        media: &MarkdownMedia,
     ) {
         let offset_y = frame_y - scroll_y;
         match &block.kind {

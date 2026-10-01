@@ -100,6 +100,8 @@ pub struct MarkdownTabState {
     pub(crate) code_copy_hover_valid: bool,
     pub(crate) code_scroll_x: Vec<MarkdownCodeScrollX>,
     pub(crate) code_scroll_drag: Option<usize>,
+    /// Inputs of the last media request pass (`None`: not requested yet, see `markdown_media_wiring`).
+    pub(crate) media_request: Option<super::markdown_media_wiring::MediaRequestMarker>,
 }
 
 // Горизонтальный скролл code block в Reader; хранится только пока активен.
@@ -140,6 +142,7 @@ impl Default for MarkdownTabState {
             code_copy_hover_valid: false,
             code_scroll_x: Vec::new(),
             code_scroll_drag: None,
+            media_request: None,
         }
     }
 }

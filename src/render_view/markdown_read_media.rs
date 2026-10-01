@@ -192,9 +192,22 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
 }
 
 impl MarkdownReadLayoutCache {
-    /// `media_gen` of the `MarkdownMedia` the layout was built with (`None`: built without one).
-    pub(crate) fn media_gen(&self) -> Option<u64> {
+    /// `media_gen` of the `MarkdownMedia` the layout was built with.
+    pub(crate) fn media_gen(&self) -> u64 {
         self.media_gen
+    }
+
+    /// The layout is valid for this geometry but was built with another media generation, so
+    /// the next prepare re-lays it out only because a size or state of an image changed.
+    pub(crate) fn media_relayout_pending(
+        &self,
+        version: u64,
+        width: f32,
+        scale: f32,
+        font_size: f32,
+        media_gen: u64,
+    ) -> bool {
+        self.is_valid_for_geometry(version, width, scale, font_size) && self.media_gen != media_gen
     }
 
     /// Folder of the document, against which relative image paths resolve. A change rebuilds.
@@ -206,7 +219,7 @@ impl MarkdownReadLayoutCache {
     }
 
     /// The layout answers for `key` and this media generation.
-    fn is_current(&self, key: LayoutKey, media_gen: Option<u64>) -> bool {
+    fn is_current(&self, key: LayoutKey, media_gen: u64) -> bool {
         self.is_valid_for(key) && self.media_gen == media_gen
     }
 
@@ -229,7 +242,7 @@ impl Renderer {
     fn draw_markdown_media(
         &mut self,
         items: &[PlacedMedia],
-        media: Option<&MarkdownMedia>,
+        media: &MarkdownMedia,
         frame_x: f32,
         top: f32,
     ) {
@@ -238,7 +251,7 @@ impl Renderer {
         let line_h = media_line_height(s);
         for item in items {
             let (x, y) = (frame_x + item.x, top + item.y);
-            let entry = media.map_or(MediaEntryView::Unknown, |media| media.entry(&item.key));
+            let entry = media.entry(&item.key);
             if let MediaEntryView::Ready { texture: Some(texture), .. } = entry {
                 self.draw_texture_quad(texture, x, y, item.w, item.h);
                 continue;

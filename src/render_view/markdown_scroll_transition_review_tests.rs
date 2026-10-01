@@ -45,7 +45,7 @@ pub(crate) mod reviewer_stage2_integration {
         let renderer = app.renderer.as_mut().unwrap();
         renderer.draw_markdown_read(
             &mut app.markdown,
-            None,
+            &app.markdown_media,
             &app.editor,
             &mut app.scroll_y,
             &[],
@@ -64,6 +64,7 @@ pub(crate) mod reviewer_stage2_integration {
         let renderer = app.renderer.as_mut().unwrap();
         renderer.resolve_markdown_edit_scroll_transition(
             &mut app.markdown,
+            &app.markdown_media,
             &app.editor,
             &mut app.scroll_y,
             &app.current_sticky_lines,
@@ -586,6 +587,7 @@ pub(crate) mod reviewer_stage2_integration {
             None,
             &app.pdf_engine,
             app.pdf_dark_pages,
+            &app.markdown_media,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;

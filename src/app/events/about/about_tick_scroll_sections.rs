@@ -464,6 +464,7 @@ fn about_to_wait_file_watcher(app: &mut App) -> bool {
         if fs_changed {
             app.refresh_file_tree();
             app.start_file_watcher();
+            app.revalidate_markdown_media(false);
             if app.ide_panel.is_open(crate::app::PanelId::Git) {
                 app.refresh_git_panel();
             }

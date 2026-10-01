@@ -1,0 +1,186 @@
+//! Markdown Read mode media: images, SVG, Mermaid, revalidation on tab activation.
+//!
+//! Everything goes through the UI (the `open` command, the Read toggle, tab clicks, the
+//! `wait` command that drives `about_to_wait` and the frames). Nothing is seeded into the
+//! media cache; fixtures are plain files written into a per-process scratch directory.
+
+use crate::headless::HeadlessSession;
+use crate::headless::tests_support::{
+    click_ui, dump, has_ui, run_script, scratch_dir, wait_until, workspace_with_explorer,
+};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+const TEST_WIDTH: u32 = 1280;
+const TEST_HEIGHT: u32 = 720;
+const TEST_SCALE: f32 = 4.0 / 3.0;
+const WAIT_MS: u64 = 15_000;
+
+const BADGE_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"20\">\
+<rect width=\"100\" height=\"20\" fill=\"#4c1\"/></svg>";
+
+fn write_png(path: &Path, width: u32, height: u32) {
+    let image = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 30, 30, 255]));
+    image.save_with_format(path, image::ImageFormat::Png).expect("write png fixture");
+}
+
+/// A workspace with `preview.md` (the given source), `pic.png` (64x32), `badge.svg` and a
+/// text file `other.txt` used to switch away from the Markdown tab.
+fn fixture(name: &str, markdown: &str) -> (PathBuf, PathBuf) {
+    let dir = scratch_dir(name);
+    write_png(&dir.join("pic.png"), 64, 32);
+    std::fs::write(dir.join("badge.svg"), BADGE_SVG).expect("write svg fixture");
+    std::fs::write(dir.join("other.txt"), "plain text\n").expect("write text fixture");
+    let path = dir.join("preview.md");
+    std::fs::write(&path, markdown).expect("write markdown fixture");
+    (dir, path)
+}
+
+fn open_file(session: &mut HeadlessSession, path: &Path) {
+    let lines = run_script(session, format!("open {}\nsettle 2000\n", path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn open_markdown(dir: &Path, path: &Path) -> HeadlessSession {
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, dir);
+    open_file(&mut session, path);
+    wait_until(&mut session, 5000, "Markdown mode toggle", |session| {
+        has_ui(&dump(session), "MarkdownModeToggle")
+    });
+    session
+}
+
+fn open_markdown_read(dir: &Path, path: &Path) -> HeadlessSession {
+    let mut session = open_markdown(dir, path);
+    click_ui(&mut session, "MarkdownModeToggle");
+    wait_until(&mut session, 5000, "Markdown read layout", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+    session
+}
+
+fn tab_index(state: &Value, file_name: &str) -> usize {
+    state["tabs"]
+        .as_array()
+        .and_then(|tabs| {
+            tabs.iter().position(|tab| {
+                tab["path"].as_str().is_some_and(|path| Path::new(path).ends_with(file_name))
+            })
+        })
+        .unwrap_or_else(|| panic!("no tab for {file_name}: {state}"))
+}
+
+/// The dump entry of the media element whose source ends with `source_suffix`.
+fn media_entry(state: &Value, file_name: &str, source_suffix: &str) -> Option<Value> {
+    let tab = &state["tabs"][tab_index(state, file_name)];
+    tab["markdown_media"]
+        .as_array()?
+        .iter()
+        .find(|item| item["source"].as_str().is_some_and(|source| source.ends_with(source_suffix)))
+        .cloned()
+}
+
+fn media_state(state: &Value, source_suffix: &str) -> Option<String> {
+    media_entry(state, "preview.md", source_suffix)?["state"].as_str().map(str::to_owned)
+}
+
+fn size_close(item: &Value, width: f64, height: f64) -> bool {
+    let close = |key: &str, want: f64| item[key].as_f64().is_some_and(|got| (got - want).abs() < 0.6);
+    close("w", width) && close("h", height)
+}
+
+fn switch_to(session: &mut HeadlessSession, file_name: &str) {
+    let index = tab_index(&dump(session), file_name);
+    click_ui(session, &format!("EditorTab({index})"));
+    let lines = run_script(session, b"settle 2000\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+#[test]
+fn png_svg_and_a_missing_image_reach_their_states() {
+    let markdown = "# Media\n\n![pic](pic.png)\n\n![badge](badge.svg)\n\n![gone](missing.png)\n";
+    let (dir, path) = fixture("md-media-states", markdown);
+    let mut session = open_markdown_read(&dir, &path);
+    wait_until(&mut session, WAIT_MS, "all three media settled", |session| {
+        let state = dump(session);
+        media_state(&state, "pic.png").as_deref() == Some("ready")
+            && media_state(&state, "badge.svg").as_deref() == Some("ready")
+            && media_state(&state, "missing.png").as_deref() == Some("failed:NotFound")
+    });
+    // The layout sizes are the natural sizes times the scale.
+    wait_until(&mut session, WAIT_MS, "laid out at natural size", |session| {
+        let state = dump(session);
+        let scale = f64::from(TEST_SCALE);
+        media_entry(&state, "preview.md", "pic.png").is_some_and(|item| size_close(&item, 64.0 * scale, 32.0 * scale))
+            && media_entry(&state, "preview.md", "badge.svg")
+                .is_some_and(|item| size_close(&item, 100.0 * scale, 20.0 * scale))
+    });
+    let state = dump(&mut session);
+    assert!(state["markdown_media_stats"]["loads_started"].as_u64().unwrap_or(0) >= 3, "{state}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_changed_and_then_a_deleted_png_follow_the_disk_after_tab_activation() {
+    // The image lives outside the workspace, so the file tree watcher never sees it change:
+    // only the tab activation can notice.
+    let assets = scratch_dir("md-media-revalidate-assets");
+    write_png(&assets.join("pic.png"), 64, 32);
+    let assets_name = assets.file_name().and_then(|name| name.to_str()).expect("assets dir name").to_owned();
+    let (dir, path) = fixture("md-media-revalidate", &format!("# Media\n\n![pic](../{assets_name}/pic.png)\n"));
+    let mut session = open_markdown_read(&dir, &path);
+    let scale = f64::from(TEST_SCALE);
+    wait_until(&mut session, WAIT_MS, "the png at 64x32", |session| {
+        media_entry(&dump(session), "preview.md", "pic.png")
+            .is_some_and(|item| item["state"] == "ready" && size_close(&item, 64.0 * scale, 32.0 * scale))
+    });
+
+    write_png(&assets.join("pic.png"), 32, 32);
+    open_file(&mut session, &dir.join("other.txt"));
+    switch_to(&mut session, "preview.md");
+    wait_until(&mut session, WAIT_MS, "the png at 32x32", |session| {
+        media_entry(&dump(session), "preview.md", "pic.png")
+            .is_some_and(|item| item["state"] == "ready" && size_close(&item, 32.0 * scale, 32.0 * scale))
+    });
+
+    std::fs::remove_file(assets.join("pic.png")).expect("delete png");
+    switch_to(&mut session, "other.txt");
+    switch_to(&mut session, "preview.md");
+    wait_until(&mut session, WAIT_MS, "the deleted png fails", |session| {
+        media_state(&dump(session), "pic.png").as_deref() == Some("failed:NotFound")
+    });
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(assets);
+}
+
+#[test]
+fn a_mermaid_block_renders_and_garbage_fails() {
+    let markdown = "# Diagrams\n\n```mermaid\ngraph TD; A-->B\n```\n\n```mermaid\n@@@ not a diagram ((((\n```\n";
+    let (dir, path) = fixture("md-media-mermaid", markdown);
+    let mut session = open_markdown_read(&dir, &path);
+    wait_until(&mut session, WAIT_MS, "both mermaid blocks settled", |session| {
+        let state = dump(session);
+        let items = state["tabs"][tab_index(&state, "preview.md")]["markdown_media"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let states: Vec<&str> = items.iter().filter_map(|item| item["state"].as_str()).collect();
+        states == ["ready", "failed:Mermaid"]
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn edit_mode_and_text_tabs_have_no_media() {
+    let (dir, path) = fixture("md-media-unaffected", "# Media\n\n![pic](pic.png)\n");
+    let mut session = open_markdown(&dir, &path);
+    open_file(&mut session, &dir.join("other.txt"));
+    let _ = run_script(&mut session, b"wait 300\n");
+    let state = dump(&mut session);
+    for file_name in ["preview.md", "other.txt"] {
+        assert!(state["tabs"][tab_index(&state, file_name)]["markdown_media"].is_null(), "{file_name}: {state}");
+    }
+    assert_eq!(state["markdown_media_stats"]["loads_started"], 0, "{state}");
+    assert_eq!(state["markdown_media_stats"]["texture_bytes"], 0, "{state}");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -12,6 +12,7 @@ impl Renderer {
     fn resolve_markdown_edit_scroll_transition(
         &mut self,
         markdown: &mut crate::app::MarkdownTabState,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
         editor: &Editor,
         scroll: &mut crate::scroll::ScrollState,
         current_sticky_lines: &[(usize, usize)],
@@ -58,7 +59,7 @@ impl Renderer {
             Some(anchor)
         } else if transition.from == crate::app::MarkdownMode::Read {
             transition.origin_read_width.and_then(|width| {
-                self.prepare_markdown_read_layout(markdown, None, editor.version, width)
+                self.prepare_markdown_read_layout(markdown, markdown_media, editor.version, width)
                     .then(|| {
                         markdown
                             .read_layout
@@ -165,6 +166,7 @@ impl Renderer {
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
@@ -234,6 +236,7 @@ impl Renderer {
             tabs,
             active_tab,
             markdown,
+            markdown_media,
             scroll_y_state,
             current_sticky_lines,
             layout,
@@ -389,6 +392,7 @@ impl Renderer {
                 chrome_detail_start,
             } = self.draw_root_markdown_read_frame(
                 markdown,
+                markdown_media,
                 editor,
                 editor_title,
                 editor_path,
