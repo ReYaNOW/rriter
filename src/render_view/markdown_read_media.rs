@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::app::{MediaItem, media_paragraph, mermaid_item};
-use crate::markdown_media::{MediaEntryView, MediaError, MediaKey};
+use crate::app::{MediaItem, document_media};
+use crate::markdown_media::{MediaEntryView, MediaKey};
 
 const MEDIA_GAP: f32 = 8.0;
 const MEDIA_FRAME_PAD: f32 = 6.0;
@@ -120,37 +120,21 @@ impl<'m> MediaInput<'m> {
         media: &'m MarkdownMedia,
     ) -> Self {
         let defs = document.link_definitions(source);
-        let mut items = HashMap::new();
-        for (index, block) in document.blocks.iter().enumerate() {
-            let found = match &block.kind {
-                MarkdownBlockKind::Paragraph { .. } => {
-                    media_paragraph(document, index, source, doc_dir, &defs)
-                }
-                MarkdownBlockKind::Code(code)
-                    if code.language.as_deref().is_some_and(|l| l.eq_ignore_ascii_case("mermaid")) =>
-                {
-                    let text: String = code
-                        .content_ranges
-                        .iter()
-                        .filter_map(|range| source.get(range.clone()))
-                        .collect();
-                    Some(vec![mermaid_item(&text, block.source_range.clone())])
-                }
-                _ => None,
-            };
-            if let Some(found) = found {
-                items.insert(block.source_range.start, found);
-            }
-        }
+        let items = document_media(document, source, doc_dir, &defs)
+            .into_iter()
+            .filter_map(|(index, found)| {
+                Some((document.blocks.get(index)?.source_range.start, found))
+            })
+            .collect();
         Self { items, media }
     }
 
-    /// First line of the error of a Mermaid block that failed to render; such a block stays a
-    /// code block and shows the message under its header.
+    /// First line of the error of a Mermaid block that failed to render, whatever the failure
+    /// (spec: the block stays a code block and shows one error line under its header).
     fn mermaid_error(&self, block_start: usize) -> Option<String> {
         let item = self.items.get(&block_start)?.first()?;
         match (&item.key, self.media.entry(&item.key)) {
-            (MediaKey::Mermaid(_), MediaEntryView::Failed(error @ MediaError::Mermaid(_))) => {
+            (MediaKey::Mermaid(_), MediaEntryView::Failed(error)) => {
                 Some(error.label().lines().next().unwrap_or("").to_string())
             }
             _ => None,
@@ -272,7 +256,7 @@ impl Renderer {
                     &item.alt,
                     (x + pad).round(),
                     (y + line_h * 0.82).round(),
-                    item.w - 2.0 * pad,
+                    (item.w - 2.0 * pad).max(0.0),
                     faded(self.theme.line_num, 0.95),
                     MEDIA_ALT_SCALE,
                     &mut scratch,

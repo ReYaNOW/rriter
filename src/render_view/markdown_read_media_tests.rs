@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod markdown_read_media_tests {
     use super::*;
-    use crate::markdown_media::{MarkdownMedia, MediaPixels, MediaRequest};
+    use crate::markdown_media::{MarkdownMedia, MediaError, MediaPixels, MediaRequest};
     use crate::ui_waker::UiWaker;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -318,10 +318,20 @@ mod markdown_read_media_tests {
     }
 
     #[test]
-    fn other_failures_of_a_mermaid_block_use_the_frame() {
+    fn every_failure_of_a_mermaid_block_keeps_the_code_with_an_error_line() {
         let source = "```mermaid\ngraph TD\n```\n";
-        let media = loaded_media(source, Arc::new(|_| Err(MediaError::Crashed)));
-        let cache = layout_with(source, 600.0, 1.0, &media);
-        assert_eq!(media_items(&cache)[0].alt, "mermaid — рендер упал");
+        let cases = [
+            (MediaError::Crashed, "рендер упал"),
+            (MediaError::Timeout, "таймаут"),
+            (MediaError::Unsupported, "не поддерживается"),
+        ];
+        for (error, label) in cases {
+            let media = loaded_media(source, Arc::new(move |_| Err(error.clone())));
+            let cache = layout_with(source, 600.0, 1.0, &media);
+            let ReadBlockKind::Code(code) = &cache.blocks[0].kind else {
+                panic!("a failed mermaid block must stay a code block ({label})");
+            };
+            assert_eq!(code.error.as_deref(), Some(label));
+        }
     }
 }

@@ -2,7 +2,7 @@ pub mod api_client;
 pub mod api_mock;
 mod markdown;
 mod markdown_nav;
-pub(crate) use markdown_nav::{MediaItem, media_paragraph, mermaid_item};
+pub(crate) use markdown_nav::{MediaItem, document_media};
 pub(crate) use markdown::{
     MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
 };

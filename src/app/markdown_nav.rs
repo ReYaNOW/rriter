@@ -164,6 +164,39 @@ pub(crate) fn media_paragraph(
     (!items.is_empty()).then_some(items)
 }
 
+/// The single place that decides which top-level blocks are media blocks (image-only
+/// paragraphs and Mermaid code blocks) and what their items and keys are. The layout and the
+/// request pass must both use it so that their keys always agree. Returns `(block index, items)`
+/// in document order; `defs` are `doc.link_definitions(source)`.
+pub(crate) fn document_media(
+    doc: &MarkdownDocument,
+    source: &str,
+    doc_dir: &Path,
+    defs: &[(String, String)],
+) -> Vec<(usize, Vec<MediaItem>)> {
+    let mut found = Vec::new();
+    for (index, block) in doc.blocks.iter().enumerate() {
+        let items = match &block.kind {
+            MarkdownBlockKind::Paragraph { .. } => media_paragraph(doc, index, source, doc_dir, defs),
+            MarkdownBlockKind::Code(code)
+                if code.language.as_deref().is_some_and(|l| l.eq_ignore_ascii_case("mermaid")) =>
+            {
+                let text: String = code
+                    .content_ranges
+                    .iter()
+                    .filter_map(|range| source.get(range.clone()))
+                    .collect();
+                Some(vec![mermaid_item(&text, block.source_range.clone())])
+            }
+            _ => None,
+        };
+        if let Some(items) = items {
+            found.push((index, items));
+        }
+    }
+    found
+}
+
 /// Media item for the source of a Mermaid code block.
 pub(crate) fn mermaid_item(code: &str, source_range: Range<usize>) -> MediaItem {
     // In-process identity only: the key never reaches the disk, so the std hasher is enough.
@@ -731,6 +764,21 @@ mod tests {
         let source = "![logo]\n\n[logo]: l.png\n";
         let items = media(source).expect("paragraph");
         assert_eq!(items[0].key, file_key("/docs/l.png"));
+    }
+
+    #[test]
+    fn document_media_key_of_a_mermaid_block_is_the_item_of_the_joined_code() {
+        let source = "text\n\n```Mermaid\ngraph TD\n  A-->B\n```\n\n![a](x.png)\n\n```rust\nfn main() {}\n```\n";
+        let document = parse(source);
+        let defs = document.link_definitions(source);
+        let found = document_media(&document, source, dir(), &defs);
+        let indices: Vec<usize> = found.iter().map(|(index, _)| *index).collect();
+        assert_eq!(indices, vec![1, 2]);
+        let expected = mermaid_item("graph TD\n  A-->B\n", 0..0);
+        assert_eq!(found[0].1.len(), 1);
+        assert_eq!(found[0].1[0].key, expected.key);
+        assert_eq!(found[0].1[0].source, expected.source);
+        assert_eq!(found[1].1[0].key, file_key("/docs/x.png"));
     }
 
     #[test]
