@@ -34,9 +34,13 @@ impl App {
     pub(crate) fn handle_markdown_toc_key(
         &mut self,
         key: winit::keyboard::PhysicalKey,
+        state: winit::event::ElementState,
     ) -> bool {
         if !self.markdown_toc.open {
             return false;
+        }
+        if state != winit::event::ElementState::Pressed {
+            return true;
         }
         match key {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {

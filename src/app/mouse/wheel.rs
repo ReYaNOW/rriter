@@ -114,7 +114,9 @@ impl App {
             self.markdown_toc.scroll.anim_speed = 7.0;
             self.markdown_toc.scroll.scroll_by(dy);
             self.markdown_toc.scroll.clamp_target(0.0, self.markdown_toc.max_scroll);
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
         if self.show_settings && self.tool_installer.is_log_open() {

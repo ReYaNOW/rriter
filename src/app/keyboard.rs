@@ -271,7 +271,8 @@ impl App {
     }
 
     fn handle_main_ime_commit_inner(&mut self, text: &str) -> bool {
-        if self.handle_file_tree_modal_ime_commit(text)
+        if self.markdown_toc.open
+            || self.handle_file_tree_modal_ime_commit(text)
             || self.modal_dialog_open()
             || self.ide_panel.project_search.help_open
         {

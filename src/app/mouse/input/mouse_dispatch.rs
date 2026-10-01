@@ -20,7 +20,9 @@ impl App {
         if self.markdown_toc.open && state == ElementState::Pressed {
             if !self.markdown_toc.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect)) {
                 self.markdown_toc.close();
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return;
             }
         }

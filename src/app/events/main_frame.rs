@@ -613,16 +613,15 @@ impl App {
                 }
 
                 if self.markdown_toc.open {
-                    let (mx, my) = {
-                        let renderer = self.renderer.as_ref().unwrap();
-                        (renderer.last_mouse_x, renderer.last_mouse_y)
-                    };
-                    wants_pointer |= self.renderer.as_mut().unwrap().draw_markdown_toc(
-                        &mut self.markdown_toc,
-                        &mut self.ui_registry,
-                        mx,
-                        my,
-                    );
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        let (mx, my) = (renderer.last_mouse_x, renderer.last_mouse_y);
+                        wants_pointer |= renderer.draw_markdown_toc(
+                            &mut self.markdown_toc,
+                            &mut self.ui_registry,
+                            mx,
+                            my,
+                        );
+                    }
                 }
 
                 let cursor_icon = if blocking_modal_open {

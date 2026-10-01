@@ -146,19 +146,33 @@ fn toc_button_and_empty_document_keep_an_open_empty_popup() {
 
 #[test]
 fn toc_arrow_selection_clamps_at_the_first_and_last_heading() {
-    let (dir, path) = fixture("markdown-toc-edges", "# First\n\n## Second\n");
+    let (dir, path) = fixture(
+        "markdown-toc-edges",
+        "# First\n\n## Second\n\n### Third\n\n#### Fourth\n",
+    );
     let mut session = open_markdown(&dir, &path);
     let _ = open_toc_with_shortcut(&mut session);
-    let lines = run_script(&mut session, b"key up\nkey down\nkey down\ndump\n");
+    let lines = run_script(&mut session, b"key down\ndump\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = state_reply(&lines);
     assert_eq!(state["markdown_toc"]["selected"], 1);
     assert_eq!(state["markdown_toc"]["open"], true);
-    assert_eq!(state["markdown_toc"]["items"].as_array().map(Vec::len), Some(2));
+    assert_eq!(state["markdown_toc"]["items"].as_array().map(Vec::len), Some(4));
     assert_eq!(state["editor"]["cursor"], 0);
-    let lines = run_script(&mut session, b"key up\nkey up\ndump\n");
+    let lines = run_script(&mut session, b"key up\nkey up\nkey up\nkey up\ndump\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     assert_eq!(state_reply(&lines)["markdown_toc"]["selected"], 0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn toc_ime_commit_does_not_change_editor_text_while_open() {
+    let (dir, path) = fixture("markdown-toc-ime", "# First\n\n## Second\n");
+    let mut session = open_markdown(&dir, &path);
+    let before = session.app.editor.get_full_text();
+    let _ = open_toc_with_shortcut(&mut session);
+    session.app.handle_main_ime_commit("committed text");
+    assert!(session.app.editor.text_equals(&before));
     let _ = std::fs::remove_dir_all(dir);
 }
 

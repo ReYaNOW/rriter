@@ -175,7 +175,7 @@ impl App {
         let alt = self.modifiers.alt_key();
 
         if self.markdown_toc.open {
-            self.handle_markdown_toc_key(key_event.physical_key);
+            self.handle_markdown_toc_key(key_event.physical_key, key_event.state);
             return;
         }
 
