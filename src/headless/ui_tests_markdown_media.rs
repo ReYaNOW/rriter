@@ -10,7 +10,12 @@ use crate::headless::tests_support::{
     workspace_with_explorer,
 };
 use serde_json::Value;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
@@ -88,6 +93,220 @@ fn media_state(state: &Value, source_suffix: &str) -> Option<String> {
 fn size_close(item: &Value, width: f64, height: f64) -> bool {
     let close = |key: &str, want: f64| item[key].as_f64().is_some_and(|got| (got - want).abs() < 0.6);
     close("w", width) && close("h", height)
+}
+
+struct MediaHttpFixture {
+    base_url: String,
+    repaired: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MediaHttpFixture {
+    fn start(png: Vec<u8>) -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind media HTTP fixture");
+        let address = listener.local_addr().expect("media HTTP fixture address");
+        listener.set_nonblocking(true).expect("set fixture nonblocking");
+        let repaired = Arc::new(AtomicBool::new(false));
+        let worker_repaired = Arc::clone(&repaired);
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker = std::thread::spawn(move || {
+            while !worker_stop.load(Ordering::Relaxed) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(count) => request.extend_from_slice(&buffer[..count]),
+                    }
+                    if request.len() > 16 * 1024 {
+                        break;
+                    }
+                }
+                let request_line = String::from_utf8_lossy(&request);
+                let path = request_line.split_whitespace().nth(1).unwrap_or("");
+                let (status, mime, body): (u16, &str, &[u8]) = match path {
+                    "/remote.png" => (200, "image/png", &png),
+                    "/badge.svg" => (200, "image/svg+xml", BADGE_SVG.as_bytes()),
+                    "/repair.svg" if worker_repaired.load(Ordering::Relaxed) => {
+                        (200, "image/svg+xml", BADGE_SVG.as_bytes())
+                    }
+                    "/repair.svg" => (404, "text/plain", b"missing"),
+                    _ => (404, "text/plain", b"missing"),
+                };
+                let reason = if status == 200 { "OK" } else { "Not Found" };
+                let headers = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(headers.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        Self {
+            base_url: format!("http://{address}"),
+            repaired,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    fn repair(&self) {
+        self.repaired.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Drop for MediaHttpFixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn settle_wheel(session: &mut HeadlessSession, x: f64, y: f64, delta: i32) -> Duration {
+    let script = format!("mouse_move {x} {y}\nwheel 0 {delta}\nsettle 2000\n");
+    let started = Instant::now();
+    let lines = run_script(session, script.as_bytes());
+    let elapsed = started.elapsed();
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    elapsed
+}
+
+fn visible_media_are_ready(state: &Value, scroll_y: f64, viewport_h: f64) -> bool {
+    let items = state["tabs"][tab_index(state, "preview.md")]["markdown_media"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    items.iter().all(|item| {
+        let Some(y) = item["y"].as_f64() else { return true };
+        let h = item["h"].as_f64().unwrap_or(0.0);
+        let visible = y + h > scroll_y && y < scroll_y + viewport_h;
+        !visible || item["state"] == "ready"
+    })
+}
+
+#[test]
+fn http_media_and_local_media_load_through_the_reader_and_http_failure_retries_on_reopen() {
+    let (dir, local_path) = fixture("md-media-http", "# Media\n");
+    let remote_png = std::fs::read(dir.join("pic.png")).expect("read png fixture");
+    let server = MediaHttpFixture::start(remote_png);
+    let markdown = format!(
+        "# Media\n\n![local](pic.png)\n\n![remote]({}/remote.png)\n\n![badge]({}/badge.svg)\n\n![repair]({}/repair.svg)\n\n```mermaid\ngraph TD; A-->B\n```\n\n[external](https://example.invalid) and [text](other.txt)\n",
+        server.base_url, server.base_url, server.base_url
+    );
+    std::fs::write(&local_path, markdown).expect("write HTTP markdown fixture");
+    let mut session = open_markdown_read(&dir, &local_path);
+    wait_until(&mut session, WAIT_MS, "HTTP, local, and Mermaid media to settle", |session| {
+        let state = dump(session);
+        ["pic.png", "/remote.png", "/badge.svg", "/repair.svg"]
+            .iter()
+            .all(|key| media_state(&state, key).is_some())
+            && media_state(&state, "/repair.svg").as_deref() == Some("failed:Http")
+            && state["tabs"][tab_index(&state, "preview.md")]["markdown_media"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["key"].as_str().is_some_and(|key| key.starts_with("mermaid:")) && item["state"] == "ready"))
+    });
+    let state = dump(&mut session);
+    for suffix in ["pic.png", "/remote.png", "/badge.svg"] {
+        assert_eq!(media_state(&state, suffix).as_deref(), Some("ready"), "{state}");
+    }
+    assert_eq!(media_state(&state, "/repair.svg").as_deref(), Some("failed:Http"), "{state}");
+
+    server.repair();
+    open_file(&mut session, &dir.join("other.txt"));
+    switch_to(&mut session, "preview.md");
+    let preview_index = tab_index(&dump(&mut session), "preview.md");
+    click_ui(&mut session, &format!("EditorTabClose({preview_index})"));
+    open_file(&mut session, &local_path);
+    if session.app.markdown_mode() != crate::app::MarkdownMode::Read {
+        click_ui(&mut session, "MarkdownModeToggle");
+    }
+    wait_until(&mut session, WAIT_MS, "reopened HTTP media to retry", |session| {
+        media_state(&dump(session), "/repair.svg").as_deref() == Some("ready")
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn thirty_large_images_survive_repeated_end_to_end_scrolling_within_the_texture_budget() {
+    let dir = scratch_dir("md-media-load");
+    let source_png = dir.join("source.png");
+    write_png(&source_png, 1600, 1200);
+    let mut markdown = String::from("# Large media\n\n");
+    for index in 0..30 {
+        let name = format!("large-{index:02}.png");
+        std::fs::copy(&source_png, dir.join(&name)).expect("copy large PNG fixture");
+        markdown.push_str(&format!("![image {index}]({name})\n\n"));
+    }
+    let path = dir.join("preview.md");
+    std::fs::write(&path, markdown).expect("write load markdown fixture");
+    let mut session = open_markdown_read(&dir, &path);
+    wait_until(&mut session, WAIT_MS, "large image Reader layout", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+
+    let (x, y, _, viewport_h) = session
+        .app
+        .ui_registry
+        .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+        .expect("Markdown Reader body rect");
+    let (x, y, viewport_h) = (f64::from(x), f64::from(y), f64::from(viewport_h));
+    let mut max_settle = Duration::ZERO;
+    for direction in ["down", "up", "down", "up"] {
+        let delta = if direction == "down" { -12 } else { 12 };
+        let mut reached_edge = false;
+        for _ in 0..100 {
+            let max_scroll = (f64::from(session.app.markdown.read_layout.content_height()) - viewport_h).max(0.0);
+            let current = f64::from(session.app.scroll_y.current);
+            if (direction == "down" && current >= max_scroll - 2.0)
+                || (direction == "up" && current <= 2.0)
+            {
+                reached_edge = true;
+                break;
+            }
+            max_settle = max_settle.max(settle_wheel(&mut session, x + 20.0, y + 20.0, delta));
+            wait_until(&mut session, WAIT_MS, "visible media after wheel scrolling", |session| {
+                visible_media_are_ready(
+                    &dump(session),
+                    f64::from(session.app.scroll_y.current),
+                    viewport_h,
+                )
+            });
+        }
+        assert!(reached_edge, "scroll did not reach {direction} edge: {}", session.app.scroll_y.current);
+    }
+
+    let state = dump(&mut session);
+    let stats = &state["markdown_media_stats"];
+    let texture_bytes = stats["texture_bytes"].as_u64().unwrap_or(u64::MAX);
+    let visible_texture_bytes = stats["visible_texture_bytes"].as_u64().unwrap_or(0);
+    let loads_started = stats["loads_started"].as_u64().unwrap_or(u64::MAX);
+    assert!(texture_bytes <= 128 * 1024 * 1024 + visible_texture_bytes, "{stats}");
+    assert!(loads_started <= 60, "more than one reload per image: {stats}");
+    assert!(visible_media_are_ready(
+        &state,
+        f64::from(session.app.scroll_y.current),
+        viewport_h,
+    ), "visible images are not ready: {state}");
+    // Measured ~1.2 s under the parallel suite; the bound only catches a blocked frame loop.
+    assert!(max_settle <= Duration::from_secs(3), "slowest wheel settle took {max_settle:?}");
+    eprintln!(
+        "markdown media load: max settle {:?}, loads_started {}, texture_bytes {}, visible_texture_bytes {}",
+        max_settle, loads_started, texture_bytes, visible_texture_bytes
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 fn switch_to(session: &mut HeadlessSession, file_name: &str) {
