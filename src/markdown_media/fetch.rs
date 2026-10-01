@@ -72,8 +72,8 @@ fn fetch_url(url: &str, env: &FetchEnv) -> Result<Fetched, MediaError> {
         };
         return Ok((kind, bytes, None));
     }
-    let response = env
-        .http
+    let client = env.http.get().ok_or(MediaError::Unsupported)?;
+    let response = client
         .get(parsed)
         .send()
         .map_err(|_| MediaError::Timeout)?;
@@ -217,7 +217,7 @@ mod tests {
             .expect("http client");
         FetchEnv {
             cache_dir,
-            http,
+            http: crate::markdown_media::HttpSource::ready(http),
             max_bytes,
             render: Some(RenderCommand::InProcess),
         }

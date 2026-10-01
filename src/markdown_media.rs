@@ -38,6 +38,17 @@ pub(crate) enum MediaKey {
     Mermaid(u64),
 }
 
+impl MediaKey {
+    /// Stable text form of the key for the headless dump.
+    pub(crate) fn dump_name(&self) -> String {
+        match self {
+            MediaKey::File(path) => path.to_string_lossy(),
+            MediaKey::Url(url) => url.clone(),
+            MediaKey::Mermaid(hash) => format!("mermaid:{hash:016x}"),
+        }
+    }
+}
+
 /// Where the bytes of a media item come from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MediaSource {
@@ -123,11 +134,42 @@ pub(crate) enum RenderCommand {
     InProcess,
 }
 
+/// The http client, built on the first `get` (in a worker thread, on the first Url fetch) so
+/// that starting the application and opening documents without remote images pay nothing.
+pub(crate) struct HttpSource {
+    build: Box<dyn Fn() -> Option<reqwest::blocking::Client> + Send + Sync>,
+    client: std::sync::Mutex<Option<reqwest::blocking::Client>>,
+}
+
+impl HttpSource {
+    pub(crate) fn lazy(build: impl Fn() -> Option<reqwest::blocking::Client> + Send + Sync + 'static) -> Arc<Self> {
+        Arc::new(Self { build: Box::new(build), client: std::sync::Mutex::new(None) })
+    }
+
+    /// An already built client.
+    #[cfg(test)]
+    pub(crate) fn ready(client: reqwest::blocking::Client) -> Arc<Self> {
+        Arc::new(Self {
+            build: Box::new(|| None),
+            client: std::sync::Mutex::new(Some(client)),
+        })
+    }
+
+    /// The shared client; `None` when it cannot be built. Blocks on the first call only.
+    pub(crate) fn get(&self) -> Option<reqwest::blocking::Client> {
+        let mut slot = self.client.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = (self.build)();
+        }
+        slot.clone()
+    }
+}
+
 /// Everything `fetch_bytes` needs from its owner.
 #[derive(Clone)]
 pub(crate) struct FetchEnv {
     pub cache_dir: PathBuf,
-    pub http: reqwest::blocking::Client,
+    pub http: Arc<HttpSource>,
     pub max_bytes: u64,
     pub render: Option<RenderCommand>,
 }
@@ -249,25 +291,21 @@ impl MarkdownMedia {
         media
     }
 
-    /// The application cache: one http client (15 s timeout), the on-disk cache under the
-    /// platform cache directory and the current executable as the helper.
+    /// The application cache: one http client (15 s timeout) built on the first Url fetch,
+    /// the on-disk cache under the platform cache directory and the current executable as
+    /// the helper. Nothing here touches the network stack or the certificate store.
     pub(crate) fn from_platform() -> Self {
-        let client = crate::platform::blocking_http_client_builder()
-            .timeout(HTTP_TIMEOUT)
-            .build();
-        match client {
-            Ok(http) => Self::new(FetchEnv {
-                cache_dir: crate::platform::cache_dir().join("markdown-images"),
-                http,
-                max_bytes: MAX_FETCH_BYTES,
-                render: RenderCommand::for_current_process(),
+        Self::new(FetchEnv {
+            cache_dir: crate::platform::cache_dir().join("markdown-images"),
+            http: HttpSource::lazy(|| {
+                crate::platform::blocking_http_client_builder()
+                    .timeout(HTTP_TIMEOUT)
+                    .build()
+                    .ok()
             }),
-            Err(_) => {
-                let mut media = Self::with_loader(Arc::new(|_| Err(MediaError::Unsupported)));
-                media.supported = false;
-                media
-            }
-        }
+            max_bytes: MAX_FETCH_BYTES,
+            render: RenderCommand::for_current_process(),
+        })
     }
 
     pub(crate) fn with_loader(loader: Loader) -> Self {

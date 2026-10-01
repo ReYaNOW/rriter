@@ -70,13 +70,13 @@ fn tab_index(state: &Value, file_name: &str) -> usize {
         .unwrap_or_else(|| panic!("no tab for {file_name}: {state}"))
 }
 
-/// The dump entry of the media element whose source ends with `source_suffix`.
+/// The dump entry of the media element whose key ends with `source_suffix`.
 fn media_entry(state: &Value, file_name: &str, source_suffix: &str) -> Option<Value> {
     let tab = &state["tabs"][tab_index(state, file_name)];
     tab["markdown_media"]
         .as_array()?
         .iter()
-        .find(|item| item["source"].as_str().is_some_and(|source| source.ends_with(source_suffix)))
+        .find(|item| item["key"].as_str().is_some_and(|key| key.ends_with(source_suffix)))
         .cloned()
 }
 
@@ -117,6 +117,15 @@ fn png_svg_and_a_missing_image_reach_their_states() {
     });
     let state = dump(&mut session);
     assert!(state["markdown_media_stats"]["loads_started"].as_u64().unwrap_or(0) >= 3, "{state}");
+    // Every element carries its document rectangle: `x`/`y` are numbers and the elements
+    // are stacked top to bottom.
+    let items = state["tabs"][tab_index(&state, "preview.md")]["markdown_media"].as_array().cloned().unwrap_or_default();
+    assert_eq!(items.len(), 3, "{state}");
+    for item in &items {
+        assert!(item["x"].is_number() && item["y"].is_number(), "{item}");
+    }
+    assert!(items[0]["y"].as_f64() < items[1]["y"].as_f64(), "{state}");
+    assert!(items[1]["y"].as_f64() < items[2]["y"].as_f64(), "{state}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -178,9 +187,33 @@ fn edit_mode_and_text_tabs_have_no_media() {
     let _ = run_script(&mut session, b"wait 300\n");
     let state = dump(&mut session);
     for file_name in ["preview.md", "other.txt"] {
-        assert!(state["tabs"][tab_index(&state, file_name)]["markdown_media"].is_null(), "{file_name}: {state}");
+        assert_eq!(state["tabs"][tab_index(&state, file_name)]["markdown_media"], serde_json::json!([]), "{file_name}: {state}");
     }
     assert_eq!(state["markdown_media_stats"]["loads_started"], 0, "{state}");
     assert_eq!(state["markdown_media_stats"]["texture_bytes"], 0, "{state}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_read_layout_is_built_once_per_geometry_with_the_ide_panel_open() {
+    // The frame step (media requests, anchoring) and the draw both lay the document out; if
+    // their widths differed in one frame the cache would be rebuilt twice per frame.
+    let (dir, path) = fixture("md-media-width", "# Media\n\n![pic](pic.png)\n\ntext\n");
+    let mut session = open_markdown_read(&dir, &path);
+    wait_until(&mut session, WAIT_MS, "the png ready", |session| {
+        media_state(&dump(session), "pic.png").as_deref() == Some("ready")
+    });
+    let lines = run_script(&mut session, b"settle 2000\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.is_ide_mode && session.app.ide_panel.visible_left_width(1.0) > 0.0);
+    // Whole and fractional panel widths, and steps below the half pixel the draw ignores.
+    for width in [240.0f32, 263.4, 301.7, 301.9, 302.1, 302.3, 287.0] {
+        session.app.ide_panel.left_width = width;
+        let before = session.app.markdown.read_layout.rebuild_count();
+        let lines = run_script(&mut session, b"mouse_move 700 300\nmouse_move 701 300\nmouse_move 700 300\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        let rebuilds = session.app.markdown.read_layout.rebuild_count() - before;
+        assert!(rebuilds <= 1, "panel width {width}: {rebuilds} rebuilds in three frames");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

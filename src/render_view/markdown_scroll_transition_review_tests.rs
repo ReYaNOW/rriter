@@ -60,7 +60,7 @@ pub(crate) mod reviewer_stage2_integration {
         renderer.flush();
     }
 
-    fn edit_transition(app: &mut App) -> bool {
+    pub(crate) fn edit_transition(app: &mut App) -> bool {
         let renderer = app.renderer.as_mut().unwrap();
         renderer.resolve_markdown_edit_scroll_transition(
             &mut app.markdown,

@@ -437,7 +437,7 @@ fn missing_render_command_fails_with_unsupported() {
     let waker = UiWaker::counting();
     let dir = test_dir("unsupported");
     let http = reqwest::blocking::Client::builder().no_proxy().build().expect("client");
-    let env = FetchEnv { cache_dir: dir.clone(), http, max_bytes: 1024, render: None };
+    let env = FetchEnv { cache_dir: dir.clone(), http: HttpSource::ready(http), max_bytes: 1024, render: None };
     let mut media = MarkdownMedia::new(env);
     let req = mermaid_req(1, 400);
     media.request(req.clone(), &waker);
@@ -721,4 +721,18 @@ fn uploads_take_visible_first_and_at_most_the_limit() {
 fn disk_cache_is_trimmed_first_and_then_every_tenth_url_load() {
     let trims: Vec<u64> = (0..25).filter(|n| should_trim_disk_cache(*n)).collect();
     assert_eq!(trims, vec![0, 10, 20]);
+}
+
+#[test]
+fn the_http_client_is_built_on_the_first_get_and_only_once() {
+    let builds = Arc::new(AtomicUsize::new(0));
+    let counter = builds.clone();
+    let source = HttpSource::lazy(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+        reqwest::blocking::Client::builder().no_proxy().build().ok()
+    });
+    assert_eq!(builds.load(Ordering::SeqCst), 0, "building the cache must not build the client");
+    assert!(source.get().is_some());
+    assert!(source.get().is_some());
+    assert_eq!(builds.load(Ordering::SeqCst), 1);
 }

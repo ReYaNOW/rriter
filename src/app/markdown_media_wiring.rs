@@ -112,55 +112,55 @@ impl MarkdownTabState {
         media.revalidate_files(&keys, waker);
     }
 
-    /// Headless dump of the media of a tab in Read mode: one object per element with its
-    /// state, the natural size and the size it is laid out at. `None` outside Read mode.
+    /// Headless dump of the media of a tab in Read mode: `{key, state, x, y, w, h}` per media
+    /// element of the document, the rectangle in document pixels. Empty outside Read mode
+    /// and without a layout. `state` is `pending`, `ready` or `failed:<MediaError variant>`;
+    /// a key the cache has not been asked for yet counts as `pending`. An element without a
+    /// media rectangle (a failed Mermaid block is drawn as a code block) has no x/y/w/h
+    /// (`null`).
     pub(crate) fn media_dump(
         &self,
         media: &MarkdownMedia,
         version: u64,
         doc_dir: Option<&Path>,
-    ) -> Option<serde_json::Value> {
-        use crate::markdown_media::{MediaEntryView, MediaSource};
-        use serde_json::json;
+    ) -> Vec<serde_json::Value> {
+        use crate::markdown_media::MediaEntryView;
 
-        if self.mode != MarkdownMode::Read {
-            return None;
+        if self.mode != MarkdownMode::Read || self.read_layout.content_height() <= 0.0 {
+            return Vec::new();
         }
-        let document = self.read_document(version)?;
+        let Some(document) = self.read_document(version) else {
+            return Vec::new();
+        };
         let source = self.read_source.as_str();
         let defs = document.link_definitions(source);
         let items = document_media(document, source, doc_dir.unwrap_or(Path::new("")), &defs);
         let rects: Vec<_> = self.read_layout.media_blocks().collect();
-        let described = items.into_iter().flat_map(|(_, items)| items).map(|item| {
-            let (state, natural) = match media.entry(&item.key) {
-                MediaEntryView::Unknown => ("unknown".to_string(), None),
-                MediaEntryView::Pending { natural } => ("pending".to_string(), natural),
-                MediaEntryView::Ready { natural_w, natural_h, .. } => {
-                    ("ready".to_string(), Some((natural_w, natural_h)))
-                }
-                MediaEntryView::Failed(error) => {
-                    let name = format!("{error:?}");
-                    let variant = name.split('(').next().unwrap_or_default();
-                    (format!("failed:{variant}"), None)
-                }
-            };
-            let laid_out = rects.iter().find(|(key, _)| **key == item.key).map(|(_, rect)| rect);
-            let source = match &item.source {
-                MediaSource::File(path) => path.display().to_string(),
-                MediaSource::Url(url) => url.clone(),
-                MediaSource::Mermaid(_) => "mermaid".to_string(),
-            };
-            json!({
-                "source": source,
-                "alt": item.alt,
-                "state": state,
-                "natural_w": natural.map(|(w, _)| w),
-                "natural_h": natural.map(|(_, h)| h),
-                "w": laid_out.map(|rect| rect[2]),
-                "h": laid_out.map(|rect| rect[3]),
+        items
+            .into_iter()
+            .flat_map(|(_, items)| items)
+            .map(|item| {
+                let key = &item.key;
+                let rect = rects.iter().find(|(rect_key, _)| *rect_key == key).map(|(_, rect)| *rect);
+                let state = match media.entry(key) {
+                    MediaEntryView::Unknown | MediaEntryView::Pending { .. } => "pending".to_string(),
+                    MediaEntryView::Ready { .. } => "ready".to_string(),
+                    MediaEntryView::Failed(error) => {
+                        let name = format!("{error:?}");
+                        let variant = name.split('(').next().unwrap_or_default();
+                        format!("failed:{variant}")
+                    }
+                };
+                serde_json::json!({
+                    "key": key.dump_name(),
+                    "state": state,
+                    "x": rect.map(|rect| rect[0]),
+                    "y": rect.map(|rect| rect[1]),
+                    "w": rect.map(|rect| rect[2]),
+                    "h": rect.map(|rect| rect[3]),
+                })
             })
-        });
-        Some(serde_json::Value::Array(described.collect()))
+            .collect()
     }
 
     /// Media elements whose rectangle overlaps `[top, bottom]` of the document, with the

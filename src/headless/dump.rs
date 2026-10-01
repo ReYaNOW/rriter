@@ -292,7 +292,7 @@ fn active_tab_json(app: &App, index: usize) -> Value {
                 app.file_path.as_deref().and_then(Path::parent),
             )
         } else {
-            None
+            Vec::new()
         },
         kind: app.tabs.get(index).map(tab_kind_name).unwrap_or("normal"),
         pdf: app.tabs.get(index).and_then(|tab| tab.pdf.as_deref()),
@@ -311,8 +311,8 @@ struct TabView<'a> {
     scroll_y: &'a ScrollState,
     scroll_x: &'a ScrollState,
     markdown: bool,
-    /// Media elements of a Markdown tab in Read mode (`null` otherwise).
-    markdown_media: Option<Value>,
+    /// Media elements of a Markdown tab in Read mode (empty otherwise).
+    markdown_media: Vec<Value>,
     kind: &'static str,
     pdf: Option<&'a crate::app::pdf_tab::PdfTabState>,
     engine: &'a crate::app::pdf_tab::PdfEngineState,

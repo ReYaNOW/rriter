@@ -608,14 +608,23 @@ impl Renderer {
                     self.scale_factor,
                     self.font_size,
                 ));
-        // Free scrolling (also a wheel animation or an anchor jump in flight): keep the text at
-        // the top of the viewport. Not at the very top of the document, where the page grows
-        // downwards under the reader, and not while the scrollbar thumb is dragged.
-        let media_anchor = (media_relayout
+        // Free scrolling (also a wheel animation or an anchor jump in flight), not while the
+        // scrollbar thumb is dragged: `current` keeps the text at the top of the viewport,
+        // except at the very top of the document where the page grows downwards under the
+        // reader; the animation target of a motion in flight keeps its own text, so an image
+        // that grows between the screen and the target does not stop the motion short of it.
+        let free_scroll = media_relayout
             && scroll.deferred_current_rebase_applied().is_none()
             && !scroll.is_dragging
-            && scroll.current > 0.5)
+            // A pending Edit -> Read transition maps the position by source range itself;
+            // a shift here would be counted twice in its `progressed` term.
+            && markdown.pending_transition_for(crate::app::MarkdownMode::Read).is_none();
+        let media_anchor = (free_scroll && scroll.current > 0.5)
             .then(|| markdown.read_layout.viewport_source_anchor(scroll.current))
+            .flatten();
+        let moving = (scroll.target - scroll.current).abs() > 0.5;
+        let target_anchor = (free_scroll && moving)
+            .then(|| markdown.read_layout.viewport_source_anchor(scroll.target))
             .flatten();
         let applied_anchor = if reproject_applied_current {
             let Some(anchor) = markdown.applied_read_current_anchor(scroll, editor_version) else {
@@ -630,11 +639,19 @@ impl Renderer {
             return false;
         }
         let Some(anchor) = applied_anchor else {
-            if let Some(anchor) = media_anchor
-                && let Some(line_y) = markdown.read_layout.source_anchor_y(&anchor.source_range)
-            {
-                // Same delta for `current` and `target`: the motion continues to the same text.
-                scroll.rebase_current_preserving_motion(anchor.projected_scroll_y(line_y));
+            let projected = |anchor: &Option<MarkdownSourceAnchor>| {
+                let anchor = anchor.as_ref()?;
+                let line_y = markdown.read_layout.source_anchor_y(&anchor.source_range)?;
+                Some(anchor.projected_scroll_y(line_y))
+            };
+            let new_current = projected(&media_anchor);
+            let new_target = projected(&target_anchor);
+            if new_current.is_some() || new_target.is_some() {
+                // Each end of the motion follows its own text; one without an anchor takes
+                // the shift of the other, so the distance is kept as before.
+                let current = new_current.unwrap_or(scroll.current);
+                let target = new_target.unwrap_or(scroll.target + (current - scroll.current));
+                scroll.rebase_current_and_target(current, target);
             }
             return true;
         };

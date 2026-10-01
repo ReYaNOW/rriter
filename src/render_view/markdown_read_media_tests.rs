@@ -458,5 +458,141 @@ mod markdown_read_media_tests {
             assert!(end > target + 50.0, "the image must have grown");
             assert!((app.scroll_y.current - end.round()).abs() < 1.5, "current={} end={end}", app.scroll_y.current);
         }
+
+        /// Ten paragraphs, the image, then the paragraphs the animation runs to.
+        fn document_with_image_after_ten() -> String {
+            let paragraph = |i: usize| format!("paragraph{i:03} alpha beta gamma delta\n\n");
+            let head: String = (0..10).map(paragraph).collect();
+            let tail: String = (10..70).map(paragraph).collect();
+            format!("{head}![pic](pic.png)\n\n{tail}")
+        }
+
+        /// Starts `animate_to` the heading `needle` (no pending navigation record: the scroll
+        /// state alone must carry the motion), runs `frames_before` frames, lets the image
+        /// finish, runs the animation out and returns (heading y after growth, growth).
+        fn run_animation_to(app: &mut App, gate: &AtomicBool, source: &str, needle: &str, frames_before: usize) -> (f32, f32) {
+            let byte = source.find(needle).expect("needle");
+            let range = byte..byte + needle.len();
+            let target = app.markdown.read_layout.source_target_y(&range).expect("target");
+            app.scroll_y.animate_to(target);
+            read_frame(app);
+            for _ in 0..frames_before {
+                app.scroll_y.update(0.016);
+                read_frame(app);
+            }
+            finish_image(app, gate);
+            for _ in 0..1200 {
+                app.scroll_y.update(0.016);
+                read_frame(app);
+            }
+            let end = app.markdown.read_layout.source_target_y(&range).expect("target after growth");
+            (end, end - target)
+        }
+
+        #[test]
+        fn an_image_between_the_screen_and_the_heading_growing_mid_animation_still_arrives_at_the_heading() {
+            let source = document_with_image_after_ten();
+            let (_context, mut app, gate) = rig(&source);
+            at_rest_on(&mut app, "paragraph002");
+            let (end, growth) = run_animation_to(&mut app, &gate, &source, "paragraph050", 5);
+            assert!(growth > 50.0, "the image must have grown");
+            assert!((app.scroll_y.current - end.round()).abs() < 1.5, "current={} end={end}", app.scroll_y.current);
+        }
+
+        #[test]
+        fn an_animation_started_at_the_top_follows_the_heading_when_the_image_grows_on_the_first_frame() {
+            let source = document_with_image_after_ten();
+            let (_context, mut app, gate) = rig(&source);
+            app.scroll_y.jump_to(0.0);
+            read_frame(&mut app);
+            let (end, growth) = run_animation_to(&mut app, &gate, &source, "paragraph050", 0);
+            assert!(growth > 50.0, "the image must have grown");
+            assert!((app.scroll_y.current - end.round()).abs() < 1.5, "current={} end={end}", app.scroll_y.current);
+        }
+
+        #[test]
+        fn at_the_top_the_page_grows_under_the_reader_while_the_target_follows_its_text() {
+            let source = document_with_image_after_ten();
+            let (_context, mut app, gate) = rig(&source);
+            app.scroll_y.jump_to(0.0);
+            read_frame(&mut app);
+            let byte = source.find("paragraph050").expect("needle");
+            let target = app.markdown.read_layout.source_target_y(&(byte..byte + 12)).expect("target");
+            app.scroll_y.animate_to(target);
+            finish_image(&mut app, &gate);
+            read_frame(&mut app);
+            assert_eq!(app.scroll_y.current, 0.0, "the top of the document is not anchored");
+            let moved = app.markdown.read_layout.source_target_y(&(byte..byte + 12)).expect("target after growth");
+            assert!(moved > target + 50.0);
+            assert!((app.scroll_y.target - moved).abs() < 1.0, "target={} heading={moved}", app.scroll_y.target);
+        }
+
+        fn screen_y(app: &App, needle: &str) -> f32 {
+            line_y(app, needle) - app.scroll_y.current
+        }
+
+        #[test]
+        fn read_to_edit_after_the_image_grew_lands_on_the_same_source_range() {
+            let (_context, mut app, gate) = rig(&document(true));
+            at_rest_on(&mut app, "paragraph010");
+            let anchor = app.markdown.read_layout.viewport_source_anchor(app.scroll_y.current).expect("anchor");
+            let byte = app.editor.get_full_text().find("paragraph010").expect("needle");
+            assert!(anchor.source_range.contains(&byte), "{:?}", anchor.source_range);
+            // `media_gen` moved, the Read layout was not rebuilt yet.
+            finish_image(&mut app, &gate);
+            app.set_markdown_mode(MarkdownMode::Edit);
+            assert!(crate::render_view::reviewer_stage2_integration::edit_transition(&mut app));
+            let renderer = app.renderer.as_mut().expect("renderer");
+            let line_y = renderer.markdown_edit_source_y(&app.editor, &anchor.source_range).expect("edit y");
+            let expected = anchor.projected_scroll_y(line_y);
+            assert!((app.scroll_y.current - expected).abs() <= 1.0, "current={} expected={expected}", app.scroll_y.current);
+        }
+
+        #[test]
+        #[ignore = "bug: resolve_markdown_edit_scroll_transition fallback (root_frame_renderer.rs, origin_read_width branch) maps origin_scroll_y of the old layout onto a Read layout rebuilt with the new media_gen"]
+        fn read_to_edit_without_a_captured_anchor_after_the_image_grew_lands_on_the_same_source_range() {
+            // The origin layout is gone at the toggle, so the transition rebuilds it at the
+            // origin width (with the new `media_gen`) and maps the old scroll position.
+            let (_context, mut app, gate) = rig(&document(true));
+            at_rest_on(&mut app, "paragraph010");
+            let anchor = app.markdown.read_layout.viewport_source_anchor(app.scroll_y.current).expect("anchor");
+            finish_image(&mut app, &gate);
+            app.markdown.read_layout.invalidate();
+            app.set_markdown_mode(MarkdownMode::Edit);
+            assert!(crate::render_view::reviewer_stage2_integration::edit_transition(&mut app));
+            let renderer = app.renderer.as_mut().expect("renderer");
+            let line_y = renderer.markdown_edit_source_y(&app.editor, &anchor.source_range).expect("edit y");
+            let expected = anchor.projected_scroll_y(line_y);
+            assert!((app.scroll_y.current - expected).abs() <= 1.0, "current={} expected={expected}", app.scroll_y.current);
+        }
+
+        #[test]
+        fn edit_to_read_while_the_image_grows_lands_on_the_same_source_range() {
+            let (_context, mut app, gate) = rig(&document(true));
+            at_rest_on(&mut app, "paragraph010");
+            let screen = screen_y(&app, "paragraph010");
+            app.set_markdown_mode(MarkdownMode::Edit);
+            assert!(crate::render_view::reviewer_stage2_integration::edit_transition(&mut app));
+            finish_image(&mut app, &gate);
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            assert!(app.markdown.read_layout.content_height() > 400.0, "the image must be laid out");
+            assert!((screen_y(&app, "paragraph010") - screen).abs() <= 1.0, "screen={} want={screen}", screen_y(&app, "paragraph010"));
+        }
+
+        #[test]
+        fn edit_to_read_with_the_image_growing_right_after_the_first_read_frame_keeps_the_source_range() {
+            let (_context, mut app, gate) = rig(&document(true));
+            at_rest_on(&mut app, "paragraph010");
+            let screen = screen_y(&app, "paragraph010");
+            app.set_markdown_mode(MarkdownMode::Edit);
+            assert!(crate::render_view::reviewer_stage2_integration::edit_transition(&mut app));
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            finish_image(&mut app, &gate);
+            read_frame(&mut app);
+            read_frame(&mut app);
+            assert!((screen_y(&app, "paragraph010") - screen).abs() <= 1.0, "screen={} want={screen}", screen_y(&app, "paragraph010"));
+        }
     }
 }

@@ -652,10 +652,12 @@ mod tests {
     fn env_with(render: Option<RenderCommand>) -> FetchEnv {
         FetchEnv {
             cache_dir: test_dir("cache"),
-            http: reqwest::blocking::Client::builder()
-                .no_proxy()
-                .build()
-                .expect("http client"),
+            http: crate::markdown_media::HttpSource::ready(
+                reqwest::blocking::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .expect("http client"),
+            ),
             max_bytes: 20 * 1024 * 1024,
             render,
         }
