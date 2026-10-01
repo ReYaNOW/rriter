@@ -981,6 +981,46 @@ mod interaction_tests {
     }
 
     #[test]
+    fn wrapped_link_runs_keep_one_index_and_hits_cover_both_lines_only() {
+        let cache = layout("before [**жирный** текст](x.md) after\n", 145.0);
+        assert_eq!(cache.links().len(), 1);
+        let text = cache
+            .blocks
+            .iter()
+            .find_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(text),
+                _ => None,
+            })
+            .expect("text block");
+        assert!(text.lines.len() >= 2, "link fixture must wrap: {:?}", text.lines);
+        assert!(text
+            .styled
+            .runs
+            .iter()
+            .filter(|run| run.link.is_some())
+            .all(|run| run.link == Some(0)));
+
+        let line_hits: Vec<Vec<(f32, Option<u32>)>> =
+            text.lines.iter().map(|line| link_hits(&cache, line.y)).collect();
+        let linked_lines: Vec<_> = line_hits
+            .iter()
+            .filter(|hits| hits.iter().any(|(_, hit)| *hit == Some(0)))
+            .collect();
+        assert_eq!(linked_lines.len(), 2, "link hits on both wrapped lines");
+        for hits in &line_hits {
+            let link_pixels: Vec<f32> = hits
+                .iter()
+                .filter(|(_, hit)| *hit == Some(0))
+                .map(|(x, _)| *x)
+                .collect();
+            if let (Some(first), Some(last)) = (link_pixels.first(), link_pixels.last()) {
+                assert_eq!(hits.iter().find(|(x, _)| *x < *first).map(|(_, hit)| *hit), Some(None));
+                assert_eq!(hits.iter().find(|(x, _)| *x > *last).map(|(_, hit)| *hit), Some(None));
+            }
+        }
+    }
+
+    #[test]
     fn unsupported_and_undefined_links_get_no_link_index() {
         let cache = layout("[a](javascript:alert(1)) [b][nope] [c]() plain\n", 800.0);
         assert!(cache.links().is_empty());

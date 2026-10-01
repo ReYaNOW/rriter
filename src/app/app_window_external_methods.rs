@@ -156,6 +156,7 @@ impl App {
     pub(crate) fn cancel_pending_action(&mut self) {
         self.confirm_dialog.cancel();
         self.protected_saves.clear_awaiting_action();
+        self.clear_pending_markdown_link_action();
         self.request_main_redraw();
     }
 
@@ -425,7 +426,9 @@ impl App {
                 (0..self.tabs.len()).any(|index| self.tab_text_is_dirty(index))
             }
             PendingAction::Quit | PendingAction::CloseAllTabs => self.editor.is_dirty(),
-            PendingAction::CloseFile | PendingAction::OpenFile => self.editor.is_dirty(),
+            PendingAction::CloseFile | PendingAction::OpenFile | PendingAction::OpenLinkedFile => {
+                self.editor.is_dirty()
+            }
             PendingAction::None => false,
         }
     }

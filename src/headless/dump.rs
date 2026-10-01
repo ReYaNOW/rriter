@@ -217,6 +217,7 @@ fn dialog_json(app: &mut App, w: u32, h: u32) -> Value {
         PendingAction::None => "None",
         PendingAction::Quit => "Quit",
         PendingAction::OpenFile => "OpenFile",
+        PendingAction::OpenLinkedFile => "OpenLinkedFile",
         PendingAction::CloseFile => "CloseFile",
         PendingAction::CloseTab(_) => "CloseTab",
         PendingAction::CloseAllTabs => "CloseAllTabs",

@@ -223,6 +223,20 @@ mod markdown_read_media_tests {
     }
 
     #[test]
+    fn badge_link_is_registered_on_placed_media() {
+        let source = "[![b](x.svg)](u)\n";
+        let media = loaded_media(source, ok_loader(100.0, 20.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        let items = media_items(&cache);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].link, Some(0));
+        assert_eq!(cache.links(), &[crate::app::LinkTarget::File {
+            path: std::path::PathBuf::from("u"),
+            anchor: None,
+        }]);
+    }
+
+    #[test]
     fn failed_image_shows_the_alt_and_reason_in_a_one_line_frame() {
         let source = "![logo](https://example.com/a.png)\n";
         let media = loaded_media(source, Arc::new(|_| Err(MediaError::NotFound)));

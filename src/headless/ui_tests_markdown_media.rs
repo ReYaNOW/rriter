@@ -6,7 +6,8 @@
 
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, wait_until, workspace_with_explorer,
+    click_ui, dump, has_ui, open_file_session, run_script, scratch_dir, wait_until,
+    workspace_with_explorer,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -253,7 +254,7 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
 
     let filler = "filler line\n\n".repeat(120);
     let source = format!(
-        "# Top\n\n[to b](b.md#Раздел-2)\n\n[missing](nope.md)\n\n[web](https://example.com/x)\n\n[bad anchor](#нет-такого)\n\n{filler}"
+        "# Top\n\n[to b](b.md#Раздел-2)\n\n[web](https://example.com/x)\n\n[top](#заголовок)\n\n[image](./pic.png)\n\n[missing](nope.md)\n\n[bad anchor](#нет-такого)\n\n{filler}## Заголовок\n\n{filler}"
     );
     let (dir, path) = fixture("md-links", &source);
     std::fs::write(dir.join("b.md"), format!("# B\n\n{filler}## Раздел 2\n\nend\n")).expect("write b.md");
@@ -262,8 +263,8 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
         .expect("link to b.md is on screen");
     let missing = link_point(&mut session, |t| matches!(t, LinkTarget::File { path, .. } if path.ends_with("nope.md")))
         .expect("link to nope.md is on screen");
-    let web = link_point(&mut session, |t| matches!(t, LinkTarget::External(_))).expect("web link");
-    let bad = link_point(&mut session, |t| matches!(t, LinkTarget::Anchor(_))).expect("anchor link");
+    let bad = link_point(&mut session, |t| matches!(t, LinkTarget::Anchor(anchor) if anchor == "нет-такого"))
+        .expect("bad anchor link");
     let tabs_before = session.app.tabs.len();
 
     // Garbage destinations: an anchor without a heading and a file that does not exist.
@@ -273,6 +274,8 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
         assert!(session.app.file_path.as_deref().is_some_and(|p| p.ends_with("preview.md")));
         assert!(session.app.markdown.read_selection_range().is_none());
     }
+    let web = link_point(&mut session, |target| matches!(target, LinkTarget::External(_)))
+        .expect("web link remains visible after the ignored links");
     session.app.external_requests.take();
     click_at(&mut session, web);
     assert_eq!(
@@ -287,6 +290,7 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     assert_eq!(session.app.tabs.len(), tabs_before);
     assert!(session.app.file_path.as_deref().is_some_and(|p| p.ends_with("preview.md")));
+    assert!(session.app.markdown.read_selection_range().is_some_and(|range| !range.is_empty()));
 
     // A click opens b.md in Read mode and scrolls to its heading.
     click_at(&mut session, to_b);
@@ -296,5 +300,64 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
             && session.app.scroll_y.current > 100.0
     });
     assert_eq!(session.app.markdown_mode(), crate::app::MarkdownMode::Read);
+
+    // An in-document anchor in a long document animates to the actual heading.
+    open_file(&mut session, &path);
+    if session.app.markdown_mode() != crate::app::MarkdownMode::Read {
+        click_ui(&mut session, "MarkdownModeToggle");
+    }
+    wait_until(&mut session, WAIT_MS, "a.md Reader layout", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+    let image = link_point(&mut session, |target| matches!(target, LinkTarget::File { path, .. } if path.ends_with("pic.png")))
+        .expect("image link");
+    // The current open_file_in_tab behavior for a non-text image link is recorded here.
+    click_at(&mut session, image);
+    assert_eq!(session.app.tabs.len(), tabs_before + 2);
+    assert!(session.app.file_path.is_none(), "png link opens an empty untitled tab");
+
+    open_file(&mut session, &path);
+    if session.app.markdown_mode() != crate::app::MarkdownMode::Read {
+        click_ui(&mut session, "MarkdownModeToggle");
+    }
+    wait_until(&mut session, WAIT_MS, "a.md Reader layout for its anchor", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+    let top = link_point(&mut session, |target| matches!(target, LinkTarget::Anchor(anchor) if anchor == "заголовок"))
+        .expect("in-document anchor link");
+    let headings = session.app.markdown.read_document(session.app.editor.version)
+        .expect("Markdown document")
+        .headings(&session.app.markdown.read_source);
+    let heading = headings.iter().find(|heading| heading.text == "Заголовок").expect("target heading");
+    let target_y = session.app.markdown.read_layout.source_target_y(&heading.source_range).expect("heading layout position");
+    click_at(&mut session, top);
+    wait_until(&mut session, WAIT_MS, "scroll reaches the in-document heading", |session| {
+        (session.app.scroll_y.current - target_y).abs() < 1.0
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dirty_standalone_reader_confirms_before_following_file_link() {
+    use crate::app::{LinkTarget, PendingAction};
+
+    let (dir, path) = fixture("md-links-dirty", "[to b](b.md)\n");
+    std::fs::write(dir.join("b.md"), "# B\n").expect("write b.md");
+    let mut session = open_file_session(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &path);
+    assert!(!session.app.is_ide_mode);
+    session.app.set_markdown_mode(crate::app::MarkdownMode::Read);
+    wait_until(&mut session, WAIT_MS, "standalone Reader layout", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+    session.app.editor.insert_str("local edit");
+    wait_until(&mut session, WAIT_MS, "updated dirty Reader layout", |session| {
+        session.app.markdown.read_layout.is_for_version(session.app.editor.version)
+    });
+    let link = link_point(&mut session, |target| matches!(target, LinkTarget::File { path, .. } if path.ends_with("b.md")))
+        .expect("link to b.md");
+    click_at(&mut session, link);
+    assert!(session.app.editor.is_dirty());
+    assert!(session.app.file_path.as_deref().is_some_and(|open| open.ends_with("preview.md")));
+    assert_eq!(session.app.confirm_dialog.action(), PendingAction::OpenLinkedFile);
     let _ = std::fs::remove_dir_all(dir);
 }

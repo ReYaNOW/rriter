@@ -151,6 +151,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
                 return;
             }
             PendingAction::OpenFile => app.trigger_file_picker(),
+            PendingAction::OpenLinkedFile => app.run_pending_markdown_link_action(),
             PendingAction::CloseFile => app.close_current_file(),
             PendingAction::CloseTab(index) => app.close_tab_at_unchecked(index),
             PendingAction::CloseAllTabs => app.close_all_tabs_unchecked(),
