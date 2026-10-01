@@ -484,6 +484,8 @@ pub struct Renderer {
     /// `draw_ide_panel_content` in `draw_ide_side_panels`; 0 everywhere else.
     pub(crate) left_panel_overdraw_h: f32,
     pub git_tooltip_waiting: bool,
+    /// The pointer rests on a Reader link whose destination tooltip is not due yet.
+    pub(crate) markdown_link_tooltip_waiting: bool,
     /// Frame output: the editor hover is blocked (status bar, bottom panel, modal, ...)
     /// and `App::render_main_frame` must clear `App::hover` after `draw`.
     pub(crate) editor_hover_blocked: bool,

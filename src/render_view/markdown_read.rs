@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::core_text::text_char_is_non_rendering_control;
-use crate::app::{MarkdownMode, MarkdownTabState};
+use crate::app::{LinkTarget, MarkdownMode, MarkdownTabState, inline_link_target, link_tooltip};
 use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
 use crate::markdown_media::MarkdownMedia;
 use crate::languages::markdown::{
@@ -62,6 +62,8 @@ pub(crate) struct MarkdownReadLayoutCache {
     source_scopes: Vec<ReadSourceScope>,
     media_gen: u64,
     media_dir: std::path::PathBuf,
+    /// Targets of the links of the layout; `StyledRun::link` and `PlacedMedia::link` index it.
+    links: Vec<LinkTarget>,
 }
 
 impl MarkdownReadLayoutCache {
@@ -104,6 +106,7 @@ impl MarkdownReadLayoutCache {
         self.source_lines = source_lines;
         self.source_prefix_max_end = source_prefix_max_end;
         self.source_scopes = source_scopes;
+        self.links.clear();
         self.key = Some(key);
         self.rebuild_count = self.rebuild_count.saturating_add(1);
     }
@@ -144,12 +147,15 @@ struct StyledRun {
     range: Range<usize>,
     source_range: Option<Range<usize>>,
     style: TextStyle,
+    link: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
 struct StyledText {
     text: String,
     runs: Vec<StyledRun>,
+    /// Link every run pushed from now on belongs to (set while a link's text is appended).
+    link: Option<u32>,
 }
 
 impl StyledText {
@@ -172,7 +178,11 @@ impl StyledText {
                 (None, None) => true,
                 _ => false,
             };
-            if last.style == style && last.range.end == start && source_contiguous {
+            if last.style == style
+                && last.link == self.link
+                && last.range.end == start
+                && source_contiguous
+            {
                 last.range.end = end;
                 if let (Some(last_source), Some(source)) =
                     (last.source_range.as_mut(), source_range.as_ref())
@@ -186,6 +196,7 @@ impl StyledText {
             range: start..end,
             source_range,
             style,
+            link: self.link,
         });
     }
 }
@@ -330,6 +341,7 @@ struct LayoutBuilder<'a, F: FnMut(char, bool, Option<f32>) -> f32> {
     source_scope_stack: Vec<Range<usize>>,
     advance: F,
     media: Option<MediaInput<'a>>,
+    links: LinkTable,
 }
 
 impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
@@ -350,6 +362,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
             source_scope_stack: Vec::new(),
             advance,
             media: None,
+            links: LinkTable::default(),
         }
     }
 
@@ -403,7 +416,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                 content_ranges,
                 inlines,
             } => {
-                let styled = styled_from_inlines(self.source, inlines, content_ranges);
+                let styled =
+                    styled_from_inlines(self.source, inlines, content_ranges, &mut self.links);
                 let scale = heading_scale(*level);
                 self.append_text(
                     styled,
@@ -420,7 +434,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                 content_ranges,
                 inlines,
             } => {
-                let styled = styled_from_inlines(self.source, inlines, content_ranges);
+                let styled =
+                    styled_from_inlines(self.source, inlines, content_ranges, &mut self.links);
                 self.append_text(
                     styled,
                     BODY_SCALE,
@@ -817,6 +832,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                         self.source,
                         &cell.inlines,
                         std::slice::from_ref(&cell.source_range),
+                        &mut self.links,
                     )
                 });
                 let max_text_w = (cell_w - pad * 2.0).max(8.0);
@@ -931,7 +947,7 @@ impl Renderer {
         if markdown.read_layout.is_current(key, media_gen) {
             return true;
         }
-        let (blocks, content_height, source_len) = {
+        let (blocks, content_height, source_len, links) = {
             let Some(document) = markdown.read_document(editor_version) else {
                 return false;
             };
@@ -948,14 +964,15 @@ impl Renderer {
             let input = MediaInput::new(document, source, &markdown.read_layout.media_dir, media);
             let mut builder =
                 LayoutBuilder::new(source, content_width, scale, text_metrics, &mut advance)
-                    .with_media(Some(input));
+                    .with_media(Some(input))
+                    .with_links(&markdown.read_layout.media_dir, document.link_definitions(source));
             builder.append_blocks(&document.blocks, 0.0, 0, None);
-            let (blocks, content_height) = builder.finish();
-            (blocks, content_height, source.len())
+            let (blocks, content_height, links) = builder.finish_with_links();
+            (blocks, content_height, source.len(), links)
         };
         markdown
             .read_layout
-            .replace_layout(key, blocks, content_height, source_len);
+            .replace_layout_with_links(key, blocks, content_height, source_len, links);
         markdown.read_layout.media_gen = media_gen;
         true
     }
@@ -1164,6 +1181,7 @@ impl Renderer {
             );
             let _ = self.draw_scrollbar(&bar, self.scale_factor, 1.0, None);
         }
+        self.update_markdown_read_link_hover(markdown, editor_version, (x, y, w, h), scroll.current, ui_registry);
     }
 
     #[allow(clippy::too_many_arguments)]

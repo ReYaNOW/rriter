@@ -119,6 +119,112 @@ pub(crate) fn resolve_link(dest: &str, doc_dir: &Path, defs: &[(String, String)]
     }
 }
 
+/// What a click on a link does; the App only carries it out.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LinkAction {
+    OpenUrl(String),
+    /// Source range of the heading an in-document anchor points at.
+    ScrollTo(Range<usize>),
+    OpenMarkdown {
+        path: PathBuf,
+        anchor: Option<String>,
+    },
+    OpenFile(PathBuf),
+    None,
+}
+
+/// Source range of the heading whose slug is `anchor`; GitHub matches fragments case-insensitively.
+pub(crate) fn heading_for_anchor(
+    anchor: &str,
+    headings: &[MarkdownHeading],
+    slugs: &[String],
+) -> Option<Range<usize>> {
+    let lowered = anchor.to_lowercase();
+    let index = slugs.iter().position(|slug| *slug == anchor || *slug == lowered)?;
+    Some(headings.get(index)?.source_range.clone())
+}
+
+pub(crate) fn link_action(
+    target: &LinkTarget,
+    headings: &[MarkdownHeading],
+    slugs: &[String],
+) -> LinkAction {
+    match target {
+        LinkTarget::External(url) => LinkAction::OpenUrl(url.clone()),
+        LinkTarget::Anchor(anchor) => heading_for_anchor(anchor, headings, slugs)
+            .map_or(LinkAction::None, LinkAction::ScrollTo),
+        LinkTarget::File { path, anchor } => {
+            let markdown = path.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+            });
+            if markdown {
+                LinkAction::OpenMarkdown { path: path.clone(), anchor: anchor.clone() }
+            } else {
+                LinkAction::OpenFile(path.clone())
+            }
+        }
+        LinkTarget::Unsupported => LinkAction::None,
+    }
+}
+
+/// A press that began on link `press.0` at `(press.1, press.2)` is a click when the release
+/// is on the same link and within `(4 * scale)` pixels of the press on both axes; anything
+/// else is a selection drag.
+pub(crate) fn is_link_click(
+    press: (u32, f32, f32),
+    release_link: Option<u32>,
+    x: f32,
+    y: f32,
+    scale: f32,
+) -> bool {
+    let slop = (4.0 * scale).round();
+    release_link == Some(press.0) && (x - press.1).abs() <= slop && (y - press.2).abs() <= slop
+}
+
+/// Hover text of a link: the destination, a local path relative to the document as written.
+pub(crate) fn link_tooltip(target: &LinkTarget, doc_dir: &Path) -> Option<String> {
+    match target {
+        LinkTarget::External(url) => Some(url.clone()),
+        LinkTarget::Anchor(anchor) => Some(format!("#{anchor}")),
+        LinkTarget::File { path, anchor } => {
+            let mut text = path.strip_prefix(doc_dir).unwrap_or(path).display().to_string();
+            if let Some(anchor) = anchor {
+                text.push('#');
+                text.push_str(anchor);
+            }
+            Some(text)
+        }
+        LinkTarget::Unsupported => None,
+    }
+}
+
+/// Target of a link span (`[text](dest)`, a reference link, an autolink); `None` for other
+/// spans. A bare autolink without a scheme (`www.x.org`, `me@x.org`) is an external address.
+pub(crate) fn inline_link_target(
+    source: &str,
+    span: &MarkdownInlineSpan,
+    doc_dir: &Path,
+    defs: &[(String, String)],
+) -> Option<LinkTarget> {
+    let dest = match &span.style {
+        MarkdownInlineStyle::Link { destination_range, reference_range } => {
+            span_destination(source, span, destination_range.as_ref(), reference_range.as_ref())
+        }
+        MarkdownInlineStyle::Uri => {
+            let text = strip_angle_brackets(source.get(span.source_range.clone())?);
+            if url_scheme(text).is_some() {
+                text.to_string()
+            } else if text.contains('@') {
+                format!("mailto:{text}")
+            } else {
+                format!("http://{text}")
+            }
+        }
+        _ => return None,
+    };
+    Some(resolve_link(&dest, doc_dir, defs))
+}
+
 /// Items of a paragraph made only of images, whitespace and links wrapped around one image;
 /// `None` when `block_index` is not such a top-level paragraph.
 pub(crate) fn media_paragraph(
@@ -801,5 +907,131 @@ mod tests {
         let document = parse(source);
         let all = heading_slugs(&document.headings(source));
         assert_eq!(all, vec!["привет", "привет-1", "привет-мир"]);
+    }
+
+    fn action(dest: &str, source: &str) -> LinkAction {
+        let document = parse(source);
+        let headings = document.headings(source);
+        let all = heading_slugs(&headings);
+        link_action(&resolve(dest), &headings, &all)
+    }
+
+    #[test]
+    fn link_action_maps_every_target_kind() {
+        let source = "# Intro\n\ntext\n\n## Раздел 2\n";
+        assert_eq!(
+            action("https://example.com/a?b=1", source),
+            LinkAction::OpenUrl("https://example.com/a?b=1".to_string())
+        );
+        assert_eq!(
+            action("mailto:me@example.com", source),
+            LinkAction::OpenUrl("mailto:me@example.com".to_string())
+        );
+        let heading_range = parse(source).headings(source)[1].source_range.clone();
+        assert!(heading_range.start >= source.find("## ").unwrap_or(usize::MAX));
+        assert_eq!(action("#раздел-2", source), LinkAction::ScrollTo(heading_range));
+        assert_eq!(
+            action("b.md#Раздел-2", source),
+            LinkAction::OpenMarkdown {
+                path: PathBuf::from("/docs/b.md"),
+                anchor: Some("Раздел-2".to_string())
+            }
+        );
+        assert_eq!(
+            action("sub/b.markdown", source),
+            LinkAction::OpenMarkdown { path: PathBuf::from("/docs/sub/b.markdown"), anchor: None }
+        );
+        assert_eq!(action("pic.png", source), LinkAction::OpenFile(PathBuf::from("/docs/pic.png")));
+        assert_eq!(action("notes.txt#x", source), LinkAction::OpenFile(PathBuf::from("/docs/notes.txt")));
+    }
+
+    #[test]
+    fn link_action_extension_match_ignores_case() {
+        assert!(matches!(action("README.MD", "# a\n"), LinkAction::OpenMarkdown { .. }));
+        assert!(matches!(action("a.Markdown", "# a\n"), LinkAction::OpenMarkdown { .. }));
+        assert!(matches!(action("a.mdx", "# a\n"), LinkAction::OpenFile(_)));
+    }
+
+    #[test]
+    fn link_action_does_nothing_for_unusable_targets() {
+        let source = "# Intro\n";
+        assert_eq!(action("#нет-такого", source), LinkAction::None);
+        assert_eq!(action("#", "# Intro\n"), LinkAction::None);
+        assert_eq!(action("javascript:alert(1)", source), LinkAction::None);
+        assert_eq!(action("file:///etc/passwd", source), LinkAction::None);
+        assert_eq!(action("", source), LinkAction::None);
+        assert!(!matches!(action("ht!tp://%zz", source), LinkAction::OpenUrl(_)));
+        assert_eq!(link_action(&LinkTarget::Unsupported, &[], &[]), LinkAction::None);
+        assert_eq!(link_action(&LinkTarget::Anchor("x".to_string()), &[], &[]), LinkAction::None);
+    }
+
+    #[test]
+    fn anchor_matches_slug_exactly_or_lowercased() {
+        let source = "# Intro\n\n# Intro\n";
+        let document = parse(source);
+        let headings = document.headings(source);
+        let all = heading_slugs(&headings);
+        assert_eq!(heading_for_anchor("intro", &headings, &all), Some(headings[0].source_range.clone()));
+        assert_eq!(heading_for_anchor("INTRO-1", &headings, &all), Some(headings[1].source_range.clone()));
+        assert_eq!(heading_for_anchor("intro-2", &headings, &all), None);
+        assert_eq!(heading_for_anchor("", &headings, &all), None);
+        assert_eq!(heading_for_anchor("intro", &[], &[]), None);
+    }
+
+    #[test]
+    fn link_tooltip_shows_the_destination() {
+        let target = resolve("sub/b.md#Раздел-2");
+        assert_eq!(link_tooltip(&target, dir()).as_deref(), Some("sub/b.md#Раздел-2"));
+        assert_eq!(link_tooltip(&resolve("#top"), dir()).as_deref(), Some("#top"));
+        assert_eq!(
+            link_tooltip(&resolve("https://x.org/a"), dir()).as_deref(),
+            Some("https://x.org/a")
+        );
+        let outside = LinkTarget::File { path: PathBuf::from("/other/c.md"), anchor: None };
+        assert_eq!(link_tooltip(&outside, dir()).as_deref(), Some("/other/c.md"));
+        assert_eq!(link_tooltip(&LinkTarget::Unsupported, dir()), None);
+    }
+
+    fn inline_target(source: &str) -> Option<LinkTarget> {
+        let document = parse(source);
+        let defs = document.link_definitions(source);
+        document.blocks.iter().find_map(|block| match &block.kind {
+            MarkdownBlockKind::Paragraph { inlines, .. } => inlines
+                .iter()
+                .find_map(|span| inline_link_target(source, span, dir(), &defs)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn inline_link_target_covers_links_references_and_autolinks() {
+        assert_eq!(inline_target("[t](b.md)\n"), Some(resolve("b.md")));
+        assert_eq!(inline_target("[t][r]\n\n[r]: https://x.org\n"), Some(resolve("https://x.org")));
+        assert_eq!(inline_target("<https://x.org/a>\n"), Some(resolve("https://x.org/a")));
+        assert_eq!(
+            inline_target("<me@x.org>\n"),
+            Some(LinkTarget::External("mailto:me@x.org".to_string()))
+        );
+        // Not a link, an undefined reference and a hostile scheme.
+        assert_eq!(inline_target("just **bold** text\n"), None);
+        assert!(matches!(inline_target("[t][nope]\n"), None | Some(LinkTarget::Unsupported)));
+        assert_eq!(inline_target("[t](javascript:alert(1))\n"), Some(LinkTarget::Unsupported));
+        assert_eq!(inline_target("[t]()\n"), Some(LinkTarget::Unsupported));
+    }
+
+    #[test]
+    fn link_click_needs_the_same_link_within_the_slop() {
+        let press = (3, 100.0, 50.0);
+        assert!(is_link_click(press, Some(3), 100.0, 50.0, 1.0));
+        assert!(is_link_click(press, Some(3), 104.0, 46.0, 1.0));
+        assert!(!is_link_click(press, Some(3), 105.0, 50.0, 1.0));
+        assert!(!is_link_click(press, Some(3), 100.0, 55.0, 1.0));
+        assert!(!is_link_click(press, Some(4), 100.0, 50.0, 1.0));
+        assert!(!is_link_click(press, None, 100.0, 50.0, 1.0));
+        // The slop scales and rounds: 4 * 1.5 = 6, 4 * 1.25 = 5.
+        assert!(is_link_click(press, Some(3), 106.0, 50.0, 1.5));
+        assert!(!is_link_click(press, Some(3), 106.0, 50.0, 1.25));
+        // A non-finite pointer never clicks.
+        assert!(!is_link_click(press, Some(3), f32::NAN, 50.0, 1.0));
     }
 }

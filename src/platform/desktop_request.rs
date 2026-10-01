@@ -213,10 +213,10 @@ pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
     }
     let parsed =
         url::Url::parse(url).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
+    if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "only http and https URLs may be opened",
+            "only http, https and mailto URLs may be opened",
         ));
     }
 

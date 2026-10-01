@@ -27,6 +27,8 @@ pub(crate) struct PlacedMedia {
     pub(crate) w: f32,
     pub(crate) h: f32,
     pub(crate) alt: String,
+    /// Index into `MarkdownReadLayoutCache::links` of the link wrapped around the image.
+    pub(crate) link: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,6 +173,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         let right_pad = (CONTENT_PAD * self.scale).round();
         let col_w = (self.width - x - right_pad).max(20.0 * self.scale);
         let (rects, height) = layout_media_rects(&slots, col_w, self.scale, media_line_height(self.scale));
+        let links = &mut self.links;
         let placed = items
             .iter()
             .zip(&rects)
@@ -180,7 +183,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                     MediaEntryView::Failed(error) => format!("{} — {}", item.alt, error.label()),
                     _ => item.alt.clone(),
                 };
-                PlacedMedia { key: item.key.clone(), x: x + rect[0], y: rect[1], w: rect[2], h: rect[3], alt }
+                let link = item.link.clone().and_then(|target| links.add(target));
+                PlacedMedia { key: item.key.clone(), x: x + rect[0], y: rect[1], w: rect[2], h: rect[3], alt, link }
             })
             .collect();
         let top = self.y;

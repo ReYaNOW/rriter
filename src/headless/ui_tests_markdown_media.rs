@@ -217,3 +217,84 @@ fn the_read_layout_is_built_once_per_geometry_with_the_ide_panel_open() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Screen point over the first link of the Reader whose target satisfies `wanted`.
+fn link_point(
+    session: &mut HeadlessSession,
+    wanted: impl Fn(&crate::app::LinkTarget) -> bool,
+) -> Option<(f32, f32)> {
+    let (x, y, w, h) = session.app.ui_registry.rect_for(crate::ui_system::UiId::MarkdownReadBody)?;
+    let mut py = y + 2.0;
+    while py < y + h {
+        let mut px = x + 2.0;
+        while px < x + w {
+            if let Some(index) = session.app.markdown_read_link_at(px, py)
+                && session.app.markdown.read_layout.links().get(index as usize).is_some_and(&wanted)
+            {
+                return Some((px, py));
+            }
+            px += 3.0;
+        }
+        py += 3.0;
+    }
+    None
+}
+
+fn click_at(session: &mut HeadlessSession, (x, y): (f32, f32)) {
+    let script = format!("mouse_move {x} {y}\nclick left down\nclick left up\nsettle 300\n");
+    let lines = run_script(session, script.as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+#[test]
+fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
+    use crate::app::LinkTarget;
+    use crate::platform::ExternalRequest;
+
+    let filler = "filler line\n\n".repeat(120);
+    let source = format!(
+        "# Top\n\n[to b](b.md#Раздел-2)\n\n[missing](nope.md)\n\n[web](https://example.com/x)\n\n[bad anchor](#нет-такого)\n\n{filler}"
+    );
+    let (dir, path) = fixture("md-links", &source);
+    std::fs::write(dir.join("b.md"), format!("# B\n\n{filler}## Раздел 2\n\nend\n")).expect("write b.md");
+    let mut session = open_markdown_read(&dir, &path);
+    let to_b = link_point(&mut session, |t| matches!(t, LinkTarget::File { path, .. } if path.ends_with("b.md")))
+        .expect("link to b.md is on screen");
+    let missing = link_point(&mut session, |t| matches!(t, LinkTarget::File { path, .. } if path.ends_with("nope.md")))
+        .expect("link to nope.md is on screen");
+    let web = link_point(&mut session, |t| matches!(t, LinkTarget::External(_))).expect("web link");
+    let bad = link_point(&mut session, |t| matches!(t, LinkTarget::Anchor(_))).expect("anchor link");
+    let tabs_before = session.app.tabs.len();
+
+    // Garbage destinations: an anchor without a heading and a file that does not exist.
+    for point in [bad, missing] {
+        click_at(&mut session, point);
+        assert_eq!(session.app.tabs.len(), tabs_before);
+        assert!(session.app.file_path.as_deref().is_some_and(|p| p.ends_with("preview.md")));
+        assert!(session.app.markdown.read_selection_range().is_none());
+    }
+    session.app.external_requests.take();
+    click_at(&mut session, web);
+    assert_eq!(
+        session.app.external_requests.take(),
+        Some(ExternalRequest::OpenUrl("https://example.com/x".to_string()))
+    );
+
+    // A drag that starts on a link selects text and follows nothing.
+    let (x, y) = to_b;
+    let script = format!("mouse_move {x} {y}\nclick left down\nmouse_move {} {y}\nclick left up\nsettle 300\n", x + 40.0);
+    let lines = run_script(&mut session, script.as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert_eq!(session.app.tabs.len(), tabs_before);
+    assert!(session.app.file_path.as_deref().is_some_and(|p| p.ends_with("preview.md")));
+
+    // A click opens b.md in Read mode and scrolls to its heading.
+    click_at(&mut session, to_b);
+    wait_until(&mut session, WAIT_MS, "b.md scrolled to the anchor", |session| {
+        session.app.file_path.as_deref().is_some_and(|p| p.ends_with("b.md"))
+            && session.app.markdown.pending_anchor.is_none()
+            && session.app.scroll_y.current > 100.0
+    });
+    assert_eq!(session.app.markdown_mode(), crate::app::MarkdownMode::Read);
+    let _ = std::fs::remove_dir_all(dir);
+}

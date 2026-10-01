@@ -102,6 +102,13 @@ pub struct MarkdownTabState {
     pub(crate) code_scroll_drag: Option<usize>,
     /// Inputs of the last media request pass (`None`: not requested yet, see `markdown_media_wiring`).
     pub(crate) media_request: Option<super::markdown_media_wiring::MediaRequestMarker>,
+    /// Link index and pointer position of the Reader press that started a selection on a link;
+    /// it is a click, not a selection, when the release stays on the same link.
+    pub(crate) link_press: Option<(u32, f32, f32)>,
+    /// Link under the pointer, refreshed by the Reader every frame.
+    pub(crate) hovered_link: Option<u32>,
+    /// Heading anchor to scroll to once the layout of a just opened document exists.
+    pub(crate) pending_anchor: Option<String>,
 }
 
 // Горизонтальный скролл code block в Reader; хранится только пока активен.
@@ -143,6 +150,9 @@ impl Default for MarkdownTabState {
             code_scroll_x: Vec::new(),
             code_scroll_drag: None,
             media_request: None,
+            link_press: None,
+            hovered_link: None,
+            pending_anchor: None,
         }
     }
 }
@@ -532,6 +542,7 @@ impl App {
             return false;
         };
         self.markdown.begin_read_selection(byte);
+        self.remember_markdown_link_press(x, y);
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         true

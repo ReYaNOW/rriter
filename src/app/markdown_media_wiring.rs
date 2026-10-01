@@ -212,6 +212,7 @@ impl App {
         {
             let content_width = self.markdown_read_content_width_for(width, scale);
             visible = self.markdown_media_layout_visible(content_width, scale, height, &waker);
+            self.apply_pending_markdown_anchor();
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;

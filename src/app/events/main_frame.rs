@@ -203,7 +203,12 @@ impl App {
                     .renderer
                     .as_ref()
                     .is_some_and(|renderer| renderer.git_tooltip_waiting);
-                if diag_timer_active || git_tooltip_waiting {
+                let link_tooltip_waiting = self.markdown_mode() == crate::app::MarkdownMode::Read
+                    && self
+                        .renderer
+                        .as_ref()
+                        .is_some_and(|renderer| renderer.markdown_link_tooltip_waiting);
+                if diag_timer_active || git_tooltip_waiting || link_tooltip_waiting {
                     self.window.as_ref().unwrap().request_redraw();
                 }
 
@@ -764,7 +769,10 @@ impl App {
                     }
                 } else if self.markdown_mode() == crate::app::MarkdownMode::Read {
                     markdown_read_cursor_icon(
-                        wants_pointer,
+                        wants_pointer
+                            || (self.markdown.hovered_link.is_some()
+                                && self.ui_registry.hovered()
+                                    == Some(crate::ui_system::UiId::MarkdownReadBody)),
                         popup_blocks_background,
                         &self.ui_registry,
                     )

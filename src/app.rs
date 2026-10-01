@@ -1,9 +1,12 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
+mod markdown_links;
 mod markdown_media_wiring;
 mod markdown_nav;
-pub(crate) use markdown_nav::{MediaItem, document_media};
+pub(crate) use markdown_nav::{
+    LinkTarget, MediaItem, document_media, inline_link_target, link_tooltip,
+};
 pub(crate) use markdown::{
     MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
 };
