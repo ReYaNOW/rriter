@@ -324,6 +324,7 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
             });
             serde_json::to_string(&record).ok().map(|payload| format!("PDF\t{payload}"))
         }),
+        crate::app::EditorTabKind::Image => None,
     }
 }
 
@@ -825,6 +826,7 @@ mod tests {
             file_extension: String::new(),
             markdown: Default::default(),
             pdf: None,
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),

@@ -582,7 +582,8 @@ impl App {
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
             | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => None,
+            | EditorTabKind::Pdf
+            | EditorTabKind::Image => None,
         }
     }
 
@@ -593,7 +594,8 @@ impl App {
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
             | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => None,
+            | EditorTabKind::Pdf
+            | EditorTabKind::Image => None,
         }
     }
 
@@ -640,7 +642,8 @@ impl App {
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
             | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => false,
+            | EditorTabKind::Pdf
+            | EditorTabKind::Image => false,
         }) {
             if idx != self.active_tab {
                 self.switch_to_tab(idx);
@@ -667,6 +670,7 @@ impl App {
                 .unwrap_or_default(),
             markdown: Default::default(),
             pdf: None,
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -855,7 +859,8 @@ impl App {
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
             | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => false,
+            | EditorTabKind::Pdf
+            | EditorTabKind::Image => false,
         }) else {
             return;
         };
@@ -1575,7 +1580,8 @@ impl App {
                     | EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
                     | EditorTabKind::DatabaseQuery(_, _)
-                    | EditorTabKind::Pdf => unreachable!(),
+                    | EditorTabKind::Pdf
+                    | EditorTabKind::Image => unreachable!(),
                 })
         else {
             return false;

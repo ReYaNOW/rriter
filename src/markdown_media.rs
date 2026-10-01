@@ -29,6 +29,23 @@ use texture_budget::{
 
 pub(crate) use render_helper::run_media_helper_if_requested;
 
+/// Loads one local image using the same bounded decoder/helper as Markdown Reader.
+pub(crate) fn load_image_path(path: PathBuf) -> Result<MediaPixels, MediaError> {
+    let env = FetchEnv {
+        cache_dir: crate::platform::cache_dir().join("markdown-images"),
+        http: HttpSource::lazy(|| None),
+        max_bytes: MAX_FETCH_BYTES,
+        render: RenderCommand::for_current_process(),
+    };
+    let req = MediaRequest {
+        key: MediaKey::File(PathKey::new(&path)),
+        source: MediaSource::File(path),
+        max_raster_w: 4096,
+        scale: 1.0,
+    };
+    load_media(&req, &env)
+}
+
 /// Identity of one media item inside the cache.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum MediaKey {

@@ -176,6 +176,7 @@ impl App {
             last_action: Instant::now(),
             last_blink_state: true,
             modifiers: ModifiersState::empty(),
+            left_shift_down: false,
             ctrl_wheel_multiplier: config.ctrl_wheel_multiplier,
             is_dragging: false,
             is_editor_drag_pending: false,

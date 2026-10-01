@@ -81,6 +81,8 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |
 | `quit` | Stop. EOF does the same. | `ok` |
 
+IDE image tabs appear in `dump` with `kind: "image"` and an `image` object containing `phase`, `natural_w`, `natural_h`, `zoom`, and `texture`.
+
 Rules:
 
 - Every synthesized event is followed by exactly one frame: `click` and `key`

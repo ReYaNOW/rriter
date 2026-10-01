@@ -536,10 +536,11 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
     });
     let image = link_point(&mut session, |target| matches!(target, LinkTarget::File { path, .. } if path.ends_with("pic.png")))
         .expect("image link");
-    // The current open_file_in_tab behavior for a non-text image link is recorded here.
     click_at(&mut session, image);
     assert_eq!(session.app.tabs.len(), tabs_before + 2);
-    assert!(session.app.file_path.is_none(), "png link opens an empty untitled tab");
+    wait_until(&mut session, WAIT_MS, "image tab opened from markdown link", |session| {
+        dump(session)["tabs"].as_array().and_then(|tabs| tabs.last()).is_some_and(|tab| tab["kind"] == "image" && tab["image"]["phase"] == "ready")
+    });
 
     open_file(&mut session, &path);
     if session.app.markdown_mode() != crate::app::MarkdownMode::Read {

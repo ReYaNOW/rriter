@@ -541,6 +541,10 @@ impl App {
                 Some("PDF нельзя сохранить: документ открыт только для просмотра".to_string());
             return SaveOutcome::Failed;
         }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) {
+            self.ide_panel.file_tree_error = Some("Изображение открыто только для просмотра".to_owned());
+            return SaveOutcome::Failed;
+        }
         let Some(path) = self.file_path.clone() else {
             self.trigger_save_as_picker();
             return SaveOutcome::Failed;
@@ -744,6 +748,9 @@ impl App {
         }
         // The async picker can return after the user switched to a PDF tab; its hidden editor is empty.
         if self.active_pdf_tab().is_some() {
+            return false;
+        }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) {
             return false;
         }
 

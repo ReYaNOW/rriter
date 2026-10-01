@@ -369,7 +369,7 @@ impl App {
     pub fn handle_editor_ime_commit(&mut self, text: &str) {
         // The hidden editor under a PDF tab is not a text field: only the inputs handled before
         // this call (search panel, terminal, dialogs) take IME text there.
-        if text.is_empty() || self.show_welcome || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) {
+        if text.is_empty() || self.show_welcome || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf() || tab.kind.is_image()) {
             return;
         }
         if self.active_tab_is_git_diff() || self.markdown_mode() == crate::app::MarkdownMode::Read {
@@ -489,7 +489,7 @@ impl App {
         // The hidden editor under a PDF tab must not run any text or cursor command (edit, move,
         // select, clipboard, undo, save: Ctrl+S would overwrite the .pdf with the empty text).
         // Global shortcuts (tab switching, panels, project search, F8) are handled before this point.
-        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf())
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf() || tab.kind.is_image())
             && !pdf_tab_key_reaches_editor(physical_key, ctrl)
         {
             return;

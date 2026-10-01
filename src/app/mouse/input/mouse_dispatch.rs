@@ -30,6 +30,7 @@ impl App {
         if self.finish_text_captures_on_release(state, button, mx, my) {
             return;
         }
+        if self.handle_image_mouse(state, button, mx, my) { return; }
         if self.prepare_left_press(state, button, mx, my) {
             return;
         }

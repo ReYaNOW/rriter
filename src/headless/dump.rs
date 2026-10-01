@@ -271,6 +271,7 @@ fn tabs_json(app: &App) -> Value {
                     ),
                     kind: tab_kind_name(tab),
                     pdf: tab.pdf.as_deref(),
+                    image: tab.image.as_deref(),
                     engine: &app.pdf_engine,
                 })
             }
@@ -302,6 +303,7 @@ fn active_tab_json(app: &App, index: usize) -> Value {
         },
         kind: app.tabs.get(index).map(tab_kind_name).unwrap_or("normal"),
         pdf: app.tabs.get(index).and_then(|tab| tab.pdf.as_deref()),
+        image: app.tabs.get(index).and_then(|tab| tab.image.as_deref()),
         engine: &app.pdf_engine,
     })
 }
@@ -321,6 +323,7 @@ struct TabView<'a> {
     markdown_media: Vec<Value>,
     kind: &'static str,
     pdf: Option<&'a crate::app::pdf_tab::PdfTabState>,
+    image: Option<&'a crate::app::image_tab::ImageTabState>,
     engine: &'a crate::app::pdf_tab::PdfEngineState,
 }
 
@@ -361,6 +364,15 @@ fn tab_json(tab: TabView<'_>) -> Value {
             "engine": engine_name, "engine_message": engine_message,
         })
     });
+    let image = tab.image.map(|image| {
+        let phase = match &image.phase {
+            crate::app::image_tab::ImagePhase::Loading => "loading",
+            crate::app::image_tab::ImagePhase::Ready => "ready",
+            crate::app::image_tab::ImagePhase::Failed(_) => "failed",
+        };
+        serde_json::json!({"phase": phase, "natural_w": image.natural.0, "natural_h": image.natural.1,
+            "zoom": image.zoom, "texture": image.texture.is_some()})
+    });
     let mut value = json!({
         "index": tab.index,
         // Output only, not persisted: `display()` is fine here.
@@ -377,6 +389,7 @@ fn tab_json(tab: TabView<'_>) -> Value {
         "kind": tab.kind,
     });
     if let Some(pdf) = pdf { value["pdf"] = pdf; }
+    if let Some(image) = image { value["image"] = image; }
     value
 }
 
@@ -388,6 +401,7 @@ fn tab_kind_name(tab: &crate::app::EditorTab) -> &'static str {
         crate::app::EditorTabKind::DatabaseTable(_, _) => "database_table",
         crate::app::EditorTabKind::DatabaseQuery(_, _) => "database_query",
         crate::app::EditorTabKind::Pdf => "pdf",
+        crate::app::EditorTabKind::Image => "image",
     }
 }
 

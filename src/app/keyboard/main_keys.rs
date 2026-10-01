@@ -157,6 +157,9 @@ impl App {
         event_loop: &HostLoop,
         key_event: KeyInput,
     ) {
+        if key_event.physical_key == PhysicalKey::Code(KeyCode::ShiftLeft) {
+            self.left_shift_down = key_event.state == ElementState::Pressed;
+        }
         if self.startup_blocks_key_input(&key_event) {
             return;
         }
@@ -398,7 +401,7 @@ impl App {
                     _ => {}
                 }
             }
-            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) {
+            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) || self.handle_image_key(&key_event) {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

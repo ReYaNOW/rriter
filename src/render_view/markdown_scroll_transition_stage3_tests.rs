@@ -17,6 +17,7 @@ fn stage3_install_normal_ide_tab(app: &mut App) {
         file_extension: "md".to_string(),
         markdown: Default::default(),
         pdf: None,
+        image: None,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),

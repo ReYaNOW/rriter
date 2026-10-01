@@ -267,6 +267,16 @@ impl Renderer {
         );
         if is_ide_mode
             && !show_welcome
+            && let Some(image) = tabs.get(active_tab).and_then(|tab| tab.image.as_deref())
+        {
+            let (x, y, w, h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, viewport.editor_height);
+            self.draw_root_image_frame(image, x, y, w, h, s, ui_mx, ui_my, ui_registry);
+            return self.draw_root_tab_frame_chrome(editor, editor_title, editor_path, tabs, active_tab,
+                markdown, None, ide_panel, lsp, ui_registry, ide_workspaces, layout, viewport,
+                active_api_route, has_lsp_diagnostics, show_fps, blink_alpha, tab_scroll_x, wants_pointer);
+        }
+        if is_ide_mode
+            && !show_welcome
             && let Some(tab) = tabs.get(active_tab).filter(|tab| tab.kind.is_pdf())
             && let Some(pdf) = tab.pdf.as_deref()
         {

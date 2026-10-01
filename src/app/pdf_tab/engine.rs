@@ -160,6 +160,7 @@ impl App {
             file_extension: extension,
             markdown: Default::default(),
             pdf: Some(Box::new(PdfTabState::new(path.clone(), Arc::clone(&gens), phase))),
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(), completions: Vec::new(), foldable_ranges: Vec::new(),

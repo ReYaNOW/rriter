@@ -691,6 +691,7 @@ fn undo_redo_rebuilds_diff_decorations() {
             state,
         ),
         pdf: None,
+        image: None,
     });
 
     app.rollback_active_git_diff_hunk(0);

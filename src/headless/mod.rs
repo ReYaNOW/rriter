@@ -14,6 +14,8 @@ mod ui_tests_api_client_import;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_pdf;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_image_viewer;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_pgo;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_multipart;

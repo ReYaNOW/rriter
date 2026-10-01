@@ -12,6 +12,7 @@ pub(crate) use markdown::{
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
 pub(crate) mod pdf_tab;
+pub(crate) mod image_tab;
 mod app_bootstrap;
 mod autocomplete;
 mod confirm_dialog;

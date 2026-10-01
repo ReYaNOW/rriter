@@ -13,6 +13,16 @@ impl App {
     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
         let px = position.x as f32;
         let py = position.y as f32;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.last_mouse_x = px;
+            renderer.last_mouse_y = py;
+        }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
+            && self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()).is_some_and(|image| image.drag_to(px, py))
+        {
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return;
+        }
         {
             let renderer = self.renderer.as_mut().unwrap();
             renderer.last_mouse_x = px;
