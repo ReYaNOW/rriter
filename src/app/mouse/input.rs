@@ -243,6 +243,7 @@ fn preserve_main_vertical_scroll_for_click(app: &App, mx: f32, my: f32) -> bool 
             app.ui_registry.find_at(mx, my),
             Some(
                 crate::ui_system::UiId::MarkdownModeToggle
+                    | crate::ui_system::UiId::MarkdownTocToggle
                     | crate::ui_system::UiId::EditorScrollbarY
                     | crate::ui_system::UiId::EditorScrollbarX
             )

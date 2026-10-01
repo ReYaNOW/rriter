@@ -431,6 +431,39 @@ impl Renderer {
             debug_assert!(label_w <= rect.w + 0.5);
             let label_x = (rect.x + (rect.w - label_w) * 0.5).round();
             self.draw_string_scaled(visible_label, label_x, text_y, self.theme.fg, mode_scale);
+            if toggle_id == crate::ui_system::UiId::MarkdownModeToggle {
+                let toc_w = (26.0 * scale).round();
+                let toc_x = (rect.x - (4.0 * scale).round() - toc_w).round();
+                if toc_x >= bar.x {
+                    let toc_rect = crate::ui_system::UiClipRect::new(toc_x, rect.y, toc_w, rect.h);
+                    let hovered = ui_registry.register_rect_clipped(
+                        crate::ui_system::UiId::MarkdownTocToggle,
+                        toc_rect.x,
+                        toc_rect.y,
+                        toc_rect.w,
+                        toc_rect.h,
+                        bar,
+                        mx,
+                        my,
+                    );
+                    let alpha = if hovered { 0.16 } else { 0.09 };
+                    self.push_rounded_rect(
+                        toc_rect.x,
+                        toc_rect.y,
+                        toc_rect.w,
+                        toc_rect.h,
+                        5.0 * scale,
+                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha],
+                    );
+                    self.draw_string_scaled_stable(
+                        "≡",
+                        toc_rect.x + (9.0 * scale).round(),
+                        text_y.round(),
+                        self.theme.fg,
+                        0.9,
+                    );
+                }
+            }
         }
     }
 

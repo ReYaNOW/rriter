@@ -512,7 +512,7 @@ impl App {
         was_open
     }
 
-    fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
+    pub(crate) fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
         if self.active_document_is_markdown() {
             if snap {
                 self.markdown

@@ -97,6 +97,7 @@ pub(crate) fn test_app() -> Option<App> {
         },
         file_extension: String::new(),
         markdown: Default::default(),
+        markdown_toc: Default::default(),
         markdown_media: crate::markdown_media::MarkdownMedia::with_loader(std::sync::Arc::new(|_| {
             Err(crate::markdown_media::MediaError::Unsupported)
         })),

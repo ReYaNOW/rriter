@@ -17,6 +17,13 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.markdown_toc.open && state == ElementState::Pressed {
+            if !self.markdown_toc.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect)) {
+                self.markdown_toc.close();
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
         if self.finish_text_captures_on_release(state, button, mx, my) {
             return;
         }

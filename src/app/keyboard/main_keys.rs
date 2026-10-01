@@ -174,6 +174,11 @@ impl App {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
 
+        if self.markdown_toc.open {
+            self.handle_markdown_toc_key(key_event.physical_key);
+            return;
+        }
+
         if key_event.state == ElementState::Pressed
             && should_suppress_hover_for_keyboard(key_event.physical_key, ctrl, alt)
         {

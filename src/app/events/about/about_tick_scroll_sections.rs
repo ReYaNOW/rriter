@@ -87,6 +87,9 @@ fn about_to_wait_popup_scrolls(app: &mut App, dt: f32) -> bool {
     if app.autocomplete_active && app.autocomplete_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.markdown_toc.open && app.markdown_toc.scroll.update(dt) {
+        needs_redraw = true;
+    }
     if app.autocomplete_active {
         if let Some(popup) = &mut app.autocomplete_detail_popup {
             popup

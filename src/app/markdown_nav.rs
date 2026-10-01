@@ -133,6 +133,72 @@ pub(crate) enum LinkAction {
     None,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TocItem {
+    pub(crate) level: u8,
+    pub(crate) text: String,
+    pub(crate) source_range: Range<usize>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TocPopup {
+    pub(crate) open: bool,
+    pub(crate) items: Vec<TocItem>,
+    pub(crate) selected: Option<usize>,
+    pub(crate) scroll: crate::scroll::ScrollState,
+    pub(crate) rect: Option<(f32, f32, f32, f32)>,
+    pub(crate) max_scroll: f32,
+}
+
+impl Default for TocPopup {
+    fn default() -> Self {
+        Self {
+            open: false,
+            items: Vec::new(),
+            selected: None,
+            scroll: crate::scroll::ScrollState::new(7.0),
+            rect: None,
+            max_scroll: 0.0,
+        }
+    }
+}
+
+impl TocPopup {
+    pub(crate) fn open(&mut self, headings: &[MarkdownHeading]) {
+        self.items.clear();
+        self.items.extend(headings.iter().map(|heading| TocItem {
+            level: heading.level,
+            text: heading.text.clone(),
+            source_range: heading.source_range.clone(),
+        }));
+        self.selected = (!self.items.is_empty()).then_some(0);
+        self.scroll.jump_to(0.0);
+        self.max_scroll = 0.0;
+        self.open = true;
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.rect = None;
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize, row_h: f32, visible_h: f32) {
+        let Some(selected) = self.selected else {
+            return;
+        };
+        let next = selected.saturating_add_signed(delta).min(self.items.len().saturating_sub(1));
+        self.selected = Some(next);
+        let row_top = next as f32 * row_h;
+        let row_bottom = row_top + row_h;
+        if row_top < self.scroll.target {
+            self.scroll.target = row_top;
+        } else if row_bottom > self.scroll.target + visible_h {
+            self.scroll.target = row_bottom - visible_h;
+        }
+        self.scroll.clamp_target(0.0, self.max_scroll);
+    }
+}
+
 /// Source range of the heading whose slug is `anchor`; GitHub matches fragments case-insensitively.
 pub(crate) fn heading_for_anchor(
     anchor: &str,
@@ -1033,5 +1099,45 @@ mod tests {
         assert!(!is_link_click(press, Some(3), 106.0, 50.0, 1.25));
         // A non-finite pointer never clicks.
         assert!(!is_link_click(press, Some(3), f32::NAN, 50.0, 1.0));
+    }
+
+    #[test]
+    fn toc_copies_heading_text_levels_and_source_ranges() {
+        let source = "# First\n\n### Nested\n";
+        let headings = parse(source).headings(source);
+        let mut toc = TocPopup::default();
+        toc.open(&headings);
+        assert!(toc.open);
+        assert_eq!(toc.items.len(), 2);
+        assert_eq!(toc.items[0].text, "First");
+        assert_eq!(toc.items[0].level, 1);
+        assert_eq!(toc.items[0].source_range, headings[0].source_range);
+        assert_eq!(toc.items[1].text, "Nested");
+        assert_eq!(toc.items[1].level, 3);
+        assert_eq!(toc.items[1].source_range, headings[1].source_range);
+    }
+
+    #[test]
+    fn toc_empty_document_opens_with_no_selected_row() {
+        let mut toc = TocPopup::default();
+        toc.open(&parse("").headings(""));
+        assert!(toc.open);
+        assert!(toc.items.is_empty());
+        assert_eq!(toc.selected, None);
+    }
+
+    #[test]
+    fn toc_selection_stays_within_both_list_edges() {
+        let source = "# First\n\n## Second\n";
+        let headings = parse(source).headings(source);
+        let mut toc = TocPopup::default();
+        toc.open(&headings);
+        toc.max_scroll = 28.0;
+        toc.move_selection(-1, 28.0, 28.0);
+        assert_eq!(toc.selected, Some(0));
+        toc.move_selection(1, 28.0, 28.0);
+        assert_eq!(toc.selected, Some(1));
+        toc.move_selection(1, 28.0, 28.0);
+        assert_eq!(toc.selected, Some(1));
     }
 }

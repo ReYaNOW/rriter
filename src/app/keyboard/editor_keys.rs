@@ -437,6 +437,16 @@ impl App {
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
 
+        if key_event.state == ElementState::Pressed
+            && ctrl
+            && shift
+            && physical_key == PhysicalKey::Code(KeyCode::KeyO)
+            && self.active_document_is_markdown()
+        {
+            self.toggle_markdown_toc();
+            return;
+        }
+
         if self.show_welcome {
             match physical_key {
                 PhysicalKey::Code(KeyCode::KeyO) if ctrl => {

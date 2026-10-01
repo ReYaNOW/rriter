@@ -164,6 +164,7 @@ impl App {
             text_file_format: options.text_file_format.unwrap_or_default(),
             file_extension: ext,
             markdown: Default::default(),
+            markdown_toc: Default::default(),
             markdown_media: crate::markdown_media::MarkdownMedia::from_platform(),
             highlighter,
             closing_hint_state: Default::default(),

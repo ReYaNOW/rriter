@@ -9,6 +9,8 @@ impl App {
             UiId::MarkdownModeToggle => {
                 self.toggle_markdown_mode();
             }
+            UiId::MarkdownTocToggle => self.toggle_markdown_toc(),
+            UiId::MarkdownTocItem(index) => self.activate_markdown_toc_item(index),
             UiId::PdfDarkToggle => self.toggle_pdf_dark_pages(),
             UiId::PdfScrollY => {}
             UiId::PdfEngineInstall => self.install_pdf_engine(),

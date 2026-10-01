@@ -1456,6 +1456,7 @@ Root:
 * `src/headless/ui_tests_problems.rs` -> headless UI tests for listing Python diagnostics, jumping to a diagnostic, and clearing stale rows.
 * `src/headless/ui_tests_problems_groups.rs` -> headless UI tests for Problems current-file/all tabs, file group collapse, and per-file groups.
 * `src/headless/ui_tests_markdown.rs` -> headless UI tests for Markdown Read block layout, scrolling, code copy, edit toggle, and scrollbar drag.
+* `src/headless/ui_tests_markdown_toc.rs` -> headless UI tests for the Markdown heading table-of-contents popup, navigation, and shortcut routing.
 * `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
 * `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
@@ -1726,6 +1727,7 @@ Rendering:
 * `src/render_view/core_text_editor_helpers.rs` -> `core_text.rs` include chunk: pixel-stable glyph rects, editor glyph pass positions, wrapped text ranges, fold suffix helpers. Hot path.
 * `src/render_view/core_text_tests.rs` -> `core_text.rs` test chunk: glyph geometry pixel-stability regressions.
 * `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_toc.rs` -> Markdown heading table-of-contents popup rendering and shared scrollbar geometry.
 * `src/render_view/markdown_read_text_layout.rs` -> `markdown_read.rs` include chunk: heading scale, inline-code geometry, text colours, visual char metrics. Hot path.
 * `src/render_view/markdown_read_media.rs` -> `markdown_read.rs` include chunk: media blocks of the Reader (image-only paragraphs, Mermaid blocks): pure row layout over `(natural, state)` per element, `PlacedMedia`, `MediaInput` (elements found per layout build), cache `media_gen`/`media_blocks()`, texture/placeholder/error-frame drawing without I/O. Hot path.
 * `src/render_view/markdown_read_media_tests.rs` -> `markdown_read_media.rs` test chunk: media layout (sizes, wrapping, degenerate sizes), media-backed layouts, cache generation, failed Mermaid regressions.

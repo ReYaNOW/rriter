@@ -177,6 +177,11 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "texture_bytes": media_stats.texture_bytes,
             "visible_texture_bytes": media_stats.visible_texture_bytes,
         },
+        "markdown_toc": {
+            "open": app.markdown_toc.open,
+            "items": app.markdown_toc.items.iter().map(|item| &item.text).collect::<Vec<_>>(),
+            "selected": app.markdown_toc.selected,
+        },
         "editor": {
             "lines": app.editor.line_offsets.len(),
             "cursor": app.editor.cursor,

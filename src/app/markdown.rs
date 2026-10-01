@@ -9,6 +9,85 @@ use crate::render_view::markdown_read::MarkdownSourceAnchor;
 use crate::ui_system::UiId;
 
 impl App {
+    pub(crate) fn toggle_markdown_toc(&mut self) {
+        if !self.active_document_is_markdown() {
+            return;
+        }
+        if self.markdown_toc.open {
+            self.markdown_toc.close();
+        } else {
+            self.refresh_markdown_read_model_if_stale();
+            if self.markdown.read_model_version != Some(self.editor.version) {
+                let source = self.editor.get_full_text();
+                self.markdown.refresh_read_model(self.editor.version, source);
+            }
+            let headings = self.markdown.read_document(self.editor.version)
+                .map(|document| document.headings(&self.markdown.read_source))
+                .unwrap_or_default();
+            self.markdown_toc.open(&headings);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn handle_markdown_toc_key(
+        &mut self,
+        key: winit::keyboard::PhysicalKey,
+    ) -> bool {
+        if !self.markdown_toc.open {
+            return false;
+        }
+        match key {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                self.markdown_toc.close();
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) => {
+                let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+                self.markdown_toc.move_selection(
+                    -1,
+                    (28.0 * scale).round(),
+                    self.markdown_toc.rect.map_or(0.0, |rect| rect.3 - (36.0 * scale).round()),
+                );
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown) => {
+                let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+                self.markdown_toc.move_selection(
+                    1,
+                    (28.0 * scale).round(),
+                    self.markdown_toc.rect.map_or(0.0, |rect| rect.3 - (36.0 * scale).round()),
+                );
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter | winit::keyboard::KeyCode::NumpadEnter) => {
+                if let Some(index) = self.markdown_toc.selected {
+                    self.activate_markdown_toc_item(index);
+                }
+            }
+            _ => {}
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        true
+    }
+
+    pub(crate) fn activate_markdown_toc_item(&mut self, index: usize) {
+        let Some(range) = self.markdown_toc.items.get(index).map(|item| item.source_range.clone()) else {
+            return;
+        };
+        self.markdown_toc.close();
+        if self.markdown_mode() == MarkdownMode::Read {
+            self.scroll_markdown_read_to(&range, false);
+        } else {
+            self.editor.cursor = range.start.min(self.editor.len());
+            self.editor.selection_anchor = None;
+            self.scroll_cursor_near_center(0.35, false);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     /// Index of the layout link under `(x, y)`, `None` outside Read mode or off a link.
     pub(crate) fn markdown_read_link_at(&mut self, x: f32, y: f32) -> Option<u32> {
         if self.markdown_mode() != MarkdownMode::Read {
