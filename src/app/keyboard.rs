@@ -255,7 +255,7 @@ fn single_line_ime_text(text: &str) -> Cow<'_, str> {
 
 impl App {
     pub fn handle_main_ime_commit(&mut self, text: &str) {
-        if text.is_empty() || self.startup_blocks_text_input() {
+        if text.is_empty() || self.startup_blocks_text_input() || self.markdown_toc.open {
             return;
         }
         let editor_was_focused = self.editor_has_input_focus();
@@ -271,8 +271,7 @@ impl App {
     }
 
     fn handle_main_ime_commit_inner(&mut self, text: &str) -> bool {
-        if self.markdown_toc.open
-            || self.handle_file_tree_modal_ime_commit(text)
+        if self.handle_file_tree_modal_ime_commit(text)
             || self.modal_dialog_open()
             || self.ide_panel.project_search.help_open
         {

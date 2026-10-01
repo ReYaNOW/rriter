@@ -444,10 +444,10 @@ fn span_destination(
     if let Some(dest) = destination_range.and_then(|range| source.get(range.clone())) {
         return dest.to_string();
     }
-    if let Some(label) = reference_range.and_then(|range| source.get(range.clone())) {
-        if !normalize_link_label(label).is_empty() {
-            return label.to_string();
-        }
+    if let Some(label) = reference_range.and_then(|range| source.get(range.clone()))
+        && !normalize_link_label(label).is_empty()
+    {
+        return label.to_string();
     }
     let whole = source.get(span.source_range.clone()).unwrap_or("");
     if reference_range.is_none() && whole.ends_with(')') {

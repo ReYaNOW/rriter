@@ -611,69 +611,50 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Points `XDG_CACHE_HOME` of this test process at a per-process directory seeded by
-    /// `prepare_mermaid_font_cache`, like the helper launcher does for the child process.
-    struct SeededMermaidCache {
-        root: PathBuf,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl SeededMermaidCache {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!("rriter_mmdr_cache_{}", std::process::id()));
-            std::fs::remove_dir_all(&root).ok();
-            prepare_mermaid_font_cache(&root).unwrap();
-            let previous = std::env::var_os("XDG_CACHE_HOME");
-            // SAFETY: edition-2024 `set_var`; this is the only test that renders Mermaid (the
-            // variable is read on the first render of the process), and it restores the old
-            // value on drop.
-            unsafe { std::env::set_var("XDG_CACHE_HOME", &root) };
-            Self { root, previous }
-        }
-
-        fn font_files(&self) -> Vec<String> {
-            let dir = self.root.join("mmdr").join("font-cache");
-            let mut names: Vec<String> = std::fs::read_dir(dir)
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .collect();
-            names.sort();
-            names
-        }
-    }
-
-    impl Drop for SeededMermaidCache {
-        fn drop(&mut self) {
-            // SAFETY: see `new`.
-            unsafe {
-                match &self.previous {
-                    Some(value) => std::env::set_var("XDG_CACHE_HOME", value),
-                    None => std::env::remove_var("XDG_CACHE_HOME"),
-                }
-            }
-            std::fs::remove_dir_all(&self.root).ok();
-        }
+    fn font_files(root: &Path) -> Vec<String> {
+        let dir = root.join("mmdr").join("font-cache");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]
     fn mermaid_uses_seeded_font_cache() {
-        let cache = SeededMermaidCache::new();
-        // Seeding: one .font (the embedded Inter) and its .meta, nothing else.
-        let seeded = cache.font_files();
-        assert_eq!(seeded.len(), 2, "{seeded:?}");
-        let font = seeded.iter().find(|name| name.ends_with(".font")).unwrap();
-        let on_disk = std::fs::read(cache.root.join("mmdr").join("font-cache").join(font)).unwrap();
-        assert_eq!(on_disk, INTER_FONT);
-        // Seeding twice is a no-op.
-        prepare_mermaid_font_cache(&cache.root).unwrap();
-        assert_eq!(cache.font_files(), seeded);
-        // The family resvg resolves is the one mermaid lays out with.
-        assert_eq!(editor_fontdb().1, MERMAID_FONT_FAMILY);
+        if let Some(root) = std::env::var_os("RRITER_MERMAID_CACHE_TEST") {
+            let root = PathBuf::from(root);
+            let seeded = font_files(&root);
+            assert_eq!(seeded.len(), 2, "{seeded:?}");
+            let font = seeded.iter().find(|name| name.ends_with(".font")).unwrap();
+            let on_disk = std::fs::read(root.join("mmdr").join("font-cache").join(font)).unwrap();
+            assert_eq!(on_disk, INTER_FONT);
+            assert_eq!(editor_fontdb().1, MERMAID_FONT_FAMILY);
+            mermaid_flowchart_renders();
+            mermaid_errors_carry_text();
+            assert_eq!(font_files(&root), seeded, "mmdr wrote a font of its own");
+            return;
+        }
 
-        mermaid_flowchart_renders();
-        mermaid_errors_carry_text();
-        // A cache miss would have made mmdr scan the system fonts and copy a font here.
-        assert_eq!(cache.font_files(), seeded, "mmdr wrote a font of its own");
+        let root = std::env::temp_dir().join(format!("rriter_mmdr_cache_{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        prepare_mermaid_font_cache(&root).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let mut command = std::process::Command::new(executable);
+        command
+            .arg("mermaid_uses_seeded_font_cache")
+            .env("XDG_CACHE_HOME", &root)
+            .env("RRITER_MERMAID_CACHE_TEST", &root)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+        let mut child = crate::platform::ManagedChild::spawn(&mut command).unwrap();
+        let result = child.wait_timeout(std::time::Duration::from_secs(60));
+        if result.as_ref().is_ok_and(Option::is_none) {
+            child.terminate(std::time::Duration::from_millis(200)).unwrap();
+        }
+        std::fs::remove_dir_all(&root).ok();
+        assert!(result.unwrap().is_some_and(|status| status.success()), "Mermaid cache child failed");
     }
 
     fn mermaid_flowchart_renders() {

@@ -15,7 +15,7 @@ const WAIT_MS: u64 = 15_000;
 fn fixture(name: &str, markdown: &str) -> (PathBuf, PathBuf) {
     let dir = scratch_dir(name);
     let path = dir.join("preview.md");
-    std::fs::write(&path, markdown).expect("write Markdown fixture");
+    std::fs::write(&path, markdown).unwrap_or_else(|error| panic!("write Markdown fixture: {error}"));
     (dir, path)
 }
 
@@ -41,7 +41,7 @@ fn open_toc_with_shortcut(session: &mut HeadlessSession) -> Value {
 fn state_reply(lines: &[String]) -> Value {
     let payload = lines.last().and_then(|line| line.strip_prefix("ok "))
         .unwrap_or_else(|| panic!("expected dump reply: {lines:?}"));
-    serde_json::from_str(payload).expect("dump JSON")
+    serde_json::from_str(payload).unwrap_or_else(|error| panic!("dump JSON: {error}"))
 }
 
 fn many_lines(count: usize) -> String {

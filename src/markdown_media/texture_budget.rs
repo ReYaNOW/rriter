@@ -107,5 +107,5 @@ pub(super) fn upload_order(visible: &[bool], limit: usize) -> Vec<usize> {
 /// The disk cache is trimmed before the first url load of a session and then before every
 /// 10th one, which keeps the growth between trims within 10 files of at most 20 MB.
 pub(super) fn should_trim_disk_cache(url_loads_started: u64) -> bool {
-    url_loads_started % 10 == 0
+    url_loads_started.is_multiple_of(10)
 }

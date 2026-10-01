@@ -27,7 +27,8 @@ const BADGE_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\"
 
 fn write_png(path: &Path, width: u32, height: u32) {
     let image = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 30, 30, 255]));
-    image.save_with_format(path, image::ImageFormat::Png).expect("write png fixture");
+    image.save_with_format(path, image::ImageFormat::Png)
+        .unwrap_or_else(|error| panic!("write png fixture: {error}"));
 }
 
 /// A workspace with `preview.md` (the given source), `pic.png` (64x32), `badge.svg` and a
@@ -35,10 +36,12 @@ fn write_png(path: &Path, width: u32, height: u32) {
 fn fixture(name: &str, markdown: &str) -> (PathBuf, PathBuf) {
     let dir = scratch_dir(name);
     write_png(&dir.join("pic.png"), 64, 32);
-    std::fs::write(dir.join("badge.svg"), BADGE_SVG).expect("write svg fixture");
-    std::fs::write(dir.join("other.txt"), "plain text\n").expect("write text fixture");
+    std::fs::write(dir.join("badge.svg"), BADGE_SVG)
+        .unwrap_or_else(|error| panic!("write svg fixture: {error}"));
+    std::fs::write(dir.join("other.txt"), "plain text\n")
+        .unwrap_or_else(|error| panic!("write text fixture: {error}"));
     let path = dir.join("preview.md");
-    std::fs::write(&path, markdown).expect("write markdown fixture");
+    std::fs::write(&path, markdown).unwrap_or_else(|error| panic!("write markdown fixture: {error}"));
     (dir, path)
 }
 
@@ -104,9 +107,12 @@ struct MediaHttpFixture {
 
 impl MediaHttpFixture {
     fn start(png: Vec<u8>) -> Self {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind media HTTP fixture");
-        let address = listener.local_addr().expect("media HTTP fixture address");
-        listener.set_nonblocking(true).expect("set fixture nonblocking");
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .unwrap_or_else(|error| panic!("bind media HTTP fixture: {error}"));
+        let address = listener.local_addr()
+            .unwrap_or_else(|error| panic!("media HTTP fixture address: {error}"));
+        listener.set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("set fixture nonblocking: {error}"));
         let repaired = Arc::new(AtomicBool::new(false));
         let worker_repaired = Arc::clone(&repaired);
         let stop = Arc::new(AtomicBool::new(false));

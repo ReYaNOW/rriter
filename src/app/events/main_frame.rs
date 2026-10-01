@@ -113,10 +113,10 @@ impl App {
                     self.lsp.as_ref(),
                 );
 
-                if let Some(log) = &mut self.pending_key_log {
-                    if log.t_render.is_none() {
-                        log.t_render = Some(std::time::Instant::now());
-                    }
+                if let Some(log) = &mut self.pending_key_log
+                    && log.t_render.is_none()
+                {
+                    log.t_render = Some(std::time::Instant::now());
                 }
 
                 if let Some(mut renderer) = self.renderer.take() {
@@ -612,16 +612,16 @@ impl App {
                     }
                 }
 
-                if self.markdown_toc.open {
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        let (mx, my) = (renderer.last_mouse_x, renderer.last_mouse_y);
-                        wants_pointer |= renderer.draw_markdown_toc(
-                            &mut self.markdown_toc,
-                            &mut self.ui_registry,
-                            mx,
-                            my,
-                        );
-                    }
+                if self.markdown_toc.open
+                    && let Some(renderer) = self.renderer.as_mut()
+                {
+                    let (mx, my) = (renderer.last_mouse_x, renderer.last_mouse_y);
+                    wants_pointer |= renderer.draw_markdown_toc(
+                        &mut self.markdown_toc,
+                        &mut self.ui_registry,
+                        mx,
+                        my,
+                    );
                 }
 
                 let cursor_icon = if blocking_modal_open {
