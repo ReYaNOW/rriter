@@ -52,8 +52,8 @@ fn test_diag(message: &str, severity: DiagSeverity, code: Option<&str>) -> Diagn
         code_href: None,
         message: std::sync::Arc::<str>::from(message),
         source: Some(std::sync::Arc::<str>::from("ruff")),
-        quickfixes: Vec::new().into_boxed_slice(),
-        tags: Vec::new().into_boxed_slice(),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

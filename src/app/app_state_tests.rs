@@ -360,8 +360,8 @@
             code_href: None,
             message: std::sync::Arc::<str>::from(message),
             source: None,
-            quickfixes: Box::new([]),
-            tags: Box::new([]),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }
     }
 
@@ -397,6 +397,17 @@
         let rows = panel.visible_problem_row_count();
         assert_eq!(rows, 2);
         assert_eq!(panel.problem_group_counts_at(0), (1, 0));
+        assert_eq!(panel.problem_group_name_at(0), "SQL-консоль · db");
+        assert_eq!(panel.problem_group_name_at(1), "");
         assert_eq!(problems_scroll_content_height(rows, 24.0), 48.0);
         assert_eq!(problems_scroll_content_height(rows, f32::NAN), 0.0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn problem_group_name_is_lossy_for_non_utf8_file_names() {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::path::Path::new("/ws").join(std::ffi::OsStr::from_bytes(b"a\xffb.py"));
+        assert_eq!(&*problem_group_name(&path), "a\u{fffd}b.py");
+        assert_eq!(&*problem_group_name(std::path::Path::new("/")), "");
     }

@@ -263,8 +263,8 @@ fn parse_borrowed_diagnostic_value(v: &BorrowedDiagnostic<'_>) -> Diagnostic {
             .map(Arc::<str>::from),
         message: Arc::<str>::from(message.as_ref()),
         source: v.source.map(Arc::<str>::from),
-        quickfixes: quickfixes.into_boxed_slice(),
-        tags: v.tags.clone().into_boxed_slice(),
+        tags: DiagTags::from_lsp(v.tags.iter().copied()),
+        extra: Diagnostic::extra_for_quickfixes(quickfixes),
     }
 }
 
@@ -470,8 +470,8 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
         code_href,
         message: Arc::<str>::from(message.as_ref()),
         source,
-        quickfixes: quickfixes.into_boxed_slice(),
-        tags: tags.into_boxed_slice(),
+        tags: DiagTags::from_lsp(tags),
+        extra: Diagnostic::extra_for_quickfixes(quickfixes),
     })
 }
 

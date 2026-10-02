@@ -639,8 +639,8 @@ fn parse_dart_machine_line(line: &str, root: &Path) -> Option<(PathBuf, Diagnost
             code_href: None,
             message: Arc::<str>::from(message),
             source: Some(Arc::<str>::from(DART_SERVER_NAME)),
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: super::DiagTags::NONE,
+            extra: None,
         },
     ))
 }
@@ -761,8 +761,8 @@ mod tests {
             code_href: None,
             message: Arc::<str>::from(message),
             source: Some(Arc::<str>::from("dart")),
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }
     }
 

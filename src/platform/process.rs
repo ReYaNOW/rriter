@@ -733,11 +733,57 @@ where
     result
 }
 
+/// Result of [`run_command_stdout_with`]: stdout is whatever the caller's reader produced.
+pub struct StreamedOutput<T> {
+    pub status: ExitStatus,
+    pub stdout: T,
+    pub stderr: Vec<u8>,
+}
+
+/// Runs a managed process like [`run_command_output`], but hands its stdout to
+/// `read_stdout` on the reader thread instead of buffering it, so large outputs
+/// (e.g. `ruff check --output-format=json` on a big workspace) can be parsed
+/// as they arrive. Whatever `read_stdout` leaves unread is drained afterwards,
+/// so the child never blocks on a full pipe.
+pub fn run_command_stdout_with<T, F>(
+    command: &mut Command,
+    timeout: Duration,
+    read_stdout: F,
+) -> io::Result<StreamedOutput<T>>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut ChildStdout) -> T + Send + 'static,
+{
+    run_command_with_stdout_reader(command, timeout, None, move |mut stdout: ChildStdout| {
+        let value = read_stdout(&mut stdout);
+        io::copy(&mut stdout, &mut io::sink())?;
+        Ok(value)
+    })
+}
+
 fn run_command_output_inner(
     command: &mut Command,
     timeout: Duration,
     cancel: Option<&AtomicBool>,
 ) -> io::Result<Output> {
+    let output = run_command_with_stdout_reader(command, timeout, cancel, read_pipe)?;
+    Ok(Output {
+        status: output.status,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+fn run_command_with_stdout_reader<T, F>(
+    command: &mut Command,
+    timeout: Duration,
+    cancel: Option<&AtomicBool>,
+    read_stdout: F,
+) -> io::Result<StreamedOutput<T>>
+where
+    T: Send + 'static,
+    F: FnOnce(ChildStdout) -> io::Result<T> + Send + 'static,
+{
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -749,7 +795,7 @@ fn run_command_output_inner(
     let stderr = child
         .take_stderr()
         .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
-    let stdout_reader = super::spawn_named("rriter-process-stdout", move || read_pipe(stdout))?;
+    let stdout_reader = super::spawn_named("rriter-process-stdout", move || read_stdout(stdout))?;
     let stderr_reader = match super::spawn_named("rriter-process-stderr", move || read_pipe(stderr))
     {
         Ok(reader) => reader,
@@ -790,7 +836,7 @@ fn run_command_output_inner(
 
     let stdout = join_pipe_reader(stdout_reader)?;
     let stderr = join_pipe_reader(stderr_reader)?;
-    Ok(Output {
+    Ok(StreamedOutput {
         status,
         stdout,
         stderr,
@@ -803,7 +849,7 @@ fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
-fn join_pipe_reader(handle: thread::JoinHandle<io::Result<Vec<u8>>>) -> io::Result<Vec<u8>> {
+fn join_pipe_reader<T>(handle: thread::JoinHandle<io::Result<T>>) -> io::Result<T> {
     handle
         .join()
         .map_err(|_| io::Error::other("process output reader panicked"))?

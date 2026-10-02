@@ -605,8 +605,8 @@ fn problem_jump_to_closed_large_file_prioritizes_target_region() {
             code_href: None,
             message: std::sync::Arc::<str>::from("problem"),
             source: None,
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }]
         .into(),
     );
@@ -657,8 +657,8 @@ fn problem_jump_to_open_file_does_not_restart_highlighter() {
             code_href: None,
             message: std::sync::Arc::<str>::from("problem"),
             source: None,
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }]
         .into(),
     );

@@ -290,7 +290,7 @@ impl App {
         if !diags.is_empty() {
             // Добавляем быстрые фиксы (quickfixes) из диагностики, которые ruff прислал заранее
             for d in &diags {
-                for qf in &d.quickfixes {
+                for qf in d.quickfixes() {
                     let mut changes = std::collections::HashMap::new();
                     if let Some(path) = self.file_path.clone() {
                         changes.insert(path, qf.edits.clone());
