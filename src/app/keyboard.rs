@@ -255,9 +255,7 @@ fn single_line_ime_text(text: &str) -> Cow<'_, str> {
 
 impl App {
     pub fn handle_main_ime_commit(&mut self, text: &str) {
-        if text.is_empty() || self.startup_blocks_text_input() || self.markdown_toc.open
-            || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
-        {
+        if text.is_empty() || self.startup_blocks_text_input() || self.markdown_toc.open {
             return;
         }
         let editor_was_focused = self.editor_has_input_focus();

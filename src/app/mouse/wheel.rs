@@ -110,16 +110,20 @@ impl App {
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) {
             let body = self.ui_registry.rect_for(crate::ui_system::UiId::PdfBody);
-            if let Some(image) = self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()) {
-                if let Some(rect) = body { image.body = rect; }
-                if self.left_shift_down {
-                    image.zoom_at((-dy * 0.002).exp(), mx, my);
-                } else {
-                    image.scroll(-dy);
+            if let Some(rect) = body
+                && crate::ui_system::point_in_rect(mx, my, rect)
+            {
+                if let Some(image) = self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()) {
+                    image.body = rect;
+                    if self.left_shift_down {
+                        image.zoom_at((-dy * 0.002).exp(), mx, my);
+                    } else {
+                        image.scroll(-dy);
+                    }
                 }
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                return;
             }
-            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
-            return;
         }
         if self.markdown_toc.open
             && self.markdown_toc.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))

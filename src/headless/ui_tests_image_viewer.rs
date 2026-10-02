@@ -1,5 +1,6 @@
 use crate::headless::HeadlessSession;
-use crate::headless::tests_support::{dump, run_script, scratch_dir, session_for_test, wait_until};
+use crate::app::{PendingAction, events::host_loop::HostLoop};
+use crate::headless::tests_support::{click_ui, dump, run_script, scratch_dir, session_for_test, shell_failed, terminal_has_line, terminal_session, ui_rect, wait_until, workspace_with_explorer};
 use std::path::{Path, PathBuf};
 
 const WAIT_MS: u64 = 8000;
@@ -84,20 +85,114 @@ fn svg_uses_the_shared_media_decoder() {
 fn left_shift_wheel_zooms_but_right_shift_does_not() {
     let (_dir, _path, mut session) = open_image("ui-image-wheel", "png", None);
     wait_phase(&mut session, "ready");
-    let before = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
+    let body = ui_rect(&dump(&mut session), "PdfBody");
+    let before = session.app.tabs[0].image.as_ref().unwrap().fit_scale(body[2] as f32, body[3] as f32);
     session.app.left_shift_down = true;
-    let lines = run_script(&mut session, b"wheel 0 -4\n");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {} {}\nwheel 0 4\n", body[0] + body[2] / 2.0, body[1] + body[3] / 2.0).as_bytes(),
+    );
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let zoomed = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
-    assert!(zoomed > before, "left shift should zoom: {before} -> {zoomed}");
+    assert!(zoomed > f64::from(before), "left shift should zoom: {before} -> {zoomed}");
     session.app.left_shift_down = false;
     session.app.modifiers = winit::keyboard::ModifiersState::SHIFT;
-    run_script(&mut session, b"wheel 0 -4\n");
+    run_script(
+        &mut session,
+        format!("mouse_move {} {}\nwheel 0 4\n", body[0] + body[2] / 2.0, body[1] + body[3] / 2.0).as_bytes(),
+    );
     let after_right_shift = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
     assert_eq!(after_right_shift, zoomed, "aggregate Shift must not zoom image");
     run_script(&mut session, b"key 0\n");
     let fit = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
-    assert!(fit > 0.0 && fit <= 1.0, "0 should restore fit-to-window: {fit}");
+    assert!((fit - f64::from(before)).abs() <= f64::EPSILON, "0 should restore first-open fit {before}: {fit}");
+}
+
+#[test]
+fn image_zoom_anchor_and_vertical_scroll_reach_both_edges() {
+    let (_dir, _path, mut session) = open_image("ui-image-geometry", "png", None);
+    wait_phase(&mut session, "ready");
+    let [bx, by, bw, bh] = ui_rect(&dump(&mut session), "PdfBody").map(|value| value as f32);
+    let image = session.app.tabs[0].image.as_deref_mut().expect("image state");
+    image.body = (bx, by, bw, bh);
+    let old_zoom = image.fit_scale(bw, bh);
+    let natural = image.natural;
+    let cursor = (bx + bw * 0.37, by + bh * 0.62);
+    let old_origin = crate::app::image_tab::image_origin((bw, bh), (natural.0 * old_zoom, natural.1 * old_zoom));
+    let image_point = (
+        (cursor.0 - bx - old_origin.0 - image.offset.0) / old_zoom,
+        (cursor.1 - by - old_origin.1 - image.offset.1) / old_zoom,
+    );
+    image.zoom_at(2.0, cursor.0, cursor.1);
+    let new_origin = crate::app::image_tab::image_origin((bw, bh), (natural.0 * image.zoom, natural.1 * image.zoom));
+    let anchored = (
+        bx + new_origin.0 + image.offset.0 + image_point.0 * image.zoom,
+        by + new_origin.1 + image.offset.1 + image_point.1 * image.zoom,
+    );
+    assert!(
+        (anchored.0 - cursor.0).abs() <= 1.0 && (anchored.1 - cursor.1).abs() <= 1.0,
+        "anchor drift: cursor={cursor:?}, anchored={anchored:?}, body={:?}, natural={natural:?}, old_origin={old_origin:?}, new_origin={new_origin:?}, offset={:?}, old_zoom={old_zoom}, zoom={}",
+        image.body,
+        image.offset,
+        image.zoom,
+    );
+
+    image.scroll(-100_000.0);
+    assert!((image.offset.1 - (bh - 1000.0 * image.zoom)).abs() <= 1.0);
+    image.scroll(100_000.0);
+    assert!(image.offset.1.abs() <= f32::EPSILON);
+}
+
+#[test]
+fn image_tab_passes_keys_to_terminal_and_escape_closes_dialog() {
+    let (dir, mut session) = terminal_session("ui-image-key-routing");
+    let path = dir.join("sample.png");
+    png(&path, 80, 60);
+    run_script(&mut session, format!("open {}\n", path.display()).as_bytes());
+    wait_phase(&mut session, "ready");
+    session.app.show_action_dialog(&HostLoop::headless(&session.loop_state), PendingAction::Quit);
+    assert_eq!(dump(&mut session)["dialog"]["action"], "Quit");
+    run_script(&mut session, b"key escape\n");
+    assert_eq!(dump(&mut session)["dialog"], serde_json::Value::Null);
+
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    click_ui(&mut session, "TerminalBody");
+    assert!(session.app.ide_panel.terminal_focused);
+    let lines = run_script(&mut session, b"type echo image-key-route\nkey enter\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    wait_until(&mut session, WAIT_MS, "terminal command from image tab", |session| {
+        terminal_has_line(session, 0, "image-key-route")
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_over_file_tree_does_not_zoom_or_scroll_image() {
+    let dir = scratch_dir("ui-image-tree-wheel");
+    for index in 0..80 {
+        std::fs::write(dir.join(format!("item-{index:02}.txt")), "tree row\n")
+            .unwrap_or_else(|error| panic!("write tree fixture: {error}"));
+    }
+    let path = dir.join("sample.png");
+    png(&path, 1600, 1000);
+    let mut session = workspace_with_explorer(1280, 720, 1.0, &dir);
+    run_script(&mut session, format!("open {}\n", path.display()).as_bytes());
+    wait_phase(&mut session, "ready");
+    let tree_bar = ui_rect(&dump(&mut session), "FileTreeScrollY");
+    let tree_point = (tree_bar[0] - 30.0, tree_bar[1] + tree_bar[3] * 0.5);
+    let image_before = dump(&mut session)["tabs"][0]["image"].clone();
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {} {}\nwheel 0 -100\n", tree_point.0, tree_point.1).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert!(session.app.ide_panel.explorer_scroll.target > 0.0, "tree did not scroll");
+    let image_after = dump(&mut session)["tabs"][0]["image"].clone();
+    assert_eq!(image_after["zoom"], image_before["zoom"]);
+    assert_eq!(session.app.tabs[0].image.as_ref().unwrap().offset, (0.0, 0.0));
 }
 
 #[test]

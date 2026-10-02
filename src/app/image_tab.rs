@@ -120,9 +120,16 @@ impl ImageTabState {
         let (bx, by, bw, bh) = self.body;
         let old = if self.zoom <= 0.0 { self.fit_scale(self.body.2, self.body.3) } else { self.zoom.max(0.01) };
         let next = (old * factor).clamp(0.05, 16.0);
-        let anchor = (x - bx - self.offset.0, y - by - self.offset.1);
+        let old_size = (self.natural.0 * old, self.natural.1 * old);
+        let next_size = (self.natural.0 * next, self.natural.1 * next);
+        let old_origin = image_origin((bw, bh), old_size);
+        let next_origin = image_origin((bw, bh), next_size);
+        let anchor = (x - bx - old_origin.0 - self.offset.0, y - by - old_origin.1 - self.offset.1);
         let ratio = next / old;
-        self.offset = (self.offset.0 + anchor.0 * (1.0 - ratio), self.offset.1 + anchor.1 * (1.0 - ratio));
+        self.offset = (
+            x - bx - next_origin.0 - anchor.0 * ratio,
+            y - by - next_origin.1 - anchor.1 * ratio,
+        );
         self.zoom = next;
         self.clamp_offset(bw, bh);
     }
@@ -160,9 +167,31 @@ impl ImageTabState {
 
 }
 
+pub(crate) fn image_origin(body: (f32, f32), image: (f32, f32)) -> (f32, f32) {
+    ((body.0 - image.0).max(0.0) * 0.5, (body.1 - image.1).max(0.0) * 0.5)
+}
+
 impl crate::app::App {
     pub(crate) fn handle_image_key(&mut self, input: &crate::app::keyboard::KeyInput) -> bool {
         if !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) { return false; }
+        if !self.editor_has_input_focus()
+            || self.modifiers.control_key()
+            || self.modifiers.alt_key()
+            || self.modifiers.super_key()
+            || self.modifiers.shift_key()
+            || matches!(input.physical_key, winit::keyboard::PhysicalKey::Code(
+                winit::keyboard::KeyCode::F1 | winit::keyboard::KeyCode::F2 | winit::keyboard::KeyCode::F3
+                | winit::keyboard::KeyCode::F4 | winit::keyboard::KeyCode::F5 | winit::keyboard::KeyCode::F6
+                | winit::keyboard::KeyCode::F7 | winit::keyboard::KeyCode::F8 | winit::keyboard::KeyCode::F9
+                | winit::keyboard::KeyCode::F10 | winit::keyboard::KeyCode::F11 | winit::keyboard::KeyCode::F12
+                | winit::keyboard::KeyCode::F13 | winit::keyboard::KeyCode::F14 | winit::keyboard::KeyCode::F15
+                | winit::keyboard::KeyCode::F16 | winit::keyboard::KeyCode::F17 | winit::keyboard::KeyCode::F18
+                | winit::keyboard::KeyCode::F19 | winit::keyboard::KeyCode::F20 | winit::keyboard::KeyCode::F21
+                | winit::keyboard::KeyCode::F22 | winit::keyboard::KeyCode::F23 | winit::keyboard::KeyCode::F24
+            ))
+        {
+            return false;
+        }
         if input.state == winit::event::ElementState::Pressed
             && input.physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Digit0)
         {
@@ -173,7 +202,7 @@ impl crate::app::App {
             }
             return true;
         }
-        true
+        false
     }
 
     pub(crate) fn handle_image_mouse(&mut self, state: winit::event::ElementState, button: winit::event::MouseButton, x: f32, y: f32) -> bool {
