@@ -638,7 +638,6 @@ impl App {
         self.cancel_pointer_interactions();
         let previous_tab = self.active_tab;
         self.pdf_tab_deactivated(previous_tab);
-        self.image_tab_deactivated(previous_tab);
         self.save_active_database_query();
         self.commit_api_focus();
         self.ide_panel.api.focused = None;
@@ -646,7 +645,6 @@ impl App {
         self.sync_active_tab();
         self.active_tab = new_idx;
         self.pdf_tab_activated(new_idx);
-        self.image_tab_activated(new_idx);
         self.sync_active_tab();
         self.markdown.clear_code_copy_transient();
         self.revalidate_markdown_media(false);

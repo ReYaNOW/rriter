@@ -1,6 +1,6 @@
 use crate::markdown_media::{MediaError, MediaPixels};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use crate::ui_waker::{OneShot, OneShotState};
 
 #[derive(Clone, Debug)]
 pub(crate) enum ImagePhase {
@@ -20,8 +20,10 @@ pub(crate) struct ImageTabState {
     pub zoom: f32,
     pub offset: (f32, f32),
     pub stamp: Option<crate::markdown_media::FileStamp>,
-    rx: Option<Receiver<Result<MediaPixels, MediaError>>>,
+    rx: Option<OneShot<Result<MediaPixels, MediaError>>>,
     pending: Option<MediaPixels>,
+    dirty: bool,
+    dirty_stamp: Option<crate::markdown_media::FileStamp>,
     pub body: (f32, f32, f32, f32),
     drag: Option<(f32, f32)>,
     last_click: Option<std::time::Instant>,
@@ -30,7 +32,7 @@ pub(crate) struct ImageTabState {
 impl ImageTabState {
     pub(crate) fn new(path: PathBuf) -> Self {
         let key = crate::platform::PathKey::new(&path);
-        let mut state = Self {
+        let state = Self {
             path,
             key,
             phase: ImagePhase::Loading,
@@ -42,30 +44,33 @@ impl ImageTabState {
             stamp: None,
             rx: None,
             pending: None,
+            dirty: false,
+            dirty_stamp: None,
             body: (0.0, 0.0, 0.0, 0.0),
             drag: None,
             last_click: None,
         };
-        state.start_load();
         state
     }
 
-    pub(crate) fn start_load(&mut self) {
+    pub(crate) fn start_load(&mut self, waker: &crate::ui_waker::UiWaker) {
+        if self.rx.is_some() { self.dirty = true; return; }
         if self.stamp.is_none() { self.phase = ImagePhase::Loading; }
         let path = self.path.clone();
-        let (tx, rx) = mpsc::channel();
-        self.rx = Some(rx);
-        let _ = crate::platform::spawn_named("rriter-image-load", move || {
-            let _ = tx.send(crate::markdown_media::load_image_path(path));
-        });
+        match waker.spawn_one_shot("rriter-image-load", move || {
+            crate::markdown_media::load_image_path(path)
+        }) {
+            Ok(rx) => self.rx = Some(rx),
+            Err(_) => self.phase = ImagePhase::Failed(MediaError::Crashed.label().into_owned()),
+        }
     }
 
     pub(crate) fn poll(&mut self, _renderer: &mut crate::renderer::Renderer) -> bool {
-        let Some(rx) = self.rx.as_ref() else { return false };
-        let result = match rx.try_recv() {
-            Ok(result) => result,
-            Err(TryRecvError::Empty) => return false,
-            Err(TryRecvError::Disconnected) => Err(MediaError::Crashed),
+        let Some(rx) = self.rx.as_mut() else { return false };
+        let result = match rx.poll() {
+            OneShotState::Pending => return false,
+            OneShotState::Ready(result) => result,
+            OneShotState::Closed => Err(MediaError::Crashed),
         };
         self.rx = None;
         match result {
@@ -142,14 +147,19 @@ impl ImageTabState {
     pub(crate) fn begin_drag(&mut self, x: f32, y: f32) { self.drag = Some((x, y)); }
 
     pub(crate) fn drag_to(&mut self, x: f32, y: f32) -> bool {
-        let Some((px, py)) = self.drag.replace((x, y)) else { return false };
-        self.offset.0 += x - px;
-        self.offset.1 += y - py;
+        let Some((px, py)) = self.drag.as_mut() else { return false };
+        let (dx, dy) = (x - *px, y - *py);
+        *px = x;
+        *py = y;
+        self.offset.0 += dx;
+        self.offset.1 += dy;
         self.clamp_offset(self.body.2, self.body.3);
         true
     }
 
     pub(crate) fn end_drag(&mut self) { self.drag = None; }
+
+    pub(crate) fn is_dragging(&self) -> bool { self.drag.is_some() }
 
     pub(crate) fn double_click(&mut self, now: std::time::Instant, width: f32, height: f32) -> bool {
         let double = self.last_click.is_some_and(|last| now.duration_since(last).as_millis() < 500);
@@ -255,7 +265,6 @@ impl crate::app::App {
         let index = self.tabs.len() - 1;
         if index == self.active_tab {
             self.sync_active_tab();
-            self.image_tab_activated(index);
             self.save_tabs_state();
         } else {
             self.switch_to_tab(index);
@@ -264,26 +273,58 @@ impl crate::app::App {
     }
 
     pub(crate) fn poll_image_tabs(&mut self) -> bool {
+        let active = self.active_tab;
         let Some(renderer) = self.renderer.as_mut() else { return false };
-        let Some(image) = self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()) else { return false };
-        image.poll(renderer) | image.upload_pending(renderer)
-    }
-
-    pub(crate) fn image_tab_deactivated(&mut self, index: usize) {
-        if let (Some(renderer), Some(image)) = (self.renderer.as_mut(), self.tabs.get_mut(index).and_then(|tab| tab.image.as_deref_mut())) {
-            image.release_texture(renderer);
+        let mut changed = false;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let Some(image) = tab.image.as_deref_mut() else { continue };
+            if index != active {
+                image.release_texture(renderer);
+                continue;
+            }
+            if image.texture.is_none()
+                && image.rx.is_none()
+                && image.pending.is_none()
+                && matches!(image.phase, ImagePhase::Loading | ImagePhase::Ready)
+            {
+                image.start_load(&self.ui_waker);
+            }
+            let image_changed = image.poll(renderer) | image.upload_pending(renderer);
+            if image.rx.is_none() && image.dirty && image.pending.is_none() {
+                image.dirty = false;
+                if image.dirty_stamp != image.stamp {
+                    image.start_load(&self.ui_waker);
+                }
+                image.dirty_stamp = None;
+            }
+            changed |= image_changed;
         }
-    }
-
-    pub(crate) fn image_tab_activated(&mut self, index: usize) {
-        if let Some(image) = self.tabs.get_mut(index).and_then(|tab| tab.image.as_deref_mut())
-            && image.texture.is_none() && image.rx.is_none() && image.pending.is_none()
-        {
-            image.start_load();
-        }
+        changed
     }
 
     pub(crate) fn revalidate_image_tabs(&mut self) {
-        if let Some(image) = self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()) { image.start_load(); }
+        let Some(image) = self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()) else { return };
+        let current = std::fs::metadata(&image.path)
+            .ok()
+            .map(|meta| crate::markdown_media::FileStamp {
+                mtime: meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                len: meta.len(),
+            });
+        if current == image.stamp { return; }
+        if image.rx.is_some() {
+            image.dirty = true;
+            image.dirty_stamp = current;
+        } else {
+            image.start_load(&self.ui_waker);
+        }
+    }
+
+    pub(crate) fn release_image_tab_texture(&mut self, index: usize) {
+        if let (Some(renderer), Some(image)) = (
+            self.renderer.as_mut(),
+            self.tabs.get_mut(index).and_then(|tab| tab.image.as_deref_mut()),
+        ) {
+            image.release_texture(renderer);
+        }
     }
 }

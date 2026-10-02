@@ -206,3 +206,62 @@ fn overwriting_an_open_image_refreshes_its_natural_dimensions() {
         tab["phase"] == "ready" && tab["natural_w"] == 320.0 && tab["natural_h"] == 180.0
     });
 }
+
+#[test]
+fn image_texture_tracks_the_active_tab_and_is_released_for_text_tabs() {
+    let (_dir, image_path, mut session) = open_image("ui-image-tab-lifecycle", "png", None);
+    wait_phase(&mut session, "ready");
+    let text_path = image_path.with_extension("txt");
+    std::fs::write(&text_path, "neighbour\n").expect("write neighbour");
+    run_script(&mut session, format!("open {}\n", text_path.display()).as_bytes());
+    wait_until(&mut session, WAIT_MS, "image texture released", |session| {
+        dump(session)["tabs"].as_array().is_some_and(|tabs| tabs[0]["image"]["texture"] == false)
+    });
+    session.app.switch_to_tab(0);
+    session.app.close_tab_at_unchecked(1);
+    wait_until(&mut session, WAIT_MS, "active image texture restored", |session| {
+        dump(session)["tabs"].as_array().is_some_and(|tabs| tabs[0]["image"]["phase"] == "ready" && tabs[0]["image"]["texture"] == true)
+    });
+}
+
+#[test]
+fn repeated_watcher_events_while_image_loads_do_not_replace_the_in_flight_load() {
+    let (_dir, _path, mut session) = open_image("ui-image-repeated-events", "png", None);
+    for _ in 0..8 {
+        session.app.revalidate_image_tabs();
+    }
+    wait_phase(&mut session, "ready");
+    wait_until(&mut session, WAIT_MS, "image texture ready after revalidation", |session| {
+        dump(session)["tabs"].as_array().is_some_and(|tabs| tabs[0]["image"]["texture"] == true)
+    });
+}
+
+#[test]
+fn moving_without_a_pressed_button_does_not_pan_the_image() {
+    let (_dir, _path, mut session) = open_image("ui-image-hover-pan", "png", None);
+    wait_phase(&mut session, "ready");
+    let [x, y, w, h] = ui_rect(&dump(&mut session), "PdfBody");
+    session.app.tabs[0].image.as_deref_mut().expect("image state").zoom_at(2.0, (x + w / 2.0) as f32, (y + h / 2.0) as f32);
+    let before = session.app.tabs[0].image.as_ref().expect("image state").offset;
+    run_script(&mut session, format!("mouse_move {} {}\nmouse_move {} {}\n", x + w / 2.0, y + h / 2.0, x + w / 2.0 + 40.0, y + h / 2.0 + 40.0).as_bytes());
+    assert_eq!(session.app.tabs[0].image.as_ref().expect("image state").offset, before);
+}
+
+#[test]
+fn settings_and_bottom_panel_wheels_do_not_zoom_the_image() {
+    let (_dir, _path, mut session) = open_image("ui-image-wheel-overlays", "png", None);
+    wait_phase(&mut session, "ready");
+    let body = ui_rect(&dump(&mut session), "PdfBody");
+    let point = (body[0] + body[2] / 2.0, body[1] + body[3] / 2.0);
+    let zoom = dump(&mut session)["tabs"][0]["image"]["zoom"].clone();
+    session.app.show_settings = true;
+    session.app.settings_tab = 1;
+    session.app.settings_anim_progress = 1.0;
+    run_script(&mut session, format!("mouse_move {} {}\nwheel 0 4\n", point.0, point.1).as_bytes());
+    assert_eq!(dump(&mut session)["tabs"][0]["image"]["zoom"], zoom);
+    session.app.show_settings = false;
+    session.app.ide_panel.toggle(crate::app::PanelId::Problems);
+    let bottom_y = body[1] + body[3] - 4.0;
+    run_script(&mut session, format!("mouse_move {} {}\nwheel 0 4\n", point.0, bottom_y).as_bytes());
+    assert_eq!(dump(&mut session)["tabs"][0]["image"]["zoom"], zoom);
+}

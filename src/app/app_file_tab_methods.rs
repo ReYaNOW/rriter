@@ -3,7 +3,7 @@ impl App {
         self.prepare_all_database_tabs_close();
         for idx in 0..self.tabs.len() {
             self.prepare_pdf_tab_close(idx);
-            self.image_tab_deactivated(idx);
+            self.release_image_tab_texture(idx);
         }
     }
 
@@ -238,12 +238,13 @@ impl App {
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
 
         if self.tabs.len() <= 1 {
-            self.image_tab_deactivated(idx);
+            self.release_image_tab_texture(idx);
             self.close_current_file();
             return;
         }
 
-        if idx == self.active_tab { self.pdf_tab_deactivated(idx); self.image_tab_deactivated(idx); }
+        if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
+        self.release_image_tab_texture(idx);
         self.prepare_pdf_tab_close(idx);
         self.prepare_database_tab_close(idx);
         let closing_lsp = self.tab_lsp_close_identity(idx);

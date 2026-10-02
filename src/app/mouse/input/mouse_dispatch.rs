@@ -30,7 +30,10 @@ impl App {
         if self.finish_text_captures_on_release(state, button, mx, my) {
             return;
         }
-        if self.handle_image_mouse(state, button, mx, my) { return; }
+        let image_dragging = state == ElementState::Released
+            && button == winit::event::MouseButton::Left
+            && self.tabs.get(self.active_tab).and_then(|tab| tab.image.as_deref()).is_some_and(crate::app::image_tab::ImageTabState::is_dragging);
+        if image_dragging && self.handle_image_mouse(state, button, mx, my) { return; }
         if self.prepare_left_press(state, button, mx, my) {
             return;
         }

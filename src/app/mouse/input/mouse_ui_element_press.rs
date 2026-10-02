@@ -266,6 +266,12 @@ impl App {
                 | crate::ui_system::UiId::PdfText
                 | crate::ui_system::UiId::PdfLink(_, _)
         ) {
+            if clicked_id == crate::ui_system::UiId::PdfBody
+                && self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
+            {
+                let _ = self.handle_image_mouse(state, button, mx, my);
+                return;
+            }
             if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
                 let link = match clicked_id {
                     crate::ui_system::UiId::PdfLink(page, idx) => Some((page, idx)),
