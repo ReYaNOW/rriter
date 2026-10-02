@@ -647,9 +647,10 @@ impl App {
         self.pdf_tab_activated(new_idx);
         self.sync_active_tab();
         self.markdown.clear_code_copy_transient();
+        self.revalidate_markdown_media(false);
         self.prefetch_active_tab_git_graph();
 
-        if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() {
+        if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() || self.tabs[self.active_tab].kind.is_image() {
             while self.highlighter.rx.try_recv().is_ok() {}
             self.autocomplete_active = false;
             self.inline_git_popup = None;
@@ -684,7 +685,7 @@ impl App {
             self.begin_initial_tab_highlight(wait_highlight);
         }
 
-        if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() && !self.tabs[self.active_tab].kind.is_pdf() {
+        if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() && !self.tabs[self.active_tab].kind.is_pdf() && !self.tabs[self.active_tab].kind.is_image() {
             if let Some(lsp) = &mut self.lsp {
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();
@@ -1386,6 +1387,7 @@ mod tests {
             file_extension: "rs".to_string(),
             markdown: Default::default(),
             pdf: None,
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans,

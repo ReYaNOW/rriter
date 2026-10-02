@@ -239,6 +239,20 @@ impl ScrollState {
         true
     }
 
+    /// Moves `current` and `target` to independently computed positions of the same
+    /// content (each follows its own source anchor), keeping velocity and animation
+    /// speed. Like `rebase_current_preserving_motion` it releases a scrollbar drag.
+    pub(crate) fn rebase_current_and_target(&mut self, new_current: f32, new_target: f32) -> bool {
+        if !new_current.is_finite() || !new_target.is_finite() {
+            return false;
+        }
+        self.current = new_current;
+        self.target = new_target;
+        self.deferred_current_rebase = None;
+        self.end_drag();
+        true
+    }
+
     /// Rebases only the current position after an absolute destination target was
     /// already selected in the new coordinate system.
     pub(crate) fn rebase_current_preserving_target(&mut self, new_current: f32) -> bool {

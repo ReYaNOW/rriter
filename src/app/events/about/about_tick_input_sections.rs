@@ -342,6 +342,7 @@ fn about_to_wait_picker_receivers(app: &mut App, dt: f32, now: Instant) -> bool 
         needs_redraw = true;
     }
     if app.poll_pdf_worker() { needs_redraw = true; }
+    if app.poll_image_tabs() { needs_redraw = true; }
     if app.tick_pdf_drag_autoscroll(dt) { needs_redraw = true; }
     if app.poll_dart_tool_state() {
         needs_redraw = true;

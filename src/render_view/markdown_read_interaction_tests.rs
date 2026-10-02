@@ -946,6 +946,97 @@ mod interaction_tests {
         assert_eq!(line_box_index(&gapped, 33.0, |line| line.top, |line| line.bottom), Some(1));
     }
 
+    fn link_hits(cache: &MarkdownReadLayoutCache, y: f32) -> Vec<(f32, Option<u32>)> {
+        let mut advance = |_: char, _: bool, _: Option<f32>| 8.0;
+        (0..400)
+            .map(|x| (x as f32, cache.link_at(x as f32, y, 1.0, &mut advance)))
+            .collect()
+    }
+
+    #[test]
+    fn link_text_is_hit_only_over_its_own_glyphs() {
+        let cache = layout("see [**bold** link](x.md#a) and more tail text\n", 800.0);
+        assert_eq!(cache.links().len(), 1);
+        let linked: Vec<u32> = cache
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(text.styled.runs.iter().filter_map(|run| run.link)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(linked.len() >= 2, "bold and plain parts both carry the link");
+        assert!(linked.iter().all(|index| *index == 0));
+        let y = cache.blocks[0].top + 2.0;
+        let hits = link_hits(&cache, y);
+        let hit_xs: Vec<f32> = hits.iter().filter(|(_, hit)| *hit == Some(0)).map(|(x, _)| *x).collect();
+        assert!(!hit_xs.is_empty());
+        let (first, last) = (hit_xs[0], hit_xs[hit_xs.len() - 1]);
+        // `bold link` is ten characters of 8 px, contiguous, and neither neighbour is hit.
+        assert!((last - first + 1.0 - 80.0).abs() <= 8.0, "span {first}..{last}");
+        assert!(hits.iter().filter(|(x, _)| *x > first && *x < last).all(|(_, hit)| *hit == Some(0)));
+        assert_eq!(hits[0].1, None);
+        assert_eq!(hits[399].1, None);
+    }
+
+    #[test]
+    fn wrapped_link_runs_keep_one_index_and_hits_cover_both_lines_only() {
+        let cache = layout("before [**жирный** текст](x.md) after\n", 145.0);
+        assert_eq!(cache.links().len(), 1);
+        let text = cache
+            .blocks
+            .iter()
+            .find_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(text),
+                _ => None,
+            })
+            .expect("text block");
+        assert!(text.lines.len() >= 2, "link fixture must wrap: {:?}", text.lines);
+        assert!(text
+            .styled
+            .runs
+            .iter()
+            .filter(|run| run.link.is_some())
+            .all(|run| run.link == Some(0)));
+
+        let line_hits: Vec<Vec<(f32, Option<u32>)>> =
+            text.lines.iter().map(|line| link_hits(&cache, line.y)).collect();
+        let linked_lines: Vec<_> = line_hits
+            .iter()
+            .filter(|hits| hits.iter().any(|(_, hit)| *hit == Some(0)))
+            .collect();
+        assert_eq!(linked_lines.len(), 2, "link hits on both wrapped lines");
+        for hits in &line_hits {
+            let link_pixels: Vec<f32> = hits
+                .iter()
+                .filter(|(_, hit)| *hit == Some(0))
+                .map(|(x, _)| *x)
+                .collect();
+            if let (Some(first), Some(last)) = (link_pixels.first(), link_pixels.last()) {
+                assert_eq!(hits.iter().find(|(x, _)| *x < *first).map(|(_, hit)| *hit), Some(None));
+                assert_eq!(hits.iter().find(|(x, _)| *x > *last).map(|(_, hit)| *hit), Some(None));
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_and_undefined_links_get_no_link_index() {
+        let cache = layout("[a](javascript:alert(1)) [b][nope] [c]() plain\n", 800.0);
+        assert!(cache.links().is_empty());
+        let any_link = cache.blocks.iter().any(|block| match &block.kind {
+            ReadBlockKind::Text(text) => text.styled.runs.iter().any(|run| run.link.is_some()),
+            _ => false,
+        });
+        assert!(!any_link);
+        let y = cache.blocks[0].top + 2.0;
+        assert!(link_hits(&cache, y).iter().all(|(_, hit)| hit.is_none()));
+        // Outside of any block there is nothing to hit either.
+        let mut advance = |_: char, _: bool, _: Option<f32>| 8.0;
+        assert_eq!(cache.link_at(10.0, -50.0, 1.0, &mut advance), None);
+        assert_eq!(cache.link_at(f32::NAN, f32::NAN, 1.0, &mut advance), None);
+    }
+
     #[test]
     fn table_line_hit_test_uses_uniform_line_boxes_at_boundaries() {
         assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 19.0), Some(0));

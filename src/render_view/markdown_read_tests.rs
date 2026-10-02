@@ -180,7 +180,7 @@
                             }
                         }
                     }
-                    ReadBlockKind::Rule { .. } => {}
+                    ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {}
                 }
             }
 

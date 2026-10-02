@@ -81,6 +81,8 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |
 | `quit` | Stop. EOF does the same. | `ok` |
 
+IDE image tabs appear in `dump` with `kind: "image"` and an `image` object containing `phase`, `natural_w`, `natural_h`, `zoom`, and `texture`.
+
 Rules:
 
 - Every synthesized event is followed by exactly one frame: `click` and `key`
@@ -139,7 +141,7 @@ what the cursor is over after `mouse_move`.
 
 Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
-markdown, `kind` (`normal|git_diff|api_client|database_table|database_query|pdf`)), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
+markdown, `markdown_media` (always an array, empty unless the tab is a Markdown tab in Read mode with a layout; otherwise one object per laid-out media element: `key` (file path, URL or `mermaid:<hash>`), `state` = `pending|ready|failed:<MediaError variant>`, laid-out rectangle `x`/`y`/`w`/`h` in document pixels, `null` for an element drawn without a media rectangle such as a failed Mermaid block), `kind` (`normal|git_diff|api_client|database_table|database_query|pdf`)), `markdown_media_stats` (`media_gen`, `loads_started`, `texture_bytes`, `visible_texture_bytes` of the shared media cache), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
 highlight version and byte-range spans), `ide_panel`, `overlays`,
 `dialog`, `external_request`, `clipboard`, `writes_allowed`.
 PDF tabs add `pdf` with `phase` (`engine_missing|engine_starting|loading|ready|error|password_required`), `page_count`, zero-based `current_page`, `scroll`, `textures` (number of uploaded page textures), `search_matches`, `search_done`, `selection_chars`, `engine` (`not_started|starting|ready|missing|failed|installing`), and `engine_message`. For PDF tabs, `scroll_y` equals `pdf.scroll`.

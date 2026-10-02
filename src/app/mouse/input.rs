@@ -212,7 +212,7 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App, preserve_main_vertical: boo
                 stop_scroll_anim(&mut state.result_view.scroll_y);
                 stop_scroll_anim(&mut state.result_view.review_message_scroll_y);
             }
-            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) | crate::app::EditorTabKind::Pdf => {}
+            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) | crate::app::EditorTabKind::Pdf | crate::app::EditorTabKind::Image => {}
         }
     }
 
@@ -243,6 +243,7 @@ fn preserve_main_vertical_scroll_for_click(app: &App, mx: f32, my: f32) -> bool 
             app.ui_registry.find_at(mx, my),
             Some(
                 crate::ui_system::UiId::MarkdownModeToggle
+                    | crate::ui_system::UiId::MarkdownTocToggle
                     | crate::ui_system::UiId::EditorScrollbarY
                     | crate::ui_system::UiId::EditorScrollbarX
             )

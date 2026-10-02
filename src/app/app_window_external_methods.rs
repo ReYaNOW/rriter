@@ -156,6 +156,7 @@ impl App {
     pub(crate) fn cancel_pending_action(&mut self) {
         self.confirm_dialog.cancel();
         self.protected_saves.clear_awaiting_action();
+        self.clear_pending_markdown_link_action();
         self.request_main_redraw();
     }
 
@@ -425,7 +426,9 @@ impl App {
                 (0..self.tabs.len()).any(|index| self.tab_text_is_dirty(index))
             }
             PendingAction::Quit | PendingAction::CloseAllTabs => self.editor.is_dirty(),
-            PendingAction::CloseFile | PendingAction::OpenFile => self.editor.is_dirty(),
+            PendingAction::CloseFile | PendingAction::OpenFile | PendingAction::OpenLinkedFile => {
+                self.editor.is_dirty()
+            }
             PendingAction::None => false,
         }
     }
@@ -536,6 +539,10 @@ impl App {
         if self.active_pdf_tab().is_some() {
             self.ide_panel.file_tree_error =
                 Some("PDF нельзя сохранить: документ открыт только для просмотра".to_string());
+            return SaveOutcome::Failed;
+        }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) {
+            self.ide_panel.file_tree_error = Some("Изображение открыто только для просмотра".to_owned());
             return SaveOutcome::Failed;
         }
         let Some(path) = self.file_path.clone() else {
@@ -741,6 +748,9 @@ impl App {
         }
         // The async picker can return after the user switched to a PDF tab; its hidden editor is empty.
         if self.active_pdf_tab().is_some() {
+            return false;
+        }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) {
             return false;
         }
 

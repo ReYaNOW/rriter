@@ -1162,7 +1162,7 @@ mod session_cases {
             keys,
             [
                 "clipboard", "cursor_icon", "dialog", "editor", "event_loop", "external_request", "hover",
-                "ide_panel", "mode",
+                "ide_panel", "markdown_media_stats", "markdown_toc", "mode",
                 "overlays", "scale", "size", "tabs", "ui", "writes_allowed"
             ]
         );

@@ -240,10 +240,48 @@ fn push_source_range(
     }
 }
 
+/// Link targets collected while a layout is built, plus what resolving a destination needs:
+/// the folder of the document and its link reference definitions.
+#[derive(Default)]
+struct LinkTable {
+    targets: Vec<LinkTarget>,
+    dir: std::path::PathBuf,
+    defs: Vec<(String, String)>,
+}
+
+impl LinkTable {
+    /// Index of `target` in the table. `Unsupported` is no link: it neither reacts to the
+    /// pointer nor shows a hand.
+    fn add(&mut self, target: LinkTarget) -> Option<u32> {
+        if target == LinkTarget::Unsupported {
+            return None;
+        }
+        let index = u32::try_from(self.targets.len()).ok()?;
+        self.targets.push(target);
+        Some(index)
+    }
+}
+
+impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
+    /// Resolves relative destinations against `dir` and `[label]` ones against the definitions.
+    fn with_links(mut self, dir: &Path, defs: Vec<(String, String)>) -> Self {
+        self.links.dir = dir.to_path_buf();
+        self.links.defs = defs;
+        self
+    }
+
+    fn finish_with_links(mut self) -> (Vec<ReadBlock>, f32, Vec<LinkTarget>) {
+        let links = std::mem::take(&mut self.links.targets);
+        let (blocks, height) = self.finish();
+        (blocks, height, links)
+    }
+}
+
 fn styled_from_inlines(
     source: &str,
     inlines: &[MarkdownInlineSpan],
     fallback_ranges: &[Range<usize>],
+    links: &mut LinkTable,
 ) -> StyledText {
     let mut styled = StyledText::default();
     if inlines.is_empty() {
@@ -253,7 +291,7 @@ fn styled_from_inlines(
         return styled;
     }
     for span in inlines {
-        append_inline(&mut styled, source, span, TextStyle::default());
+        append_inline(&mut styled, source, span, TextStyle::default(), links);
     }
     styled
 }
@@ -263,6 +301,7 @@ fn append_inline(
     source: &str,
     span: &MarkdownInlineSpan,
     inherited: TextStyle,
+    links: &mut LinkTable,
 ) {
     let mut style = inherited;
     match &span.style {
@@ -292,15 +331,21 @@ fn append_inline(
         }
         MarkdownInlineStyle::Text | MarkdownInlineStyle::Escape => {}
     }
+    // Every run of the link's text, nested styles and wrapped lines included, carries its index.
+    let outer_link = styled.link;
+    if let Some(target) = inline_link_target(source, span, &links.dir, &links.defs) {
+        styled.link = links.add(target);
+    }
     if !span.children.is_empty() {
         for child in &span.children {
-            append_inline(styled, source, child, style);
+            append_inline(styled, source, child, style, links);
         }
     } else {
         for range in &span.text_ranges {
             push_source_range(styled, source, range, style);
         }
     }
+    styled.link = outer_link;
 }
 
 fn visible_block_range(blocks: &[ReadBlock], top: f32, bottom: f32) -> Range<usize> {

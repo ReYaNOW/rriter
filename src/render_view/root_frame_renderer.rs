@@ -12,6 +12,7 @@ impl Renderer {
     fn resolve_markdown_edit_scroll_transition(
         &mut self,
         markdown: &mut crate::app::MarkdownTabState,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
         editor: &Editor,
         scroll: &mut crate::scroll::ScrollState,
         current_sticky_lines: &[(usize, usize)],
@@ -58,7 +59,7 @@ impl Renderer {
             Some(anchor)
         } else if transition.from == crate::app::MarkdownMode::Read {
             transition.origin_read_width.and_then(|width| {
-                self.prepare_markdown_read_layout(markdown, editor.version, width)
+                self.prepare_markdown_read_layout(markdown, markdown_media, editor.version, width)
                     .then(|| {
                         markdown
                             .read_layout
@@ -165,6 +166,7 @@ impl Renderer {
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
@@ -234,6 +236,7 @@ impl Renderer {
             tabs,
             active_tab,
             markdown,
+            markdown_media,
             scroll_y_state,
             current_sticky_lines,
             layout,
@@ -262,6 +265,16 @@ impl Renderer {
             &mut telemetry_root_phases,
             &mut telemetry_side_panel_time,
         );
+        if is_ide_mode
+            && !show_welcome
+            && let Some(image) = tabs.get(active_tab).and_then(|tab| tab.image.as_deref())
+        {
+            let (x, y, w, h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, viewport.editor_height);
+            self.draw_root_image_frame(image, x, y, w, h, s, ui_mx, ui_my, ui_registry);
+            return self.draw_root_tab_frame_chrome(editor, editor_title, editor_path, tabs, active_tab,
+                markdown, None, ide_panel, lsp, ui_registry, ide_workspaces, layout, viewport,
+                active_api_route, has_lsp_diagnostics, show_fps, blink_alpha, tab_scroll_x, wants_pointer);
+        }
         if is_ide_mode
             && !show_welcome
             && let Some(tab) = tabs.get(active_tab).filter(|tab| tab.kind.is_pdf())
@@ -389,6 +402,7 @@ impl Renderer {
                 chrome_detail_start,
             } = self.draw_root_markdown_read_frame(
                 markdown,
+                markdown_media,
                 editor,
                 editor_title,
                 editor_path,

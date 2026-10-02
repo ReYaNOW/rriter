@@ -336,6 +336,21 @@ impl Renderer {
             status_progress_elapsed,
             status_progress_value,
         );
+        if let Some(image) = tabs.get(active_tab).and_then(|tab| tab.image.as_deref()) {
+            let (_, _, body_w, body_h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
+            let zoom = if image.zoom <= 0.0 { image.fit_scale(body_w, body_h) } else { image.zoom };
+            let mut label = std::mem::take(&mut self.scratch_buffer);
+            label.clear();
+            let _ = std::fmt::Write::write_fmt(&mut label, format_args!("{:.0}×{:.0} · {:.0}%", image.natural.0, image.natural.1, zoom * 100.0));
+            let label_w = self.measure_ui_width(&label, 0.95).round();
+            let bar_h = crate::render_view::ide_status_bar_height(s).round();
+            let bar_y = crate::render_view::ide_status_bar_y(self.height, panel_bottom_h, s).round();
+            let label_x = (self.width - 10.0 * s - label_w).round();
+            let overlay_x = (label_x - 6.0 * s).round();
+            self.push_rect(overlay_x, bar_y, (self.width - overlay_x).max(0.0), bar_h, [0.118, 0.125, 0.165, 1.0]);
+            self.draw_string_scaled_stable(&label, label_x, (bar_y + bar_h * 0.5 + (5.0 * s).round()).round(), self.theme.fg, 0.95);
+            self.scratch_buffer = label;
+        }
         if let Some((path, tx, ty)) = tab_tooltip {
             self.draw_tab_tooltip(&path, tx, ty, s);
         }
@@ -376,6 +391,7 @@ impl Renderer {
     fn draw_root_markdown_read_frame(
         &mut self,
         markdown: &mut crate::app::MarkdownTabState,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
         editor: &Editor,
         editor_title: &str,
         editor_path: Option<&std::path::PathBuf>,
@@ -446,6 +462,7 @@ impl Renderer {
         let stage_start = telemetry_frame_start.map(|_| Instant::now());
         self.draw_markdown_read(
             markdown,
+            markdown_media,
             editor,
             scroll_y_state,
             spans,

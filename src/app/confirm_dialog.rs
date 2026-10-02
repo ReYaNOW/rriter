@@ -13,6 +13,7 @@ pub enum PendingAction {
     None,
     Quit,
     OpenFile,
+    OpenLinkedFile,
     CloseFile,
     CloseTab(usize),
     CloseAllTabs,

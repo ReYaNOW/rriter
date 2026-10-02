@@ -87,6 +87,9 @@ fn about_to_wait_popup_scrolls(app: &mut App, dt: f32) -> bool {
     if app.autocomplete_active && app.autocomplete_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.markdown_toc.open && app.markdown_toc.scroll.update(dt) {
+        needs_redraw = true;
+    }
     if app.autocomplete_active {
         if let Some(popup) = &mut app.autocomplete_detail_popup {
             popup
@@ -464,6 +467,8 @@ fn about_to_wait_file_watcher(app: &mut App) -> bool {
         if fs_changed {
             app.refresh_file_tree();
             app.start_file_watcher();
+            app.revalidate_markdown_media(false);
+            app.revalidate_image_tabs();
             if app.ide_panel.is_open(crate::app::PanelId::Git) {
                 app.refresh_git_panel();
             }

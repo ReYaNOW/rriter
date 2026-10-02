@@ -451,6 +451,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
             WindowEvent::Focused(focused) => {
                 self.is_focused = focused;
                 self.modifiers = winit::keyboard::ModifiersState::empty();
+                self.left_shift_down = false;
                 if focused {
                     self.render_suspended = false;
                     if let Some(r) = self.renderer.as_mut() {

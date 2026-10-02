@@ -17,8 +17,17 @@ impl App {
             state == ElementState::Released && button == winit::event::MouseButton::Left;
         let mut finished_markdown_pointer = false;
         if left_released && self.markdown.read_selecting {
-            let _ = self.update_markdown_read_selection_at(mx, my);
+            // A release on the link the press began on is a click: no selection, run the link.
+            let link_action = self.take_markdown_read_link_click(mx, my);
+            if link_action.is_none() {
+                let _ = self.update_markdown_read_selection_at(mx, my);
+            }
             finished_markdown_pointer |= self.finish_markdown_read_selection_gesture();
+            if let Some(action) = link_action {
+                self.markdown.clear_read_selection();
+                self.run_markdown_link_action(action);
+                finished_markdown_pointer = true;
+            }
         }
         let finished_read_scrollbar_drag = left_released
             && self.markdown_mode() == crate::app::MarkdownMode::Read

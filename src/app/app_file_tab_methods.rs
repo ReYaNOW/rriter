@@ -3,6 +3,7 @@ impl App {
         self.prepare_all_database_tabs_close();
         for idx in 0..self.tabs.len() {
             self.prepare_pdf_tab_close(idx);
+            self.release_image_tab_texture(idx);
         }
     }
 
@@ -34,6 +35,7 @@ impl App {
                 file_extension: String::new(),
                 markdown: Default::default(),
                 pdf: None,
+                image: None,
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -77,6 +79,7 @@ impl App {
             file_extension: String::new(),
             markdown: Default::default(),
             pdf: None,
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -235,11 +238,13 @@ impl App {
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
 
         if self.tabs.len() <= 1 {
+            self.release_image_tab_texture(idx);
             self.close_current_file();
             return;
         }
 
         if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
+        self.release_image_tab_texture(idx);
         self.prepare_pdf_tab_close(idx);
         self.prepare_database_tab_close(idx);
         let closing_lsp = self.tab_lsp_close_identity(idx);
@@ -351,6 +356,11 @@ impl App {
         // No single-file transition into IDE mode exists (a folder only adds a workspace),
         // so outside IDE mode a `.pdf` goes the binary-file way through `load_file_internal`.
         let is_pdf = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
+        let is_image = path.extension().is_some_and(|ext| {
+            ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        });
         if !self.is_ide_mode {
             if start_highlighter {
                 self.load_file_internal(path, add_to_history, wait_highlight);
@@ -366,10 +376,15 @@ impl App {
             } else if wait_highlight {
                 self.switch_to_tab(i);
             }
+            self.revalidate_markdown_media(true);
             return;
         }
         if is_pdf {
             self.open_pdf_tab(path);
+            return;
+        }
+        if is_image {
+            self.open_image_tab(path);
             return;
         }
 
@@ -378,6 +393,7 @@ impl App {
             || self.editor.is_dirty()
             || self.editor.len() > 0
             || self.active_tab_is_api_client()
+            || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
         {
             self.open_new_tab();
         }
@@ -511,7 +527,7 @@ impl App {
         was_open
     }
 
-    fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
+    pub(crate) fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
         if self.active_document_is_markdown() {
             if snap {
                 self.markdown
@@ -638,6 +654,7 @@ impl App {
         if !self.is_ide_mode
             || self.active_tab_is_git_diff()
             || self.active_tab_is_api_client()
+            || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
             || self.file_path.is_none()
             || !self.editor.is_dirty()
             // Autosave must not bring a deleted file back; only an explicit

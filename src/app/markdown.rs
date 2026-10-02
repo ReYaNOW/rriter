@@ -1,7 +1,240 @@
 use std::ops::Range;
+use std::path::PathBuf;
 
-use super::{App, EditorTabKind};
+use super::{App, EditorTabKind, PendingAction};
+use super::markdown_nav::{
+    LinkAction, heading_for_anchor, heading_slugs, is_link_click, link_action,
+};
 use crate::render_view::markdown_read::MarkdownSourceAnchor;
+use crate::ui_system::UiId;
+
+impl App {
+    pub(crate) fn toggle_markdown_toc(&mut self) {
+        if !self.active_document_is_markdown() {
+            return;
+        }
+        if self.markdown_toc.open {
+            self.markdown_toc.close();
+        } else {
+            self.refresh_markdown_read_model_if_stale();
+            if self.markdown.read_model_version != Some(self.editor.version) {
+                let source = self.editor.get_full_text();
+                self.markdown.refresh_read_model(self.editor.version, source);
+            }
+            let headings = self.markdown.read_document(self.editor.version)
+                .map(|document| document.headings(&self.markdown.read_source))
+                .unwrap_or_default();
+            self.markdown_toc.open(&headings);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn handle_markdown_toc_key(
+        &mut self,
+        key: winit::keyboard::PhysicalKey,
+        state: winit::event::ElementState,
+    ) -> bool {
+        if !self.markdown_toc.open {
+            return false;
+        }
+        if state != winit::event::ElementState::Pressed {
+            return true;
+        }
+        match key {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                self.markdown_toc.close();
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp) => {
+                let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+                self.markdown_toc.move_selection(
+                    -1,
+                    (28.0 * scale).round(),
+                    self.markdown_toc.rect.map_or(0.0, |rect| rect.3 - (36.0 * scale).round()),
+                );
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown) => {
+                let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+                self.markdown_toc.move_selection(
+                    1,
+                    (28.0 * scale).round(),
+                    self.markdown_toc.rect.map_or(0.0, |rect| rect.3 - (36.0 * scale).round()),
+                );
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter | winit::keyboard::KeyCode::NumpadEnter) => {
+                if let Some(index) = self.markdown_toc.selected {
+                    self.activate_markdown_toc_item(index);
+                }
+            }
+            _ => {}
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        true
+    }
+
+    pub(crate) fn activate_markdown_toc_item(&mut self, index: usize) {
+        let Some(range) = self.markdown_toc.items.get(index).map(|item| item.source_range.clone()) else {
+            return;
+        };
+        self.markdown_toc.close();
+        if self.markdown_mode() == MarkdownMode::Read {
+            self.scroll_markdown_read_to(&range, false);
+        } else {
+            self.editor.cursor = range.start.min(self.editor.len());
+            self.editor.selection_anchor = None;
+            self.scroll_cursor_near_center(0.35, false);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    /// Index of the layout link under `(x, y)`, `None` outside Read mode or off a link.
+    pub(crate) fn markdown_read_link_at(&mut self, x: f32, y: f32) -> Option<u32> {
+        if self.markdown_mode() != MarkdownMode::Read {
+            return None;
+        }
+        let frame = self.ui_registry.rect_for(UiId::MarkdownReadBody)?;
+        let version = self.editor.version;
+        let scroll = self.scroll_y.current;
+        let markdown = &self.markdown;
+        self.renderer
+            .as_mut()?
+            .markdown_read_link_at(markdown, version, frame, scroll, x, y)
+    }
+
+    /// Called on the press that starts a Reader selection: remembers the link under it.
+    pub(crate) fn remember_markdown_link_press(&mut self, x: f32, y: f32) {
+        self.markdown.link_press = self.markdown_read_link_at(x, y).map(|index| (index, x, y));
+    }
+
+    pub(crate) fn cancel_markdown_link_press_after_drag(&mut self, x: f32, y: f32) {
+        let slop = self.renderer.as_ref().map_or(4.0, |renderer| (4.0 * renderer.scale_factor).round());
+        if self.markdown.link_press.is_some_and(|(_, press_x, press_y)| {
+            (x - press_x).abs() > slop || (y - press_y).abs() > slop
+        }) {
+            self.markdown.link_press = None;
+        }
+    }
+
+    /// Called on the release of a Reader selection. `Some` when the press and the release
+    /// make a click on one link (the caller then drops the selection and runs the action);
+    /// `None` leaves the gesture a normal selection.
+    pub(crate) fn take_markdown_read_link_click(&mut self, x: f32, y: f32) -> Option<LinkAction> {
+        let press = self.markdown.link_press.take()?;
+        let scale = self.renderer.as_ref()?.scale_factor;
+        let release = self.markdown_read_link_at(x, y);
+        if !is_link_click(press, release, x, y, scale) {
+            return None;
+        }
+        let target = self.markdown.read_layout.links().get(press.0 as usize)?.clone();
+        let document = self.markdown.read_document(self.editor.version)?;
+        let headings = document.headings(&self.markdown.read_source);
+        let slugs = heading_slugs(&headings);
+        Some(link_action(&target, &headings, &slugs))
+    }
+
+    pub(crate) fn run_markdown_link_action(&mut self, action: LinkAction) {
+        if !self.is_ide_mode
+            && self.editor.is_dirty()
+            && matches!(&action, LinkAction::OpenMarkdown { .. } | LinkAction::OpenFile(_))
+        {
+            if self.confirm_dialog.request(PendingAction::OpenLinkedFile) {
+                self.markdown.pending_link_action = Some(action);
+                self.ui_waker.wake();
+            }
+            return;
+        }
+        self.run_markdown_link_action_unchecked(action);
+    }
+
+    /// Opens a previously confirmed Markdown link. The discard path can be dirty by design.
+    pub(crate) fn run_pending_markdown_link_action(&mut self) {
+        if let Some(action) = self.markdown.pending_link_action.take() {
+            self.run_markdown_link_action_unchecked(action);
+        }
+    }
+
+    fn run_markdown_link_action_unchecked(&mut self, action: LinkAction) {
+        match action {
+            LinkAction::OpenUrl(url) => {
+                if let Err(error) = crate::platform::open_url(self.external_requests.sink(), &url) {
+                    eprintln!("cannot open link {url}: {error}");
+                }
+            }
+            LinkAction::ScrollTo(range) => self.scroll_markdown_read_to(&range, false),
+            // A link to a file that is not there must not create an empty tab for it.
+            LinkAction::OpenMarkdown { path, .. } | LinkAction::OpenFile(path) if !path.is_file() => {
+                eprintln!("link target is not a file: {}", path.display());
+            }
+            LinkAction::OpenMarkdown { path, anchor } => self.open_markdown_link(path, anchor),
+            LinkAction::OpenFile(path) => self.open_file_in_tab(path, true),
+            LinkAction::None => {}
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    /// Opens a linked Markdown file in Read mode; `anchor` is applied once its layout exists.
+    /// A file that did not open (missing, unreadable) leaves the current document untouched.
+    fn open_markdown_link(&mut self, path: PathBuf, anchor: Option<String>) {
+        self.open_file_in_tab(path.clone(), true);
+        let path_key = crate::platform::PathKey::new(&path);
+        let opened = self.file_key.as_ref() == Some(&path_key);
+        if !opened || !self.active_document_is_markdown() {
+            return;
+        }
+        self.set_markdown_mode(MarkdownMode::Read);
+        self.markdown.pending_anchor = anchor;
+    }
+
+    /// Scrolls the Reader to the line of `range`; `jump` skips the animation.
+    fn scroll_markdown_read_to(&mut self, range: &Range<usize>, jump: bool) {
+        let Some(top) = self.markdown.read_layout.source_target_y(range) else {
+            return;
+        };
+        self.markdown.mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+        if jump {
+            self.scroll_y.jump_to(top);
+        } else {
+            self.scroll_y.animate_to(top);
+        }
+    }
+
+    /// Frame step: scrolls to the heading of `pending_anchor` once the Reader has a layout of
+    /// the current text. The anchor is dropped afterwards, also when no heading matches.
+    pub(crate) fn apply_pending_markdown_anchor(&mut self) {
+        if self.markdown.pending_anchor.is_none() {
+            return;
+        }
+        let version = self.editor.version;
+        if self.markdown_mode() != MarkdownMode::Read
+            || !self.markdown.read_layout.is_for_version(version)
+            || self.markdown.read_layout.content_height() <= 0.0
+        {
+            return;
+        }
+        let Some(anchor) = self.markdown.pending_anchor.take() else {
+            return;
+        };
+        let Some(document) = self.markdown.read_document(version) else {
+            return;
+        };
+        let headings = document.headings(&self.markdown.read_source);
+        let slugs = heading_slugs(&headings);
+        if let Some(range) = heading_for_anchor(&anchor, &headings, &slugs) {
+            self.scroll_markdown_read_to(&range, true);
+        }
+    }
+
+    pub(crate) fn clear_pending_markdown_link_action(&mut self) {
+        self.markdown.pending_link_action = None;
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MarkdownMode {
@@ -100,6 +333,16 @@ pub struct MarkdownTabState {
     pub(crate) code_copy_hover_valid: bool,
     pub(crate) code_scroll_x: Vec<MarkdownCodeScrollX>,
     pub(crate) code_scroll_drag: Option<usize>,
+    /// Inputs of the last media request pass (`None`: not requested yet, see `markdown_media_wiring`).
+    pub(crate) media_request: Option<super::markdown_media_wiring::MediaRequestMarker>,
+    /// Link index and pointer position of the Reader press that started a selection on a link;
+    /// it is a click, not a selection, when the release stays on the same link.
+    pub(crate) link_press: Option<(u32, f32, f32)>,
+    /// Link under the pointer, refreshed by the Reader every frame.
+    pub(crate) hovered_link: Option<u32>,
+    /// Heading anchor to scroll to once the layout of a just opened document exists.
+    pub(crate) pending_anchor: Option<String>,
+    pub(crate) pending_link_action: Option<super::markdown_nav::LinkAction>,
 }
 
 // Горизонтальный скролл code block в Reader; хранится только пока активен.
@@ -140,6 +383,11 @@ impl Default for MarkdownTabState {
             code_copy_hover_valid: false,
             code_scroll_x: Vec::new(),
             code_scroll_drag: None,
+            media_request: None,
+            link_press: None,
+            hovered_link: None,
+            pending_anchor: None,
+            pending_link_action: None,
         }
     }
 }
@@ -529,6 +777,7 @@ impl App {
             return false;
         };
         self.markdown.begin_read_selection(byte);
+        self.remember_markdown_link_press(x, y);
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         true
@@ -538,6 +787,7 @@ impl App {
         if !self.markdown.read_selecting || self.markdown_mode() != MarkdownMode::Read {
             return false;
         }
+        self.cancel_markdown_link_press_after_drag(x, y);
         let Some(frame) = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::MarkdownReadBody)

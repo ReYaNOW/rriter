@@ -1427,6 +1427,12 @@ Root:
 * `scripts/lint_baseline.json` -> Clippy warning counts by file/lint and ceilings for files over 1600 lines.
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
+* `src/markdown_media.rs` -> Markdown reader media shared types (`MediaKey`, `MediaSource`, `MediaKind`, `MediaRequest`, `FileStamp`, `MediaPixels`, `MediaError` with Russian `label`, `RenderCommand`, `FetchEnv`) and `MarkdownMedia`, the one texture cache shared by all tabs: entries with generation, FIFO queue (visible keys first), at most 3 `OneShot` load slots held until GPU upload or discard, stale results dropped by generation, `poll`/`prepare_gpu` (freed-texture list drained first, at most 2 uploads per frame, CPU pixels dropped after upload, re-render of visible keys off by more than 25%, eviction), `invalidate_path`, `revalidate_files` (one background `stat` pass), `reset_failed`, `stats`, background disk-cache trim. Background tasks only, no frame-loop I/O.
+* `src/markdown_media/fetch.rs` -> blocking byte acquisition for media: local files (20 MB cap, `FileStamp`), http(s) through the injected client with FNV-1a-named atomic disk cache, Mermaid source passthrough, SVG detection, `trim_disk_cache`. Focused http tests run against a loopback server.
+* `src/markdown_media/decode.rs` -> in-process media decoding for the helper: `decode_in_process` (raster via `image` with `Limits`, SVG via `usvg`/`resvg` with only the two embedded editor fonts and no external `<image href>`, Mermaid via `mermaid-rs-renderer` dark theme then the SVG path), `raster_target_size`, premultiplied-to-straight alpha for the GPU. Runs in the helper process only.
+* `src/markdown_media/render_helper.rs` -> media helper process: stdin/stdout wire protocol (`<kind> <scale> <max_w> <len>` request, `OK`/`ERR` reply with strict validation of untrusted output), `render_media` (spawn through `platform::ManagedChild`, stdin written from its own thread, deadline, process-tree termination, Mermaid font cache seeded and given to the child alone as `XDG_CACHE_HOME`), `RenderCommand::for_current_process`, `run_media_helper_if_requested` (early exit via `platform::handle_startup_helper`, flag `--rriter-media-render`). `fetch::load_media` = `fetch_bytes` + `render_media`.
+* `src/markdown_media/texture_budget.rs` -> pure decisions of the media cache over plain facts (no GL): `should_enqueue`/`enqueue_indices`, `needs_rerender` (compares with the clamped `raster_target_size`, so tall images do not re-render forever), `eviction_plan` (invisible textures beyond 128 MB, oldest first, visible never), `texture_totals`, `upload_order`, `should_trim_disk_cache`.
+* `src/markdown_media/tests.rs` -> media cache tests on a fake loader and fake texture host (real `spawn_one_shot` tasks, `UiWaker::counting`).
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/pdf/mod.rs` -> PDF protocol types, worker channel contracts, document generations, and user-facing errors.
 * `src/pdf/library.rs` -> Pdfium manifest parsing, managed paths, archive URL, and library discovery.
@@ -1435,8 +1441,10 @@ Root:
 * `src/pdf/fixture.rs` -> Test-only generated three-page PDF, invalid PDF, and empty-file fixtures.
 * `src/app/pdf_tab.rs` / `src/app/pdf_tab/engine.rs` / `src/app/pdf_tab/input.rs` -> PDF tab data, page texture cache, scrolling and keys, document transitions, and worker lifecycle.
 * `src/app/pdf_tab/text.rs` -> PDF text layer: page-text cache requests, search state and generations, selection, copy, link and char hit testing.
+* `src/app/image_tab.rs` / `src/render_view/image_view.rs` -> IDE image tab state, bounded background decoding, texture lifetime, fit/zoom/pan input, and image frame rendering.
 * `src/render_view/pdf_view.rs` -> PDF loading/error states, textured pages, search/selection highlights, page hit targets, and the text-layer hit region.
 * `src/headless/ui_tests_pdf.rs` -> PDF tab lifecycle, rasterized pages, input, invalid documents, path deduplication, tab switching/closing, and missing-engine tests.
+* `src/headless/ui_tests_image_viewer.rs` -> image tab loading/errors, SVG decoding, reload after file changes, and wheel zoom input.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.
@@ -1450,6 +1458,7 @@ Root:
 * `src/headless/ui_tests_problems.rs` -> headless UI tests for listing Python diagnostics, jumping to a diagnostic, and clearing stale rows.
 * `src/headless/ui_tests_problems_groups.rs` -> headless UI tests for Problems current-file/all tabs, file group collapse, and per-file groups.
 * `src/headless/ui_tests_markdown.rs` -> headless UI tests for Markdown Read block layout, scrolling, code copy, edit toggle, and scrollbar drag.
+* `src/headless/ui_tests_markdown_toc.rs` -> headless UI tests for the Markdown heading table-of-contents popup, navigation, and shortcut routing.
 * `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
 * `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
@@ -1720,7 +1729,10 @@ Rendering:
 * `src/render_view/core_text_editor_helpers.rs` -> `core_text.rs` include chunk: pixel-stable glyph rects, editor glyph pass positions, wrapped text ranges, fold suffix helpers. Hot path.
 * `src/render_view/core_text_tests.rs` -> `core_text.rs` test chunk: glyph geometry pixel-stability regressions.
 * `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_toc.rs` -> Markdown heading table-of-contents popup rendering and shared scrollbar geometry.
 * `src/render_view/markdown_read_text_layout.rs` -> `markdown_read.rs` include chunk: heading scale, inline-code geometry, text colours, visual char metrics. Hot path.
+* `src/render_view/markdown_read_media.rs` -> `markdown_read.rs` include chunk: media blocks of the Reader (image-only paragraphs, Mermaid blocks): pure row layout over `(natural, state)` per element, `PlacedMedia`, `MediaInput` (elements found per layout build), cache `media_gen`/`media_blocks()`, texture/placeholder/error-frame drawing without I/O. Hot path.
+* `src/render_view/markdown_read_media_tests.rs` -> `markdown_read_media.rs` test chunk: media layout (sizes, wrapping, degenerate sizes), media-backed layouts, cache generation, failed Mermaid regressions.
 * `src/render_view/markdown_read_tests.rs` -> `markdown_read.rs` test chunk: Reader layout, baseline and table draw regressions.
 * `src/render_view/markdown_read_interaction_tests.rs` -> `markdown_read_interaction.rs` test chunk: visual/source mapping and hit-testing regressions.
 * `src/render_view/ide_panels/ide_panel_dialog_renderer.rs` -> bottom panel and file/Git dialogs.
@@ -1758,7 +1770,10 @@ Syntax/languages:
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
 * `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.
-* `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches.
+* `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches; `MarkdownHeading` with `headings`, `link_definitions` (normalized label, destination), `inline_plain_text`, `normalize_link_label`.
+* `src/app/markdown_nav.rs` -> pure Markdown reader navigation model: `heading_slugs` (GitHub-style, unique), `LinkTarget` and `resolve_link` (reference labels, percent-decoding, `http`/`https`/`mailto` only), `media_paragraph` (image-only and badge paragraphs to `MediaItem`s), `mermaid_item`; no I/O.
+* `src/app/markdown_media_wiring.rs` -> glue between the Reader state and the shared `MarkdownMedia` cache: per-tab request pass guarded by `MediaRequestMarker` (first pass also resets failures and revalidates files), per-frame step `markdown_media_prepare_frame` (poll, request, anchored layout, visible set, `prepare_gpu`), revalidation triggers (`revalidate_markdown_media`: watcher tick, tab activation, reopen), `media_dump` for the headless dump. `App` only routes here.
+* `src/headless/ui_tests_markdown_media.rs` -> headless Reader media coverage: PNG/SVG/missing states and sizes, revalidation on tab activation (changed and deleted file outside the watched workspace), Mermaid ready/failed, Edit-mode and text tabs unaffected.
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
 * `src/languages/python_highlight_spans.rs` -> Python syntax highlight span extraction helpers included by `python.rs`.
 * `src/languages/sql_analysis_tests.rs` -> SQL AST diagnostics and completion analysis regressions included by `sql_analysis.rs`.

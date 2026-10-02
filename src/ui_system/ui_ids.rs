@@ -457,6 +457,8 @@ pub enum UiId {
     StatusBar,
     StatusDiagnostics,
     MarkdownModeToggle,
+    MarkdownTocToggle,
+    MarkdownTocItem(usize),
     PdfDarkToggle,
     PdfScrollY,
     /// "Download the PDF engine" / "Retry" button of the engine-missing screen.

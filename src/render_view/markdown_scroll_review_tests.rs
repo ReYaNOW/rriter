@@ -963,7 +963,10 @@ mod reader_stage1_review_v1 {
                 renderer.draw_markdown_block(block, &source, &[], 0.0, 0.0, 0.0, 900.0,
                     0.0, f32::MAX, ReadHighlights {
                         selection: Some(&selected), search_results: &[], search_current_idx: None,
-                    }, 0.0, (0.0, 0.0, 900.0, renderer.height));
+                    }, 0.0, (0.0, 0.0, 900.0, renderer.height),
+                    &crate::markdown_media::MarkdownMedia::with_loader(std::sync::Arc::new(|_| {
+                        Err(crate::markdown_media::MediaError::Unsupported)
+                    })));
                 let selection_vertices: Vec<_> = renderer.vertices.iter()
                     .filter(|v| v.color == renderer.theme.sel).map(|v| v.pos[1]).collect();
                 assert!(!selection_vertices.is_empty());

@@ -45,6 +45,7 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
             .unwrap_or_default(),
         markdown: Default::default(),
         pdf: None,
+        image: None,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),
@@ -97,6 +98,10 @@ pub(crate) fn test_app() -> Option<App> {
         },
         file_extension: String::new(),
         markdown: Default::default(),
+        markdown_toc: Default::default(),
+        markdown_media: crate::markdown_media::MarkdownMedia::with_loader(std::sync::Arc::new(|_| {
+            Err(crate::markdown_media::MediaError::Unsupported)
+        })),
         highlighter: crate::highlighter::Highlighter::new(),
         closing_hint_state: Default::default(),
         closing_hint_settings: Default::default(),
@@ -106,7 +111,8 @@ pub(crate) fn test_app() -> Option<App> {
         last_frame: now,
         last_action: now,
         last_blink_state: true,
-        modifiers: winit::keyboard::ModifiersState::empty(),
+            modifiers: winit::keyboard::ModifiersState::empty(),
+            left_shift_down: false,
         ctrl_wheel_multiplier: crate::CTRL_WHEEL_MULTIPLIER_DEFAULT,
         is_dragging: false,
         is_editor_drag_pending: false,

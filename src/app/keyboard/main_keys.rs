@@ -157,6 +157,9 @@ impl App {
         event_loop: &HostLoop,
         key_event: KeyInput,
     ) {
+        if key_event.physical_key == PhysicalKey::Code(KeyCode::ShiftLeft) {
+            self.left_shift_down = key_event.state == ElementState::Pressed;
+        }
         if self.startup_blocks_key_input(&key_event) {
             return;
         }
@@ -173,6 +176,11 @@ impl App {
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
+
+        if self.markdown_toc.open {
+            self.handle_markdown_toc_key(key_event.physical_key, key_event.state);
+            return;
+        }
 
         if key_event.state == ElementState::Pressed
             && should_suppress_hover_for_keyboard(key_event.physical_key, ctrl, alt)
@@ -393,7 +401,7 @@ impl App {
                     _ => {}
                 }
             }
-            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) {
+            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) || self.handle_image_key(&key_event) {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

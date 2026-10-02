@@ -1,12 +1,18 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
+mod markdown_media_wiring;
+mod markdown_nav;
+pub(crate) use markdown_nav::{
+    LinkTarget, MediaItem, TocPopup, document_media, inline_link_target, link_tooltip,
+};
 pub(crate) use markdown::{
     MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
 };
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
 pub(crate) mod pdf_tab;
+pub(crate) mod image_tab;
 mod app_bootstrap;
 mod autocomplete;
 mod confirm_dialog;

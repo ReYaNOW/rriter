@@ -113,16 +113,17 @@ impl App {
                     self.lsp.as_ref(),
                 );
 
-                if let Some(log) = &mut self.pending_key_log {
-                    if log.t_render.is_none() {
-                        log.t_render = Some(std::time::Instant::now());
-                    }
+                if let Some(log) = &mut self.pending_key_log
+                    && log.t_render.is_none()
+                {
+                    log.t_render = Some(std::time::Instant::now());
                 }
 
                 if let Some(mut renderer) = self.renderer.take() {
                     self.pdf_prepare_frame(&mut renderer);
                     self.renderer = Some(renderer);
                 }
+                self.markdown_media_prepare_frame();
                 let ctrl_definition_range = self.ctrl_definition_highlight_range();
                 let python_inlay_hints = if self.python_inlay_hint_path.as_ref()
                     == self.file_path.as_ref()
@@ -183,6 +184,7 @@ impl App {
                     self.inline_git_popup.as_ref(),
                     &self.pdf_engine,
                     self.pdf_dark_pages,
+                    &self.markdown_media,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -201,7 +203,12 @@ impl App {
                     .renderer
                     .as_ref()
                     .is_some_and(|renderer| renderer.git_tooltip_waiting);
-                if diag_timer_active || git_tooltip_waiting {
+                let link_tooltip_waiting = self.markdown_mode() == crate::app::MarkdownMode::Read
+                    && self
+                        .renderer
+                        .as_ref()
+                        .is_some_and(|renderer| renderer.markdown_link_tooltip_waiting);
+                if diag_timer_active || git_tooltip_waiting || link_tooltip_waiting {
                     self.window.as_ref().unwrap().request_redraw();
                 }
 
@@ -605,6 +612,18 @@ impl App {
                     }
                 }
 
+                if self.markdown_toc.open
+                    && let Some(renderer) = self.renderer.as_mut()
+                {
+                    let (mx, my) = (renderer.last_mouse_x, renderer.last_mouse_y);
+                    wants_pointer |= renderer.draw_markdown_toc(
+                        &mut self.markdown_toc,
+                        &mut self.ui_registry,
+                        mx,
+                        my,
+                    );
+                }
+
                 let cursor_icon = if blocking_modal_open {
                     let (mx, my) = self.renderer.as_ref().map_or((-1.0, -1.0), |renderer| {
                         (renderer.last_mouse_x, renderer.last_mouse_y)
@@ -762,7 +781,10 @@ impl App {
                     }
                 } else if self.markdown_mode() == crate::app::MarkdownMode::Read {
                     markdown_read_cursor_icon(
-                        wants_pointer,
+                        wants_pointer
+                            || (self.markdown.hovered_link.is_some()
+                                && self.ui_registry.hovered()
+                                    == Some(crate::ui_system::UiId::MarkdownReadBody)),
                         popup_blocks_background,
                         &self.ui_registry,
                     )

@@ -43,6 +43,7 @@ pub struct EditorTab {
     pub file_extension: String,
     pub markdown: MarkdownTabState,
     pub pdf: Option<Box<super::pdf_tab::PdfTabState>>,
+    pub image: Option<Box<super::image_tab::ImageTabState>>,
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
     pub spans: Vec<crate::highlighter::ColorSpan>,
@@ -126,6 +127,7 @@ pub enum EditorTabKind {
         crate::app::database::DatabaseQueryTabState,
     ),
     Pdf,
+    Image,
 }
 
 impl EditorTabKind {
@@ -147,6 +149,10 @@ impl EditorTabKind {
 
     pub fn is_pdf(&self) -> bool {
         matches!(self, Self::Pdf)
+    }
+
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::Image)
     }
 
     pub fn is_database_tab(&self) -> bool {
@@ -1261,6 +1267,8 @@ pub struct App {
     pub text_file_format: crate::platform::TextFileFormat,
     pub file_extension: String,
     pub markdown: MarkdownTabState,
+    pub markdown_toc: crate::app::TocPopup,
+    pub markdown_media: crate::markdown_media::MarkdownMedia,
     pub highlighter: Highlighter,
     pub closing_hint_state: crate::languages::dart::ClosingHintState,
     pub closing_hint_settings: crate::languages::dart::ClosingHintSettings,
@@ -1272,6 +1280,7 @@ pub struct App {
     pub last_action: Instant,
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
+    pub left_shift_down: bool,
     pub ctrl_wheel_multiplier: f32,
     pub is_dragging: bool,
     pub is_editor_drag_pending: bool,

@@ -324,6 +324,7 @@ impl Renderer {
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
         markdown: &mut crate::app::MarkdownTabState,
+        markdown_media: &crate::markdown_media::MarkdownMedia,
         scroll_y_state: &mut crate::scroll::ScrollState,
         current_sticky_lines: &[(usize, usize)],
         layout: RootFramePanelLayout<'_>,
@@ -359,6 +360,7 @@ impl Renderer {
         if !markdown_read_active
             && self.resolve_markdown_edit_scroll_transition(
                 markdown,
+                markdown_media,
                 editor,
                 scroll_y_state,
                 current_sticky_lines,

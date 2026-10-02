@@ -188,6 +188,137 @@ impl MarkdownDocument {
     }
 }
 
+/// A heading of the document: level, visible text without inline markup, and its block range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownHeading {
+    pub level: u8,
+    pub text: String,
+    pub source_range: Range<usize>,
+}
+
+impl MarkdownDocument {
+    /// All headings in document order, including those nested in quotes and list items.
+    pub fn headings(&self, source: &str) -> Vec<MarkdownHeading> {
+        let mut headings = Vec::new();
+        collect_headings(source, &self.blocks, &mut headings);
+        headings
+    }
+
+    /// Link reference definitions in document order as `(normalized label, destination)`.
+    /// The label is lower-cased with whitespace runs collapsed; `<...>` around the destination is
+    /// removed. Definitions without a label or destination are skipped.
+    pub fn link_definitions(&self, source: &str) -> Vec<(String, String)> {
+        let mut definitions = Vec::new();
+        collect_link_definitions(source, &self.blocks, &mut definitions);
+        definitions
+    }
+}
+
+/// Visible text of inline spans with markup removed: children win over the span's own ranges, so
+/// emphasis markers, link destinations and code delimiters never appear in the result.
+pub fn inline_plain_text(source: &str, spans: &[MarkdownInlineSpan]) -> String {
+    let mut text = String::new();
+    append_inline_plain_text(source, spans, &mut text);
+    text
+}
+
+fn append_inline_plain_text(source: &str, spans: &[MarkdownInlineSpan], out: &mut String) {
+    for span in spans {
+        if span.children.is_empty() {
+            for range in &span.text_ranges {
+                if let Some(text) = source.get(range.clone()) {
+                    out.push_str(text);
+                }
+            }
+        } else {
+            append_inline_plain_text(source, &span.children, out);
+        }
+    }
+}
+
+/// Lower-cases a link label, collapses whitespace runs to one space and trims. Surrounding
+/// brackets, when present, are removed first.
+pub fn normalize_link_label(label: &str) -> String {
+    let trimmed = label.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    let mut out = String::with_capacity(inner.len());
+    for word in inner.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.extend(word.chars().flat_map(char::to_lowercase));
+    }
+    out
+}
+
+fn collect_headings(source: &str, blocks: &[MarkdownBlock], out: &mut Vec<MarkdownHeading>) {
+    for block in blocks {
+        match &block.kind {
+            MarkdownBlockKind::Heading { level, inlines, .. } => {
+                let text = inline_plain_text(source, inlines);
+                out.push(MarkdownHeading {
+                    level: *level,
+                    text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+                    source_range: block.source_range.clone(),
+                });
+            }
+            MarkdownBlockKind::BlockQuote { blocks: nested, .. } => {
+                collect_headings(source, nested, out);
+            }
+            MarkdownBlockKind::List(list) => {
+                for item in &list.items {
+                    collect_headings(source, &item.blocks, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_link_definitions(
+    source: &str,
+    blocks: &[MarkdownBlock],
+    out: &mut Vec<(String, String)>,
+) {
+    for block in blocks {
+        match &block.kind {
+            MarkdownBlockKind::LinkReference(reference) => {
+                let (Some(label), Some(destination)) =
+                    (&reference.label_range, &reference.destination_range)
+                else {
+                    continue;
+                };
+                let (Some(label), Some(destination)) =
+                    (source.get(label.clone()), source.get(destination.clone()))
+                else {
+                    continue;
+                };
+                let label = normalize_link_label(label);
+                let destination = destination.trim();
+                let destination = destination
+                    .strip_prefix('<')
+                    .and_then(|rest| rest.strip_suffix('>'))
+                    .unwrap_or(destination);
+                if !label.is_empty() {
+                    out.push((label, destination.to_string()));
+                }
+            }
+            MarkdownBlockKind::BlockQuote { blocks: nested, .. } => {
+                collect_link_definitions(source, nested, out);
+            }
+            MarkdownBlockKind::List(list) => {
+                for item in &list.items {
+                    collect_link_definitions(source, &item.blocks, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn append_block_children(
     source: &str,
     tree: &MarkdownTree,
@@ -1319,5 +1450,54 @@ mod tests {
                 .iter()
                 .all(|block| source.get(block.source_range.clone()).is_some())
         );
+    }
+
+    #[test]
+    fn headings_cover_atx_setext_nested_and_strip_inline_markup() {
+        let source = "# Title\n\nSetext *two*\n---\n\n## A `code` and **bold** [link](x.md) \\*s\\*\n\n> ### Quoted\n\n- item\n\n  #### Listed\n\n# Привет, мир!\n\n#\n";
+        let document = parse(source);
+        let headings = document.headings(source);
+        let summary: Vec<(u8, &str)> = headings
+            .iter()
+            .map(|heading| (heading.level, heading.text.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (1, "Title"),
+                (2, "Setext two"),
+                (2, "A code and bold link *s*"),
+                (3, "Quoted"),
+                (4, "Listed"),
+                (1, "Привет, мир!"),
+                (1, ""),
+            ]
+        );
+        assert!(source[headings[0].source_range.clone()].starts_with("# Title"));
+        assert!(source[headings[5].source_range.clone()].contains("Привет"));
+    }
+
+    #[test]
+    fn headings_of_plain_paragraph_document_are_empty() {
+        let source = "just text\n\n```\n# not a heading\n```\n";
+        assert!(parse(source).headings(source).is_empty());
+    }
+
+    #[test]
+    fn link_definitions_are_normalized_and_nested_ones_found() {
+        let source = "[Foo  Bar]: <my file.md> \"title\"\n[Next]: https://e.com/x\n\ntext [Foo Bar]\n\n> [Quoted]: q.md\n\n[Empty]:\n";
+        let document = parse(source);
+        let defs = document.link_definitions(source);
+        assert!(defs.contains(&("foo bar".to_string(), "my file.md".to_string())));
+        assert!(defs.contains(&("next".to_string(), "https://e.com/x".to_string())));
+        assert!(defs.contains(&("quoted".to_string(), "q.md".to_string())));
+        assert!(defs.iter().all(|(label, _)| label != "empty"));
+    }
+
+    #[test]
+    fn link_label_normalization_folds_case_whitespace_and_brackets() {
+        assert_eq!(normalize_link_label("[ Ref \t Ёж ]"), "ref ёж");
+        assert_eq!(normalize_link_label("REF"), "ref");
+        assert_eq!(normalize_link_label("[]"), "");
     }
 }

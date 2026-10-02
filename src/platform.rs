@@ -419,6 +419,11 @@ impl PathKey {
     fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+
+    /// The normalized path as text, for diagnostics and dumps (invalid UTF-8 is replaced).
+    pub(crate) fn to_string_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.0).into_owned()
+    }
 }
 
 impl PartialEq for PathKey {

@@ -1,8 +1,9 @@
 use std::ops::Range;
 
 use super::core_text::text_char_is_non_rendering_control;
-use crate::app::{MarkdownMode, MarkdownTabState};
+use crate::app::{LinkTarget, MarkdownMode, MarkdownTabState, inline_link_target, link_tooltip};
 use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
+use crate::markdown_media::MarkdownMedia;
 use crate::languages::markdown::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle, MarkdownListKind,
     MarkdownTableAlignment,
@@ -59,6 +60,10 @@ pub(crate) struct MarkdownReadLayoutCache {
     source_lines: Vec<ReadSourceLine>,
     source_prefix_max_end: Vec<usize>,
     source_scopes: Vec<ReadSourceScope>,
+    media_gen: u64,
+    media_dir: std::path::PathBuf,
+    /// Targets of the links of the layout; `StyledRun::link` and `PlacedMedia::link` index it.
+    links: Vec<LinkTarget>,
 }
 
 impl MarkdownReadLayoutCache {
@@ -101,6 +106,7 @@ impl MarkdownReadLayoutCache {
         self.source_lines = source_lines;
         self.source_prefix_max_end = source_prefix_max_end;
         self.source_scopes = source_scopes;
+        self.links.clear();
         self.key = Some(key);
         self.rebuild_count = self.rebuild_count.saturating_add(1);
     }
@@ -141,12 +147,15 @@ struct StyledRun {
     range: Range<usize>,
     source_range: Option<Range<usize>>,
     style: TextStyle,
+    link: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
 struct StyledText {
     text: String,
     runs: Vec<StyledRun>,
+    /// Link every run pushed from now on belongs to (set while a link's text is appended).
+    link: Option<u32>,
 }
 
 impl StyledText {
@@ -169,7 +178,11 @@ impl StyledText {
                 (None, None) => true,
                 _ => false,
             };
-            if last.style == style && last.range.end == start && source_contiguous {
+            if last.style == style
+                && last.link == self.link
+                && last.range.end == start
+                && source_contiguous
+            {
                 last.range.end = end;
                 if let (Some(last_source), Some(source)) =
                     (last.source_range.as_mut(), source_range.as_ref())
@@ -183,6 +196,7 @@ impl StyledText {
             range: start..end,
             source_range,
             style,
+            link: self.link,
         });
     }
 }
@@ -232,6 +246,7 @@ struct CodeBlock {
     language: Option<String>,
     line_height: f32,
     content_width: f32,
+    error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -272,6 +287,9 @@ enum ReadBlockKind {
         x: f32,
         width: f32,
         quote_depth: usize,
+    },
+    Media {
+        items: Vec<PlacedMedia>,
     },
 }
 
@@ -322,6 +340,8 @@ struct LayoutBuilder<'a, F: FnMut(char, bool, Option<f32>) -> f32> {
     blocks: Vec<ReadBlock>,
     source_scope_stack: Vec<Range<usize>>,
     advance: F,
+    media: Option<MediaInput<'a>>,
+    links: LinkTable,
 }
 
 impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
@@ -341,6 +361,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
             blocks: Vec::new(),
             source_scope_stack: Vec::new(),
             advance,
+            media: None,
+            links: LinkTable::default(),
         }
     }
 
@@ -385,13 +407,17 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         quote_depth: usize,
         prefix: Option<ReadPrefix>,
     ) {
+        if self.try_append_media(block, indent) {
+            return;
+        }
         match &block.kind {
             MarkdownBlockKind::Heading {
                 level,
                 content_ranges,
                 inlines,
             } => {
-                let styled = styled_from_inlines(self.source, inlines, content_ranges);
+                let styled =
+                    styled_from_inlines(self.source, inlines, content_ranges, &mut self.links);
                 let scale = heading_scale(*level);
                 self.append_text(
                     styled,
@@ -408,7 +434,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                 content_ranges,
                 inlines,
             } => {
-                let styled = styled_from_inlines(self.source, inlines, content_ranges);
+                let styled =
+                    styled_from_inlines(self.source, inlines, content_ranges, &mut self.links);
                 self.append_text(
                     styled,
                     BODY_SCALE,
@@ -468,6 +495,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                     quote_depth,
                     prefix,
                     block.source_range.clone(),
+                    self.media_code_error(block.source_range.start),
                 );
             }
             MarkdownBlockKind::Table(table) => {
@@ -667,6 +695,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         quote_depth: usize,
         prefix: Option<ReadPrefix>,
         source_range: Range<usize>,
+        error: Option<String>,
     ) {
         if prefix.is_some() {
             self.append_text(
@@ -685,7 +714,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         let x = (CONTENT_PAD * self.scale + indent).round();
         let line_h = (BODY_LINE_H * self.scale).round().max(1.0);
         let top = self.y;
-        let mut y = top + pad + header_h;
+        let error_h = if error.is_some() { line_h } else { 0.0 };
+        let mut y = top + pad + header_h + error_h;
         let mut lines = Vec::new();
         let mut content_width = 0.0f32;
         for range in ranges {
@@ -741,6 +771,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                 language,
                 line_height: line_h,
                 content_width,
+                error,
             }),
         );
         self.y = bottom + (BLOCK_GAP * self.scale).round();
@@ -801,6 +832,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                         self.source,
                         &cell.inlines,
                         std::slice::from_ref(&cell.source_range),
+                        &mut self.links,
                     )
                 });
                 let max_text_w = (cell_w - pad * 2.0).max(8.0);
@@ -873,6 +905,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
 }
 
 include!("markdown_read_text_layout.rs");
+include!("markdown_read_media.rs");
 impl Renderer {
     #[inline]
     fn markdown_read_char_advance(
@@ -899,6 +932,7 @@ impl Renderer {
     pub(crate) fn prepare_markdown_read_layout(
         &mut self,
         markdown: &mut MarkdownTabState,
+        media: &MarkdownMedia,
         editor_version: u64,
         content_width: f32,
     ) -> bool {
@@ -909,10 +943,11 @@ impl Renderer {
             self.scale_factor,
             self.font_size,
         );
-        if markdown.read_layout.is_valid_for(key) {
+        let media_gen = media.media_gen();
+        if markdown.read_layout.is_current(key, media_gen) {
             return true;
         }
-        let (blocks, content_height, source_len) = {
+        let (blocks, content_height, source_len, links) = {
             let Some(document) = markdown.read_document(editor_version) else {
                 return false;
             };
@@ -926,21 +961,26 @@ impl Renderer {
             let mut advance = |ch: char, mono: bool, final_size_scale: Option<f32>| {
                 self.markdown_read_char_advance(ch, mono, final_size_scale)
             };
+            let input = MediaInput::new(document, source, &markdown.read_layout.media_dir, media);
             let mut builder =
-                LayoutBuilder::new(source, content_width, scale, text_metrics, &mut advance);
+                LayoutBuilder::new(source, content_width, scale, text_metrics, &mut advance)
+                    .with_media(Some(input))
+                    .with_links(&markdown.read_layout.media_dir, document.link_definitions(source));
             builder.append_blocks(&document.blocks, 0.0, 0, None);
-            let (blocks, content_height) = builder.finish();
-            (blocks, content_height, source.len())
+            let (blocks, content_height, links) = builder.finish_with_links();
+            (blocks, content_height, source.len(), links)
         };
         markdown
             .read_layout
-            .replace_layout(key, blocks, content_height, source_len);
+            .replace_layout_with_links(key, blocks, content_height, source_len, links);
+        markdown.read_layout.media_gen = media_gen;
         true
     }
 
     pub(crate) fn draw_markdown_read(
         &mut self,
         markdown: &mut MarkdownTabState,
+        media: &MarkdownMedia,
         editor: &crate::editor::Editor,
         scroll: &mut crate::scroll::ScrollState,
         spans: &[ColorSpan],
@@ -991,6 +1031,7 @@ impl Renderer {
         }
         if !self.prepare_markdown_read_layout_preserving_current_ownership(
             markdown,
+            media,
             scroll,
             editor_version,
             content_w,
@@ -1109,6 +1150,7 @@ impl Renderer {
                 highlights,
                 markdown.code_scroll_x(block.source_range.start),
                 (x, y, w, h),
+                media,
             );
             self.register_markdown_code_scrollbar(block, x, y - scroll_y, content_w, ui_registry);
             if hovered_code_block == Some(block.source_range.start) {
@@ -1139,6 +1181,7 @@ impl Renderer {
             );
             let _ = self.draw_scrollbar(&bar, self.scale_factor, 1.0, None);
         }
+        self.update_markdown_read_link_hover(markdown, editor_version, (x, y, w, h), scroll.current, ui_registry);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1156,6 +1199,7 @@ impl Renderer {
         highlights: ReadHighlights<'_>,
         code_scroll_x: f32,
         reader_clip: (f32, f32, f32, f32),
+        media: &MarkdownMedia,
     ) {
         let offset_y = frame_y - scroll_y;
         match &block.kind {
@@ -1227,6 +1271,9 @@ impl Renderer {
                         &mut scratch,
                     );
                     self.scratch_buffer = scratch;
+                }
+                if let Some(error) = code.error.as_deref() {
+                    self.draw_markdown_code_error(code, error, left, right, block.top + offset_y);
                 }
                 self.draw_markdown_code_lines(
                     code,
@@ -1335,6 +1382,9 @@ impl Renderer {
                     1.0,
                     faded(self.theme.fg, 0.22),
                 );
+            }
+            ReadBlockKind::Media { items } => {
+                self.draw_markdown_media(items, media, frame_x, block.top + offset_y);
             }
         }
     }

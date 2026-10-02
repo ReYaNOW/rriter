@@ -17,9 +17,23 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.markdown_toc.open
+            && state == ElementState::Pressed
+            && !self.markdown_toc.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
+        {
+            self.markdown_toc.close();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
         if self.finish_text_captures_on_release(state, button, mx, my) {
             return;
         }
+        let image_dragging = state == ElementState::Released
+            && button == winit::event::MouseButton::Left
+            && self.tabs.get(self.active_tab).and_then(|tab| tab.image.as_deref()).is_some_and(crate::app::image_tab::ImageTabState::is_dragging);
+        if image_dragging && self.handle_image_mouse(state, button, mx, my) { return; }
         if self.prepare_left_press(state, button, mx, my) {
             return;
         }
@@ -46,14 +60,18 @@ impl App {
 
         self.forward_terminal_mouse_report(state, button, mx, my);
 
-        if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
-            if self.handle_lsp_actions_menu_press(state, mx, my) {
-                return;
-            }
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Left
+            && self.handle_lsp_actions_menu_press(state, mx, my)
+        {
+            return;
+        }
 
-            if self.dispatch_declarative_ui_press(state, button, mx, my) {
-                return;
-            }
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Left
+            && self.dispatch_declarative_ui_press(state, button, mx, my)
+        {
+            return;
         }
 
         // Clicks routed through UI system

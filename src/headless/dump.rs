@@ -164,12 +164,24 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             json!({"start": [start.0, start.1], "end": [end.0, end.1]})
         },
     );
+    let media_stats = app.markdown_media.stats();
     json!({
         "size": [w, h],
         "scale": scale,
         "cursor_icon": format!("{:?}", app.current_cursor),
         "mode": mode,
         "tabs": tabs_json(app),
+        "markdown_media_stats": {
+            "media_gen": app.markdown_media.media_gen(),
+            "loads_started": media_stats.loads_started,
+            "texture_bytes": media_stats.texture_bytes,
+            "visible_texture_bytes": media_stats.visible_texture_bytes,
+        },
+        "markdown_toc": {
+            "open": app.markdown_toc.open,
+            "items": app.markdown_toc.items.iter().map(|item| &item.text).collect::<Vec<_>>(),
+            "selected": app.markdown_toc.selected,
+        },
         "editor": {
             "lines": app.editor.line_offsets.len(),
             "cursor": app.editor.cursor,
@@ -210,6 +222,7 @@ fn dialog_json(app: &mut App, w: u32, h: u32) -> Value {
         PendingAction::None => "None",
         PendingAction::Quit => "Quit",
         PendingAction::OpenFile => "OpenFile",
+        PendingAction::OpenLinkedFile => "OpenLinkedFile",
         PendingAction::CloseFile => "CloseFile",
         PendingAction::CloseTab(_) => "CloseTab",
         PendingAction::CloseAllTabs => "CloseAllTabs",
@@ -251,8 +264,14 @@ fn tabs_json(app: &App) -> Value {
                     scroll_y: &tab.scroll_y,
                     scroll_x: &tab.scroll_x,
                     markdown: tab.markdown.mode != MarkdownMode::Edit,
+                    markdown_media: tab.markdown.media_dump(
+                        &app.markdown_media,
+                        tab.editor.version,
+                        tab.file_path.as_deref().and_then(Path::parent),
+                    ),
                     kind: tab_kind_name(tab),
                     pdf: tab.pdf.as_deref(),
+                    image: tab.image.as_deref(),
                     engine: &app.pdf_engine,
                 })
             }
@@ -273,8 +292,18 @@ fn active_tab_json(app: &App, index: usize) -> Value {
         scroll_y: &app.scroll_y,
         scroll_x: &app.scroll_x,
         markdown: app.markdown_mode() != MarkdownMode::Edit,
+        markdown_media: if app.active_document_is_markdown() {
+            app.markdown.media_dump(
+                &app.markdown_media,
+                app.editor.version,
+                app.file_path.as_deref().and_then(Path::parent),
+            )
+        } else {
+            Vec::new()
+        },
         kind: app.tabs.get(index).map(tab_kind_name).unwrap_or("normal"),
         pdf: app.tabs.get(index).and_then(|tab| tab.pdf.as_deref()),
+        image: app.tabs.get(index).and_then(|tab| tab.image.as_deref()),
         engine: &app.pdf_engine,
     })
 }
@@ -290,8 +319,11 @@ struct TabView<'a> {
     scroll_y: &'a ScrollState,
     scroll_x: &'a ScrollState,
     markdown: bool,
+    /// Media elements of a Markdown tab in Read mode (empty otherwise).
+    markdown_media: Vec<Value>,
     kind: &'static str,
     pdf: Option<&'a crate::app::pdf_tab::PdfTabState>,
+    image: Option<&'a crate::app::image_tab::ImageTabState>,
     engine: &'a crate::app::pdf_tab::PdfEngineState,
 }
 
@@ -332,6 +364,15 @@ fn tab_json(tab: TabView<'_>) -> Value {
             "engine": engine_name, "engine_message": engine_message,
         })
     });
+    let image = tab.image.map(|image| {
+        let phase = match &image.phase {
+            crate::app::image_tab::ImagePhase::Loading => "loading",
+            crate::app::image_tab::ImagePhase::Ready => "ready",
+            crate::app::image_tab::ImagePhase::Failed(_) => "failed",
+        };
+        serde_json::json!({"phase": phase, "natural_w": image.natural.0, "natural_h": image.natural.1,
+            "zoom": image.zoom, "texture": image.texture.is_some()})
+    });
     let mut value = json!({
         "index": tab.index,
         // Output only, not persisted: `display()` is fine here.
@@ -344,9 +385,11 @@ fn tab_json(tab: TabView<'_>) -> Value {
         "scroll_y": scroll_y,
         "scroll_x": tab.scroll_x.current,
         "markdown": tab.markdown,
+        "markdown_media": tab.markdown_media,
         "kind": tab.kind,
     });
     if let Some(pdf) = pdf { value["pdf"] = pdf; }
+    if let Some(image) = image { value["image"] = image; }
     value
 }
 
@@ -358,6 +401,7 @@ fn tab_kind_name(tab: &crate::app::EditorTab) -> &'static str {
         crate::app::EditorTabKind::DatabaseTable(_, _) => "database_table",
         crate::app::EditorTabKind::DatabaseQuery(_, _) => "database_query",
         crate::app::EditorTabKind::Pdf => "pdf",
+        crate::app::EditorTabKind::Image => "image",
     }
 }
 

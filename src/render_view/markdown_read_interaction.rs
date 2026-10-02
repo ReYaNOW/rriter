@@ -90,7 +90,7 @@ impl MarkdownReadLayoutCache {
                         selection,
                     );
                 }
-                ReadBlockKind::Rule { .. } => {}
+                ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {}
             }
             if block_text.is_empty() {
                 continue;
@@ -105,6 +105,71 @@ impl MarkdownReadLayoutCache {
 
     pub(crate) fn source_target_y(&self, source_range: &Range<usize>) -> Option<f32> {
         self.source_anchor_y(source_range)
+    }
+
+    /// Targets of the layout's links; `StyledRun::link` and `PlacedMedia::link` index them.
+    pub(crate) fn links(&self) -> &[LinkTarget] {
+        &self.links
+    }
+
+    /// The layout was built from the text of `version` (its geometry may be any).
+    pub(crate) fn is_for_version(&self, version: u64) -> bool {
+        self.key.is_some_and(|key| key.version == version)
+    }
+
+    /// Folder of the document the links were resolved against.
+    pub(crate) fn doc_dir(&self) -> &Path {
+        &self.media_dir
+    }
+
+    fn replace_layout_with_links(
+        &mut self,
+        key: LayoutKey,
+        blocks: Vec<ReadBlock>,
+        content_height: f32,
+        source_len: usize,
+        links: Vec<LinkTarget>,
+    ) {
+        self.replace_layout(key, blocks, content_height, source_len);
+        self.links = links;
+    }
+
+    /// Link under a point given in content coordinates: `x` from the left edge of the Reader
+    /// frame, `y` from the top of the document. Only a character (or an image) of the link
+    /// counts: the empty space of a line, and the gap between two links, do not.
+    pub(crate) fn link_at<F>(&self, x: f32, y: f32, scale: f32, advance: &mut F) -> Option<u32>
+    where
+        F: FnMut(char, bool, Option<f32>) -> f32,
+    {
+        let block = self.blocks.get(self.blocks.partition_point(|block| block.bottom < y))?;
+        if y < block.top {
+            return None;
+        }
+        match &block.kind {
+            ReadBlockKind::Text(text) => {
+                let line = text.lines.get(text.lines.partition_point(|line| line.bottom <= y))?;
+                let face = TextFace {
+                    text_scale: text.scale,
+                    layout_scale: scale,
+                    mono: text.mono,
+                    final_size_scale: text.heading_level.map(|_| text.scale),
+                };
+                (y >= line.top)
+                    .then(|| styled_link_at_x(&text.styled, &line.range, x - text.x, face, advance))
+                    .flatten()
+            }
+            ReadBlockKind::Table(table) => table_link_at(table, x, y, scale, advance),
+            ReadBlockKind::Media { items } => items
+                .iter()
+                .find(|item| {
+                    x >= item.x
+                        && x < item.x + item.w
+                        && y >= block.top + item.y
+                        && y < block.top + item.y + item.h
+                })
+                .and_then(|item| item.link),
+            ReadBlockKind::Code(_) | ReadBlockKind::Rule { .. } => None,
+        }
     }
 
     pub(crate) fn code_block_copy_text(&self, source: &str, block_id: usize) -> Option<String> {
@@ -243,6 +308,117 @@ fn append_selected_table_text(
             wrote_row = true;
         }
     }
+}
+
+/// How a laid-out piece of text is measured: the parameters `styled_char_metrics` needs.
+#[derive(Clone, Copy)]
+struct TextFace {
+    text_scale: f32,
+    layout_scale: f32,
+    mono: bool,
+    final_size_scale: Option<f32>,
+}
+
+fn styled_metrics_at<F>(
+    styled: &StyledText,
+    byte: usize,
+    ch: char,
+    face: TextFace,
+    advance: &mut F,
+) -> VisualCharMetrics
+where
+    F: FnMut(char, bool, Option<f32>) -> f32,
+{
+    let advance_scale = if face.final_size_scale.is_some() {
+        1.0
+    } else {
+        face.text_scale
+    };
+    let mut glyph = |c: char, use_mono: bool| advance(c, use_mono, face.final_size_scale);
+    styled_char_metrics(
+        styled,
+        byte,
+        ch,
+        advance_scale,
+        face.layout_scale,
+        face.mono,
+        &mut glyph,
+    )
+}
+
+fn styled_link_at_byte(styled: &StyledText, byte: usize) -> Option<u32> {
+    let idx = styled.runs.partition_point(|run| run.range.end <= byte);
+    styled
+        .runs
+        .get(idx)
+        .filter(|run| run.range.start <= byte)
+        .and_then(|run| run.link)
+}
+
+/// Link of the character of the line `range` whose box holds `target_x` (measured from the
+/// start of the line); `None` right of the text and on characters that are not a link.
+fn styled_link_at_x<F>(
+    styled: &StyledText,
+    range: &Range<usize>,
+    target_x: f32,
+    face: TextFace,
+    advance: &mut F,
+) -> Option<u32>
+where
+    F: FnMut(char, bool, Option<f32>) -> f32,
+{
+    if target_x < 0.0 {
+        return None;
+    }
+    let text = styled.text.get(range.clone())?;
+    let mut x = 0.0;
+    let mut byte = range.start;
+    for ch in text.chars() {
+        x += styled_metrics_at(styled, byte, ch, face, advance).width();
+        if target_x < x {
+            return styled_link_at_byte(styled, byte);
+        }
+        byte += ch.len_utf8();
+    }
+    None
+}
+
+fn table_link_at<F>(table: &TableBlock, x: f32, y: f32, scale: f32, advance: &mut F) -> Option<u32>
+where
+    F: FnMut(char, bool, Option<f32>) -> f32,
+{
+    let row = table.rows.get(table.rows.partition_point(|row| row.y + row.h <= y))?;
+    let col = ((x - table.x) / table.cell_width.max(1.0)).floor();
+    let line = ((y - row.y - table.cell_padding) / table.line_height.max(1.0)).floor();
+    if y < row.y || col < 0.0 || line < 0.0 {
+        return None;
+    }
+    let cell = row.cells.get(col as usize)?;
+    let range = cell.lines.get(line as usize)?;
+    let face = TextFace {
+        text_scale: 0.82,
+        layout_scale: scale,
+        mono: false,
+        final_size_scale: None,
+    };
+    let cell_x = table.x + col * table.cell_width;
+    let text_x = match cell.alignment {
+        MarkdownTableAlignment::Left | MarkdownTableAlignment::None => cell_x + table.cell_padding,
+        MarkdownTableAlignment::Center | MarkdownTableAlignment::Right => {
+            let mut width = 0.0;
+            let mut byte = range.start;
+            for ch in cell.styled.text.get(range.clone())?.chars() {
+                width += styled_metrics_at(&cell.styled, byte, ch, face, advance).width();
+                byte += ch.len_utf8();
+            }
+            if cell.alignment == MarkdownTableAlignment::Center {
+                cell_x + (table.cell_width - width) * 0.5
+            } else {
+                cell_x + table.cell_width - table.cell_padding - width
+            }
+        }
+    };
+    styled_link_at_x(&cell.styled, range, x - text_x, face, advance)
 }
 
 fn nearest_block_index(blocks: &[ReadBlock], y: f32) -> Option<usize> {
@@ -495,6 +671,83 @@ impl Renderer {
         )
     }
 
+    /// Index of the link under the pointer in the Reader `frame`, if the layout is current.
+    pub(crate) fn markdown_read_link_at(
+        &mut self,
+        markdown: &MarkdownTabState,
+        editor_version: u64,
+        frame: (f32, f32, f32, f32),
+        scroll_y: f32,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> Option<u32> {
+        let (frame_x, frame_y, frame_w, frame_h) = frame;
+        if markdown.mode != MarkdownMode::Read
+            || markdown.read_layout.key?.version != editor_version
+            || mouse_x < frame_x
+            || mouse_x > frame_x + frame_w
+            || mouse_y < frame_y
+            || mouse_y > frame_y + frame_h
+        {
+            return None;
+        }
+        let doc_y = mouse_y - frame_y + scroll_y.round();
+        let scale = self.scale_factor;
+        let mut advance = |c: char, mono: bool, final_size: Option<f32>| {
+            self.markdown_read_char_advance(c, mono, final_size)
+        };
+        markdown
+            .read_layout
+            .link_at(mouse_x - frame_x, doc_y, scale, &mut advance)
+    }
+
+    /// Refreshes `markdown.hovered_link` for the pointer and draws the destination tooltip once
+    /// the pointer has rested on the link. Called at the end of the Reader draw.
+    fn update_markdown_read_link_hover(
+        &mut self,
+        markdown: &mut MarkdownTabState,
+        editor_version: u64,
+        frame: (f32, f32, f32, f32),
+        scroll_y: f32,
+        ui_registry: &UiRegistry,
+    ) {
+        const LINK_TOOLTIP_NAMESPACE: u64 = 1u64 << 58;
+        const LINK_TOOLTIP_MAX_CHARS: usize = 160;
+        let (mouse_x, mouse_y) = (self.last_mouse_x, self.last_mouse_y);
+        let over_body = ui_registry.hovered() == Some(crate::ui_system::UiId::MarkdownReadBody)
+            && !markdown.read_selecting;
+        let link = over_body
+            .then(|| self.markdown_read_link_at(markdown, editor_version, frame, scroll_y, mouse_x, mouse_y))
+            .flatten();
+        markdown.hovered_link = link;
+        let text = link
+            .and_then(|index| markdown.read_layout.links().get(index as usize))
+            .and_then(|target| link_tooltip(target, markdown.read_layout.doc_dir()));
+        let (Some(index), Some(text)) = (link, text) else {
+            self.reset_delayed_tooltip_anchor_namespace(LINK_TOOLTIP_NAMESPACE);
+            self.markdown_link_tooltip_waiting = false;
+            return;
+        };
+        let anchor = self.delayed_tooltip_anchor(
+            Some(LINK_TOOLTIP_NAMESPACE | u64::from(index)),
+            mouse_x,
+            mouse_y,
+            std::time::Instant::now(),
+        );
+        self.markdown_link_tooltip_waiting = anchor.is_none();
+        if let Some((anchor_x, anchor_y)) = anchor
+            && !self.hide_popups_until_mouse_move
+        {
+            let text: String = if text.chars().count() > LINK_TOOLTIP_MAX_CHARS {
+                text.chars().take(LINK_TOOLTIP_MAX_CHARS).chain(std::iter::once('…')).collect()
+            } else {
+                text
+            };
+            let scale = self.scale_factor;
+            self.draw_tab_tooltip(&text, anchor_x, anchor_y + 12.0 * scale, scale);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_markdown_code_copy_action(
         &mut self,
@@ -645,7 +898,9 @@ impl Renderer {
                 styled_source_boundary(&cell.styled, visual)
                     .or_else(|| Some(row.source_range.start))
             }
-            ReadBlockKind::Rule { .. } => Some(block.source_range.start),
+            ReadBlockKind::Rule { .. } | ReadBlockKind::Media { .. } => {
+                Some(block.source_range.start)
+            }
         }
     }
 
@@ -661,25 +916,17 @@ impl Renderer {
         let Some(text) = styled.text.get(range.clone()) else {
             return range.start;
         };
-        let layout_scale = self.scale_factor;
-        let advance_scale = if final_size_scale.is_some() {
-            1.0
-        } else {
-            text_scale
+        let face = TextFace {
+            text_scale,
+            layout_scale: self.scale_factor,
+            mono,
+            final_size_scale,
         };
         visual_byte_at_x(text, range.start, target_x, |byte, ch| {
-            let mut advance = |c: char, use_mono: bool| {
-                self.markdown_read_char_advance(c, use_mono, final_size_scale)
+            let mut advance = |c: char, use_mono: bool, final_size: Option<f32>| {
+                self.markdown_read_char_advance(c, use_mono, final_size)
             };
-            styled_char_metrics(
-                styled,
-                byte,
-                ch,
-                advance_scale,
-                layout_scale,
-                mono,
-                &mut advance,
-            )
+            styled_metrics_at(styled, byte, ch, face, &mut advance)
         })
     }
 
@@ -1001,19 +1248,37 @@ pub(crate) fn build_test_markdown_read_layout(
     source: &str,
     width: f32,
 ) -> MarkdownReadLayoutCache {
+    build_test_markdown_read_layout_with_media(source, width, 1.0, None)
+}
+
+/// Same, with media blocks: `media` is the cache to read and the folder of the document.
+#[cfg(test)]
+pub(crate) fn build_test_markdown_read_layout_with_media(
+    source: &str,
+    width: f32,
+    scale: f32,
+    media: Option<(&MarkdownMedia, &std::path::Path)>,
+) -> MarkdownReadLayoutCache {
     let document = crate::languages::markdown::MarkdownParseState::default()
         .parse(source)
         .expect("markdown parse");
-    let mut builder = LayoutBuilder::new(source, width, 1.0, test_layout_text_metrics(1.0), |_, _, _| 8.0);
+    let input = media.map(|(m, dir)| MediaInput::new(&document, source, dir, m));
+    let dir = media.map_or_else(std::path::PathBuf::new, |(_, dir)| dir.to_path_buf());
+    let mut builder =
+        LayoutBuilder::new(source, width, scale, test_layout_text_metrics(scale), |_, _, _| 8.0 * scale)
+            .with_media(input)
+            .with_links(&dir, document.link_definitions(source));
     builder.append_blocks(&document.blocks, 0.0, 0, None);
-    let (blocks, content_height) = builder.finish();
+    let (blocks, content_height, links) = builder.finish_with_links();
     let mut cache = MarkdownReadLayoutCache::default();
-    cache.replace_layout(
-        LayoutKey::new(1, width, 1.0, 16.0),
+    cache.replace_layout_with_links(
+        LayoutKey::new(1, width, scale, 16.0),
         blocks,
         content_height,
         source.len(),
+        links,
     );
+    cache.media_gen = media.map_or(0, |(m, _)| m.media_gen());
     cache
 }
 

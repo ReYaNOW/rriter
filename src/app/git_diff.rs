@@ -578,22 +578,14 @@ impl App {
     pub fn active_git_diff_state(&self) -> Option<&GitDiffState> {
         match &self.tabs.get(self.active_tab)?.kind {
             EditorTabKind::GitDiff(_, state) => Some(state),
-            EditorTabKind::Normal
-            | EditorTabKind::ApiClient(_, _)
-            | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => None,
+            _ => None,
         }
     }
 
     fn active_git_diff_state_mut(&mut self) -> Option<&mut GitDiffState> {
         match &mut self.tabs.get_mut(self.active_tab)?.kind {
             EditorTabKind::GitDiff(_, state) => Some(state),
-            EditorTabKind::Normal
-            | EditorTabKind::ApiClient(_, _)
-            | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => None,
+            _ => None,
         }
     }
 
@@ -636,11 +628,7 @@ impl App {
                     && existing.rel_path == meta.rel_path
                     && existing.old_rel_path == meta.old_rel_path
             }
-            EditorTabKind::Normal
-            | EditorTabKind::ApiClient(_, _)
-            | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => false,
+            _ => false,
         }) {
             if idx != self.active_tab {
                 self.switch_to_tab(idx);
@@ -667,6 +655,7 @@ impl App {
                 .unwrap_or_default(),
             markdown: Default::default(),
             pdf: None,
+            image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -851,11 +840,7 @@ impl App {
                     && meta.old_rel_path == event.meta.old_rel_path
                     && state.version == event.version
             }
-            EditorTabKind::Normal
-            | EditorTabKind::ApiClient(_, _)
-            | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _)
-            | EditorTabKind::Pdf => false,
+            _ => false,
         }) else {
             return;
         };
@@ -1571,11 +1556,7 @@ impl App {
                         meta.rel_path.clone(),
                         state.line_kinds.clone(),
                     ),
-                    EditorTabKind::Normal
-                    | EditorTabKind::ApiClient(_, _)
-                    | EditorTabKind::DatabaseTable(_, _)
-                    | EditorTabKind::DatabaseQuery(_, _)
-                    | EditorTabKind::Pdf => unreachable!(),
+                    _ => unreachable!(),
                 })
         else {
             return false;

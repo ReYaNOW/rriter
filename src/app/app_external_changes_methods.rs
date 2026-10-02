@@ -19,7 +19,8 @@ impl App {
                     | EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
                     | EditorTabKind::DatabaseQuery(_, _)
-                    | EditorTabKind::Pdf => None,
+                    | EditorTabKind::Pdf
+                    | EditorTabKind::Image => None,
                 };
                 if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref())
                     && let Ok(decoded) = crate::platform::read_text_file(path)
@@ -103,7 +104,8 @@ impl App {
                     EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
                     | EditorTabKind::DatabaseQuery(_, _)
-                    | EditorTabKind::Pdf => None,
+                    | EditorTabKind::Pdf
+                    | EditorTabKind::Image => None,
                 }
             })
             .collect::<Vec<_>>();
