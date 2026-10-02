@@ -422,7 +422,8 @@ impl MarkdownMedia {
             self.trim_task = None;
         }
         self.start_tasks(waker);
-        self.media_gen != before
+        // A same-size re-render or reload does not bump media_gen but still needs a frame to upload.
+        self.media_gen != before || !self.pending_uploads.is_empty()
     }
 
     /// Frame step on the GPU side. True while another frame is needed for pending uploads.

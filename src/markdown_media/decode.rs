@@ -213,8 +213,11 @@ fn rasterize_svg(
     let (natural_w, natural_h) = bounded_natural_size(size.width(), size.height());
     let (target_w, target_h) = raster_target_size(natural_w, natural_h, scale, max_raster_w);
     let mut pixmap = tiny_skia::Pixmap::new(target_w, target_h).ok_or(MediaError::Decode)?;
-    let transform =
-        tiny_skia::Transform::from_scale(target_w as f32 / natural_w, target_h as f32 / natural_h);
+    // Scale from the tree's own size: natural_* may be clamped below it.
+    let transform = tiny_skia::Transform::from_scale(
+        target_w as f32 / size.width(),
+        target_h as f32 / size.height(),
+    );
     resvg::render(tree, transform, &mut pixmap.as_mut());
     // tiny-skia stores premultiplied alpha; the GPU path blends with SRC_ALPHA /
     // ONE_MINUS_SRC_ALPHA, so the texture must hold straight alpha.
