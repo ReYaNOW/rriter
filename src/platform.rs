@@ -97,7 +97,7 @@ pub use process::{
     ManagedChild, ProcessOutputStream, ProcessTree, StreamedOutput, command_for_executable,
     command_for_tool,
     resolve_executable, resolve_tool_executable, run_command_output, run_command_output_cancelable,
-    run_command_stdout_with, run_command_streaming_cancelable,
+    run_command_stdout_with, run_command_stdout_with_cancelable, run_command_streaming_cancelable,
 };
 pub(crate) use process::{ProcessSnapshot, foreground_process_snapshot};
 pub use secret_store::{

@@ -1,5 +1,6 @@
 use super::{DART_SERVER, DiagSeverity, Diagnostic, LogEntry, LspManager, LspProcess};
 use std::collections::HashMap;
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -562,14 +563,23 @@ fn run_dart_workspace_check(
         .arg("--format")
         .arg("machine")
         .arg(root);
-    let output = crate::platform::run_command_output_cancelable(
+    let root_for_reader = root.to_path_buf();
+    let output = crate::platform::run_command_stdout_with_cancelable(
         &mut command,
         Duration::from_secs(180),
         cancel,
+        move |stdout| {
+            let mut reader = BufReader::new(stdout);
+            let empty = matches!(reader.fill_buf(), Ok(buf) if buf.is_empty());
+            DartStdout {
+                empty,
+                parsed: parse_dart_machine_reader(&mut reader, &root_for_reader),
+            }
+        },
     )
     .map_err(|error| error.to_string())?;
 
-    if output.stdout.is_empty() && !output.status.success() {
+    if output.stdout.empty && !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
             "dart analyze exited with {}{}",
@@ -579,22 +589,42 @@ fn run_dart_workspace_check(
                 .unwrap_or_default()
         ));
     }
-    Ok(parse_dart_machine_output(&output.stdout, root))
+    output.stdout.parsed.map_err(|error| error.to_string())
+}
+
+struct DartStdout {
+    empty: bool,
+    parsed: io::Result<HashMap<PathBuf, Vec<Diagnostic>>>,
+}
+
+fn parse_dart_machine_reader(
+    mut reader: impl BufRead,
+    root: &Path,
+) -> io::Result<HashMap<PathBuf, Vec<Diagnostic>>> {
+    let mut diagnostics: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    let mut bytes = Vec::new();
+    while reader.read_until(b'\n', &mut bytes)? > 0 {
+        let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        let text = String::from_utf8_lossy(line);
+        let line = text.strip_suffix('\r').unwrap_or(&text);
+        if let Some((path, diagnostic)) = parse_dart_machine_line(line, root) {
+            diagnostics.entry(path).or_default().push(diagnostic);
+        }
+        bytes.clear();
+    }
+    sort_dart_diagnostics(&mut diagnostics);
+    Ok(diagnostics)
 }
 
 pub(super) fn parse_dart_machine_output(
     raw: &[u8],
     root: &Path,
 ) -> HashMap<PathBuf, Vec<Diagnostic>> {
-    let text = String::from_utf8_lossy(raw);
-    let mut diagnostics: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
-    for raw_line in text.lines() {
-        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        let Some((path, diagnostic)) = parse_dart_machine_line(line, root) else {
-            continue;
-        };
-        diagnostics.entry(path).or_default().push(diagnostic);
-    }
+    // Reading from a slice cannot fail.
+    parse_dart_machine_reader(raw, root).unwrap_or_default()
+}
+
+fn sort_dart_diagnostics(diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>) {
     for items in diagnostics.values_mut() {
         items.sort_by(|left, right| {
             left.start_line
@@ -604,7 +634,6 @@ pub(super) fn parse_dart_machine_output(
                 .then_with(|| left.message.as_ref().cmp(right.message.as_ref()))
         });
     }
-    diagnostics
 }
 
 fn parse_dart_machine_line(line: &str, root: &Path) -> Option<(PathBuf, Diagnostic)> {

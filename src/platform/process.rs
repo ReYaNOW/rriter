@@ -761,6 +761,23 @@ where
     })
 }
 
+pub fn run_command_stdout_with_cancelable<T, F>(
+    command: &mut Command,
+    timeout: Duration,
+    cancel: &AtomicBool,
+    read_stdout: F,
+) -> io::Result<StreamedOutput<T>>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut ChildStdout) -> T + Send + 'static,
+{
+    run_command_with_stdout_reader(command, timeout, Some(cancel), move |mut stdout: ChildStdout| {
+        let value = read_stdout(&mut stdout);
+        io::copy(&mut stdout, &mut io::sink())?;
+        Ok(value)
+    })
+}
+
 fn run_command_output_inner(
     command: &mut Command,
     timeout: Duration,
