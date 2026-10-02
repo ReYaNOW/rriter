@@ -231,6 +231,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     needs_redraw |= about_to_wait_picker_receivers(app, dt, now);
 
     about_to_wait_lsp_events(app);
+    needs_redraw |= app.ide_panel.flat_diagnostics_stale(app.lsp.as_ref());
 
     request_python_inlay_hints_if_needed(app);
 

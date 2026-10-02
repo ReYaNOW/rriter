@@ -39,6 +39,17 @@ impl ProblemRow {
 }
 
 impl IdePanelState {
+    /// The open Problems rows were built from an older diagnostics store generation.
+    /// Rows are rebuilt only on a drawn frame (`refresh_flat_diagnostics_if_needed`), while
+    /// the store can change without one (the debounced summary rebuild in `LspManager::poll`,
+    /// `clear_diagnostics_for_path`), so the frame loop asks for a frame when this is true.
+    pub(crate) fn flat_diagnostics_stale(&self, lsp: Option<&crate::lsp::LspManager>) -> bool {
+        self.is_open(PanelId::Problems)
+            && (self.flat_diags_cache_has_lsp != lsp.is_some()
+                || self.flat_diags_cache_lsp_generation
+                    != lsp.map_or(0, crate::lsp::LspManager::diagnostic_generation))
+    }
+
     pub(crate) fn refresh_flat_diagnostics_if_needed(
         &mut self,
         active_tab: usize,
