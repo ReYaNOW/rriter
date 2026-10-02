@@ -49,6 +49,57 @@ fn png_opens_in_a_ready_image_tab_without_marking_text_modified() {
 }
 
 #[test]
+fn image_status_bar_hides_cursor_position_while_text_status_keeps_it() {
+    let (dir, _image_path, mut session) = open_image("ui-image-status", "png", None);
+    wait_phase(&mut session, "ready");
+    let count_bright = |image: &image::RgbaImage, x0: u32, x1: u32| {
+        (image.height().saturating_sub(40)..image.height())
+            .flat_map(|y| (x0..x1.min(image.width())).map(move |x| (x, y)))
+            .filter(|&(x, y)| image.get_pixel(x, y).0[..3].iter().all(|&c| c > 140))
+            .count()
+    };
+    let image_shot = dir.join("image-status.png");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move 0 0\nscreenshot {}\n", image_shot.display()).as_bytes(),
+    );
+    assert!(lines[1].starts_with("ok "), "{lines:?}");
+    let image = image::open(&image_shot)
+        .unwrap_or_else(|error| panic!("decode screenshot: {error}"))
+        .to_rgba8();
+    let body = crate::headless::tests_support::ui_rect(&dump(&mut session), "PdfBody");
+    let image_tab = session.app.tabs[session.app.active_tab].image.as_ref().expect("image tab");
+    let zoom = image_tab.fit_scale(body[2] as f32, body[3] as f32);
+    let status_label = format!("{:.0}×{:.0} · {:.0}%", image_tab.natural.0, image_tab.natural.1, zoom * 100.0);
+    let label_x = (1280.0
+        - 10.0
+        - session
+            .app
+            .renderer
+            .as_mut()
+            .expect("renderer")
+            .measure_ui_width(&status_label, 0.95)
+            .round()) as u32;
+    assert_eq!(count_bright(&image, 300, label_x), 0, "image status bar must not show cursor line/column");
+
+    let text_path = dir.join("sample.txt");
+    std::fs::write(&text_path, "hello\n").expect("write text fixture");
+    let lines = run_script(&mut session, format!("open {}\n", text_path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let text_shot = dir.join("text-status.png");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move 0 0\nscreenshot {}\n", text_shot.display()).as_bytes(),
+    );
+    assert!(lines[1].starts_with("ok "), "{lines:?}");
+    let text = image::open(&text_shot)
+        .unwrap_or_else(|error| panic!("decode screenshot: {error}"))
+        .to_rgba8();
+    assert!(count_bright(&text, 300, 1160) > 0, "text status bar must keep cursor line/column");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn truncated_png_bytes_show_a_failed_image_phase() {
     let (_dir, _path, mut session) = open_image("ui-image-corrupt", "png", Some(b"\x89PNG\r\n\x1a\ncut"));
     wait_phase(&mut session, "failed");
