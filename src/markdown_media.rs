@@ -46,6 +46,7 @@ pub(crate) fn load_image_path(path: PathBuf) -> Result<MediaPixels, MediaError> 
     load_media(&req, &env)
 }
 
+
 /// Identity of one media item inside the cache.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum MediaKey {
@@ -424,8 +425,7 @@ impl MarkdownMedia {
         self.media_gen != before
     }
 
-    /// Frame step on the GPU side. True while another frame is needed: pixels wait for the
-    /// upload or a visible key is still loading.
+    /// Frame step on the GPU side. True while another frame is needed for pending uploads.
     pub(crate) fn prepare_gpu(
         &mut self,
         renderer: &mut Renderer,
@@ -436,6 +436,7 @@ impl MarkdownMedia {
     }
 
     fn prepare_with(&mut self, host: &mut dyn TextureHost, visible: &[VisibleMedia], waker: &UiWaker) -> bool {
+        let media_gen = self.media_gen;
         for texture in self.to_free.drain(..) {
             host.delete_texture(texture);
         }
@@ -449,10 +450,7 @@ impl MarkdownMedia {
         self.queue_visible(visible);
         self.evict_over_budget();
         self.start_tasks(waker);
-        !self.pending_uploads.is_empty()
-            || visible
-                .iter()
-                .any(|item| self.entries.get(&item.key).is_some_and(|entry| entry.in_flight))
+        !self.pending_uploads.is_empty() || self.media_gen != media_gen
     }
 
     /// Drops the entry of a changed or vanished file. A task still running for it is
@@ -641,8 +639,14 @@ impl MarkdownMedia {
                 self.pending_uploads.push(key.clone());
             }
             Err(error) => {
-                fail_entry(entry, error, &mut self.to_free);
-                self.media_gen += 1;
+                if entry.texture.is_some() {
+                    entry.state = EntryState::Ready;
+                    entry.pending = None;
+                    entry.in_flight = false;
+                } else {
+                    fail_entry(entry, error, &mut self.to_free);
+                    self.media_gen += 1;
+                }
             }
         }
     }
@@ -696,8 +700,12 @@ impl MarkdownMedia {
                 && (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4))
                     == Some(pixels.rgba.len());
             if !size_ok {
-                fail_entry(entry, MediaError::Decode, &mut self.to_free);
-                self.media_gen += 1;
+                if entry.texture.is_some() {
+                    entry.state = EntryState::Ready;
+                } else {
+                    fail_entry(entry, MediaError::Decode, &mut self.to_free);
+                    self.media_gen += 1;
+                }
                 continue;
             }
             // `pixels` (and its buffer) is dropped at the end of this iteration.
@@ -708,8 +716,12 @@ impl MarkdownMedia {
                     }
                 }
                 None => {
-                    fail_entry(entry, MediaError::TooManyPixels, &mut self.to_free);
-                    self.media_gen += 1;
+                    if entry.texture.is_some() {
+                        entry.state = EntryState::Ready;
+                    } else {
+                        fail_entry(entry, MediaError::TooManyPixels, &mut self.to_free);
+                        self.media_gen += 1;
+                    }
                 }
             }
         }

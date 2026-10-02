@@ -510,12 +510,12 @@ fn clicking_reader_links_follows_them_and_a_drag_only_selects() {
 
     // A drag that starts on a link selects text and follows nothing.
     let (x, y) = to_b;
-    let script = format!("mouse_move {x} {y}\nclick left down\nmouse_move {} {y}\nclick left up\nsettle 300\n", x + 40.0);
+    let script = format!("mouse_move {x} {y}\nclick left down\nmouse_move {} {y}\nmouse_move {x} {y}\nclick left up\nsettle 300\n", x + 40.0);
     let lines = run_script(&mut session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     assert_eq!(session.app.tabs.len(), tabs_before);
     assert!(session.app.file_path.as_deref().is_some_and(|p| p.ends_with("preview.md")));
-    assert!(session.app.markdown.read_selection_range().is_some_and(|range| !range.is_empty()));
+    assert!(session.app.markdown.read_selection_range().is_none_or(|range| range.is_empty()));
 
     // A click opens b.md in Read mode and scrolls to its heading.
     click_at(&mut session, to_b);

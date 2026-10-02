@@ -360,6 +360,8 @@ fn read_pixels(reader: &mut impl BufRead, fields: &str) -> Result<MediaPixels, M
         && natural_h.is_finite()
         && natural_w > 0.0
         && natural_h > 0.0
+        && natural_w <= super::decode::MAX_INPUT_SIDE as f32
+        && natural_h <= super::decode::MAX_INPUT_SIDE as f32
         && (1..=MAX_OUTPUT_SIDE).contains(&raster_w)
         && (1..=MAX_OUTPUT_SIDE).contains(&raster_h);
     if !sane {

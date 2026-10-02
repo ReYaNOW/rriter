@@ -247,6 +247,26 @@ fn media_gen_follows_natural_size_and_failures() {
 }
 
 #[test]
+fn prepare_gpu_does_not_redraw_for_only_in_flight_visible_keys() {
+    let gate = Arc::new(Gate::default());
+    let loader: Loader = {
+        let gate = Arc::clone(&gate);
+        Arc::new(move |_| {
+            gate.wait();
+            Ok(small_pixels())
+        })
+    };
+    let waker = UiWaker::counting();
+    let mut media = MarkdownMedia::with_loader(loader);
+    let req = mermaid_req(91, 100);
+    media.request(req.clone(), &waker);
+    let mut host = FakeHost::default();
+    assert!(!media.prepare_with(&mut host, &[visible(&req.key, 100)], &waker));
+    gate.open();
+    poll_until(&mut media, &waker, |m| m.tasks.is_empty());
+}
+
+#[test]
 fn failed_entry_is_not_retried_until_reset() {
     let waker = UiWaker::counting();
     let calls = Arc::new(AtomicUsize::new(0));
@@ -296,6 +316,30 @@ fn upload_refusal_fails_with_too_many_pixels() {
     pump(&mut media, &waker, &mut host, &shown, |m| matches!(m.entry(&req.key), MediaEntryView::Failed(_)));
     assert_eq!(media.entry(&req.key), MediaEntryView::Failed(&MediaError::TooManyPixels));
     assert!(media.pending_uploads.is_empty() && media.tasks.is_empty());
+}
+
+#[test]
+fn failed_rerender_keeps_the_ready_texture() {
+    let results: Arc<Mutex<Vec<LoadResult>>> = Arc::new(Mutex::new(vec![
+        Ok(pixels((2000.0, 1000.0), (2000, 1000))),
+        Err(MediaError::Timeout),
+    ]));
+    let loader: Loader = {
+        let results = Arc::clone(&results);
+        Arc::new(move |_| results.lock().expect("results").remove(0))
+    };
+    let waker = UiWaker::counting();
+    let mut media = MarkdownMedia::with_loader(loader);
+    let req = mermaid_req(92, 2000);
+    media.request(req.clone(), &waker);
+    let mut host = FakeHost::default();
+    let wide = [visible(&req.key, 2000)];
+    pump(&mut media, &waker, &mut host, &wide, |m| has_texture(m, &req.key));
+    media.request(mermaid_req(92, 1000), &waker);
+    let narrow = [visible(&req.key, 1000)];
+    pump(&mut media, &waker, &mut host, &narrow, |m| m.stats().loads_started == 2 && m.tasks.is_empty());
+    assert!(has_texture(&media, &req.key));
+    assert!(matches!(media.entry(&req.key), MediaEntryView::Ready { texture: Some(_), .. }));
 }
 
 #[test]

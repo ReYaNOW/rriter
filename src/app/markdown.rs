@@ -111,6 +111,15 @@ impl App {
         self.markdown.link_press = self.markdown_read_link_at(x, y).map(|index| (index, x, y));
     }
 
+    pub(crate) fn cancel_markdown_link_press_after_drag(&mut self, x: f32, y: f32) {
+        let slop = self.renderer.as_ref().map_or(4.0, |renderer| (4.0 * renderer.scale_factor).round());
+        if self.markdown.link_press.is_some_and(|(_, press_x, press_y)| {
+            (x - press_x).abs() > slop || (y - press_y).abs() > slop
+        }) {
+            self.markdown.link_press = None;
+        }
+    }
+
     /// Called on the release of a Reader selection. `Some` when the press and the release
     /// make a click on one link (the caller then drops the selection and runs the action);
     /// `None` leaves the gesture a normal selection.
@@ -778,6 +787,7 @@ impl App {
         if !self.markdown.read_selecting || self.markdown_mode() != MarkdownMode::Read {
             return false;
         }
+        self.cancel_markdown_link_press_after_drag(x, y);
         let Some(frame) = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::MarkdownReadBody)

@@ -42,7 +42,14 @@ fn fetch_file(path: &Path, max_bytes: u64) -> Result<Fetched, MediaError> {
     if meta.len() > max_bytes {
         return Err(MediaError::TooLarge);
     }
-    let bytes = std::fs::read(path).map_err(|_| MediaError::NotFound)?;
+    let file = std::fs::File::open(path).map_err(|_| MediaError::NotFound)?;
+    let mut bytes = Vec::with_capacity(meta.len().min(max_bytes) as usize);
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| MediaError::NotFound)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(MediaError::TooLarge);
+    }
     let stamp = FileStamp {
         mtime: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
         len: meta.len(),

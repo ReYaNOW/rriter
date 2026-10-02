@@ -17,6 +17,7 @@ impl App {
             renderer.last_mouse_x = px;
             renderer.last_mouse_y = py;
         }
+        self.cancel_markdown_link_press_after_drag(px, py);
         if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
             && self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()).is_some_and(|image| image.drag_to(px, py))
         {

@@ -16,7 +16,7 @@ use image::{DynamicImage, ImageDecoder, ImageError, ImageReader, Limits, RgbaIma
 use super::{MediaError, MediaKind, MediaPixels};
 
 /// Longest side of any decoded raster input, in pixels.
-const MAX_INPUT_SIDE: u32 = 16384;
+pub(super) const MAX_INPUT_SIDE: u32 = 16384;
 /// Decoder allocation budget in bytes.
 const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
 /// Longest side of the produced raster, in pixels.
@@ -210,7 +210,7 @@ fn rasterize_svg(
     max_raster_w: u32,
 ) -> Result<MediaPixels, MediaError> {
     let size = tree.size();
-    let (natural_w, natural_h) = (size.width(), size.height());
+    let (natural_w, natural_h) = bounded_natural_size(size.width(), size.height());
     let (target_w, target_h) = raster_target_size(natural_w, natural_h, scale, max_raster_w);
     let mut pixmap = tiny_skia::Pixmap::new(target_w, target_h).ok_or(MediaError::Decode)?;
     let transform =
@@ -231,6 +231,11 @@ fn rasterize_svg(
         rgba,
         stamp: None,
     })
+}
+
+fn bounded_natural_size(width: f32, height: f32) -> (f32, f32) {
+    let scale = (MAX_INPUT_SIDE as f32 / width.max(height)).min(1.0);
+    (width * scale, height * scale)
 }
 
 /// The single font family Mermaid text is laid out and drawn with. It must be exactly this
@@ -466,6 +471,14 @@ mod tests {
         let pixels = decode_in_process(MediaKind::Svg, svg, 2.0, 1000).unwrap();
         assert_eq!((pixels.raster_w, pixels.raster_h), (20, 40));
         assert_eq!(pixels.rgba.len(), 20 * 40 * 4);
+    }
+
+    #[test]
+    fn huge_svg_natural_size_is_bounded_with_its_aspect_ratio() {
+        let (w, h) = bounded_natural_size(10.0, 50_000_000.0);
+        assert!(w > 0.0 && w <= MAX_INPUT_SIDE as f32);
+        assert_eq!(h, MAX_INPUT_SIDE as f32);
+        assert!((w / h - 10.0 / 50_000_000.0).abs() < f32::EPSILON);
     }
 
     #[test]
