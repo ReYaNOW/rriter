@@ -276,3 +276,20 @@
 - [ ] **Step 4 (контроллер SDD, не implementer):** после финального `make codex_test` (он собирает release) замерить через настоящий хелпер один SVG-бейдж с текстом и один flowchart Mermaid (`graph TD; A-->B`): время `render_media(Process)` на элемент. Больше 50 мс на элемент → контроллер добавляет задачу на долгоживущий хелпер по спеке §2.3 (один хелпер на слот, завершение после 60 с простоя, упавший отдаёт `Failed` текущему элементу без повторов); иначе фиксирует цифры в ledger.
 
 **Агенты:** implementer ds-low-agentic · reviewer нет
+
+### Task 11: Вкладка просмотра картинок
+
+Решения пользователя 01–02.10 (bounded design, одобрен в чате): открытие файла-картинки (из дерева, диалога, drop, ссылки markdown) показывает вкладку просмотра вместо пустой untitled-вкладки. Только IDE-режим, как PDF; вне IDE поведение не меняется.
+
+**Files:**
+- Create: `src/app/image_tab.rs` (`ImageTabState`: путь, фаза `Loading`/`Ready`/`Failed(причина)`, натуральный размер, текстура, zoom, смещение, stamp файла; методы загрузки/перезагрузки/закрытия/ввода), `src/render_view/image_view.rs` (`draw_root_image_frame`), `src/headless/ui_tests_image_viewer.rs`
+- Modify: `src/app/app_state.rs` (`EditorTabKind::Image`, поле `image: Option<Box<ImageTabState>>` рядом с `pdf`), `src/app/app_file_tab_methods.rs` (ветка по расширению рядом с `.pdf` в `open_file_in_tab_internal_options`), `src/render_view/root_frame_renderer.rs`, `src/app/mouse/wheel.rs`, keyboard routing (как `handle_pdf_key`), место хранения модификаторов (физический Left Shift), `src/markdown_media.rs` (одна `pub(crate)` точка «загрузить по пути → `MediaPixels` в фоне», без изменения кэша markdown), `Cargo.toml` (фичи `image`: `bmp`, `ico`), статус-бар, `src/headless/dump.rs`, `docs/headless.md`, `PROJECT_GUIDE.md` §4
+
+**Interfaces:** Consumes — `load_media`/`MediaPixels`/helper-процесс и лимиты markdown_media (T2–T7), образец PDF-вкладки (`src/app/pdf_tab.rs`, `pdf_tab/engine.rs:313` закрытие, `pdf_tab/input.rs`, `render_view/pdf_view.rs`, `dump.rs:333`).
+
+- [ ] **Step 1:** Маршрутизация и состояние: расширения png/jpg/jpeg/gif/webp/bmp/ico/svg (регистр не важен) → `ImageTabState`, загрузка в фоне через markdown_media, GIF/WebP — первый кадр, SVG растеризуется один раз (сторона ≤ 4096); картинка > 4096 показывается уменьшенной копией. Битый/нечитаемый файл → `Failed` с текстом во вкладке, не пустая untitled. Повторное открытие того же пути (`PathKey`) активирует существующую вкладку. Закрытие/деактивация освобождает текстуру, как PDF.
+- [ ] **Step 2:** Отрисовка и ввод: по умолчанию fit-to-window, маленькие не растягиваются выше 100%, координаты округлены. Left Shift + колесо — zoom с якорем под курсором (правый Shift — нет; нужен трекинг физической клавиши), колесо без модификатора — вертикальная прокрутка увеличенной картинки, перетаскивание левой кнопкой — панорама, двойной клик или клавиша `0` — сброс к fit. Клавиши и IME не доходят до скрытого редактора (как PDF allow-list). Статус-бар: `W×H · N%` вместо пунктов курсора.
+- [ ] **Step 3:** Перезагрузка с диска: на тике изменений workspace (как `markdown_media_wiring.rs:278`) сравнить stamp, перечитать в фоне; zoom/смещение сохраняются; удалённый файл → `Failed`.
+- [ ] **Step 4:** Headless: dump `"kind":"image"` + объект `image` (phase, natural w/h, zoom, texture); тесты в `ui_tests_image_viewer.rs`: открытие PNG из дерева → `ready`; клик по ссылке на PNG в markdown → вкладка image; Left Shift + wheel меняет zoom, Right Shift + wheel — нет, `0` возвращает fit; перезапись файла на диске → новые размеры; битый `.png` → `failed`; SVG → `ready`.
+
+**Агенты:** implementer ds-low-agentic · reviewer ds-high — high: маршрутизация открытия файлов общая для дерева/диалога/drop/ссылок, новый вид вкладки не должен утечь в редакторские пути (сохранение, external-change probe, сессия вкладок) и обязан освобождать текстуры
