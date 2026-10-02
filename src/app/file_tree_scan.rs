@@ -472,6 +472,20 @@ pub(super) fn notify_paths_need_file_tree_refresh<'a>(
     paths.into_iter().any(|path| !path_has_git_dir(path))
 }
 
+/// Quiet window that coalesces a burst of changes into one file-tree refresh.
+const FILE_TREE_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Reads change nothing on disk: inotify reports every `open` (our own directory scan, pdfium
+/// reading an open PDF), and passing those on made each refresh trigger the next one.
+/// A close after writing still counts, as a write signal.
+fn notify_event_changes_tree(kind: &notify_debouncer_mini::notify::EventKind) -> bool {
+    use notify_debouncer_mini::notify::event::{AccessKind, AccessMode, EventKind};
+    match kind {
+        EventKind::Access(access) => matches!(access, AccessKind::Close(AccessMode::Write)),
+        _ => true,
+    }
+}
+
 fn push_watch_path(
     path: &Path,
     platform: crate::platform::PlatformKind,
@@ -543,34 +557,42 @@ pub fn spawn_watcher(
     stop_rx: mpsc::Receiver<()>,
 ) -> bool {
     match crate::platform::spawn_named("rriter-file-tree-watcher", move || {
-        use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+        use notify_debouncer_mini::notify::{self, Watcher, RecursiveMode};
 
-        let (dtx, drx) = mpsc::channel();
-        let mut debouncer = match new_debouncer(Duration::from_millis(300), dtx) {
-            Ok(d) => d,
+        let (etx, erx) = mpsc::channel();
+        let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res
+                && notify_event_changes_tree(&event.kind)
+                && notify_paths_need_file_tree_refresh(event.paths.iter().map(PathBuf::as_path))
+            {
+                let _ = etx.send(());
+            }
+        }) {
+            Ok(w) => w,
             Err(_) => return,
         };
 
         for path in &paths {
-            let _ = debouncer.watcher().watch(path, RecursiveMode::NonRecursive);
+            let _ = watcher.watch(path, RecursiveMode::NonRecursive);
         }
 
-        // Блокируемся в цикле — debouncer должен жить, пока работает watcher.
+        // Блокируемся в цикле — watcher должен жить, пока работает поток.
         loop {
             match stop_rx.try_recv() {
                 Ok(()) | Err(mpsc::TryRecvError::Disconnected) => break,
                 Err(mpsc::TryRecvError::Empty) => {}
             }
-            match drx.recv_timeout(Duration::from_millis(250)) {
-                Ok(Ok(events)) => {
-                    let paths = events.iter().map(|event| event.path.as_path());
-                    if notify_paths_need_file_tree_refresh(paths) {
-                        if tx.send(()).is_err() {
-                            break; // главный поток упал / rx закрыт
-                        }
+            match erx.recv_timeout(Duration::from_millis(250)) {
+                Ok(()) => {
+                    // Debounce: one refresh per burst, sent FILE_TREE_DEBOUNCE after its first change.
+                    let deadline = std::time::Instant::now() + FILE_TREE_DEBOUNCE;
+                    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now())
+                        && erx.recv_timeout(left).is_ok()
+                    {}
+                    if tx.send(()).is_err() {
+                        break; // главный поток упал / rx закрыт
                     }
                 }
-                Ok(Err(_)) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(_) => break,
             }
@@ -614,6 +636,16 @@ mod tests {
         assert!(notify_paths_need_file_tree_refresh([Path::new(
             "/workspace/not.git/index"
         )]));
+    }
+
+    #[test]
+    fn read_access_events_do_not_refresh_file_tree() {
+        use notify_debouncer_mini::notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
+        assert!(!notify_event_changes_tree(&EventKind::Access(AccessKind::Open(AccessMode::Any))));
+        assert!(!notify_event_changes_tree(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
+        assert!(notify_event_changes_tree(&EventKind::Access(AccessKind::Close(AccessMode::Write))));
+        assert!(notify_event_changes_tree(&EventKind::Create(CreateKind::File)));
+        assert!(notify_event_changes_tree(&EventKind::Modify(ModifyKind::Any)));
     }
 
     #[test]
