@@ -692,9 +692,6 @@
     "src/main.rs": {
       "expect_used": 2
     },
-    "src/markdown_media/texture_budget.rs": {
-      "struct_excessive_bools": 2
-    },
     "src/platform.rs": {
       "collapsible_if": 2,
       "expect_used": 4,

@@ -14,15 +14,21 @@ const RERENDER_TOLERANCE: f32 = 0.25;
 #[derive(Clone, Copy, Debug)]
 pub(super) struct QueueFacts {
     pub visible: bool,
-    pub has_texture: bool,
-    pub in_flight: bool,
-    pub failed: bool,
-    pub queued: bool,
+    pub state: QueueEntryState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum QueueEntryState {
+    Textured,
+    InFlight,
+    Failed,
+    Queued,
+    Idle,
 }
 
 /// A visible key without a texture that is neither loading, failed nor queued already.
 pub(super) fn should_enqueue(facts: &QueueFacts) -> bool {
-    facts.visible && !facts.has_texture && !facts.in_flight && !facts.failed && !facts.queued
+    facts.visible && facts.state == QueueEntryState::Idle
 }
 
 /// Indices of the entries that must be put into the queue now.
