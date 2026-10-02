@@ -321,11 +321,12 @@ impl Renderer {
                 active_api_route,
             );
         }
-        self.draw_status_bar(
+        self.draw_status_bar_with_cursor_position(
             editor,
             None,
             markdown.mode,
             pdf_status,
+            !tabs.get(active_tab).is_some_and(|tab| tab.kind.is_image()),
             lsp,
             ui_registry,
             s,
