@@ -35,11 +35,12 @@ pub struct LspManager {
     dart_live_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     dart_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     diagnostic_generation: u64,
-    merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
     diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
     diagnostic_total_counts: (usize, usize),
     ty_diag_result_ids: HashMap<PathBuf, String>,
-    diag_text_pool: HashMap<Arc<str>, Arc<str>>,
+    /// One shared copy of every diagnostic code, URL and source text in the store;
+    /// `prune_diag_text_pool` drops the entries no diagnostic references any more.
+    diag_text_pool: std::collections::HashSet<Arc<str>>,
     ruff_workspace_diag_rx: Option<crate::ui_waker::OneShot<ruff_workspace::RuffWorkspaceResult>>,
     ruff_workspace_diag_pending: bool,
     ruff_workspace_diag_dirty: bool,
@@ -111,11 +112,10 @@ impl LspManager {
             dart_live_diagnostics: HashMap::new(),
             dart_workspace_diagnostics: HashMap::new(),
             diagnostic_generation: 0,
-            merged_diagnostic_indices: HashMap::new(),
             diagnostic_ancestor_severities: HashMap::new(),
             diagnostic_total_counts: (0, 0),
             ty_diag_result_ids: HashMap::new(),
-            diag_text_pool: HashMap::new(),
+            diag_text_pool: std::collections::HashSet::new(),
             ruff_workspace_diag_rx: None,
             ruff_workspace_diag_pending: false,
             ruff_workspace_diag_dirty: false,
@@ -187,7 +187,6 @@ impl LspManager {
 
     fn reset_ty_workspace_state(&mut self) {
         self.ty_diag_result_ids.clear();
-        self.merged_diagnostic_indices.clear();
         self.diagnostic_ancestor_severities.clear();
         self.diagnostic_total_counts = (0, 0);
         self.diag_text_pool.clear();
@@ -348,7 +347,6 @@ impl LspManager {
         self.ruff_workspace_diagnostics.clear();
         self.ty_instant_diagnostics.clear();
         self.ty_diag_result_ids.clear();
-        self.merged_diagnostic_indices.clear();
         self.diagnostic_ancestor_severities.clear();
         self.diagnostic_total_counts = (0, 0);
         self.diag_text_pool.clear();
@@ -439,7 +437,7 @@ impl LspManager {
                 self.dart_workspace_diagnostics.clear();
                 self.mark_diagnostics_changed();
             }
-            self.rebuild_merged_diagnostic_indices();
+            self.rebuild_diagnostic_summary();
             return;
         }
         self.python_disabled = false;
@@ -485,7 +483,7 @@ impl LspManager {
             }
             _ => return,
         }
-        self.rebuild_merged_diagnostic_indices();
+        self.rebuild_diagnostic_summary();
     }
 
     pub fn stop_server(&mut self, name: &str) {

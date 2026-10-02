@@ -595,6 +595,8 @@ impl Renderer {
                 color_atlas_x: 2,
                 color_atlas_y: 2,
                 color_max_row_h: 0,
+                color_atlas_width: COLOR_ATLAS_SIZE_W,
+                color_atlas_height: COLOR_ATLAS_SIZE_H,
                 font_size: 18.0 * scale_factor,
                 scale_factor,
                 theme,

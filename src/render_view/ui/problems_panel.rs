@@ -8,6 +8,24 @@ fn problems_group_expanded(is_collapsed: bool) -> bool {
     !is_collapsed
 }
 
+/// Rows of a `row_count`-long list with `item_h` rows that intersect a `list_h` viewport
+/// scrolled by `scroll_y`.
+fn problems_visible_rows(
+    scroll_y: f32,
+    list_h: f32,
+    item_h: f32,
+    row_count: usize,
+) -> std::ops::Range<usize> {
+    if item_h.is_nan() || item_h <= 0.0 || !scroll_y.is_finite() || !list_h.is_finite() {
+        return 0..0;
+    }
+    let first = ((scroll_y.max(0.0) / item_h).floor() as usize).min(row_count);
+    let end = (((scroll_y.max(0.0) + list_h.max(0.0)) / item_h).ceil() as usize)
+        .saturating_add(1)
+        .min(row_count);
+    first..end.max(first)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_problems_panel(
@@ -145,7 +163,7 @@ impl Renderer {
             (content_w - 14.0 * s).max(0.0),
             list_h,
         );
-        let visible_row_count = ide_panel.visible_problem_row_count(lsp);
+        let visible_row_count = ide_panel.visible_problem_row_count();
 
         if problems_empty_state_visible(visible_row_count) {
             let hint = "Нет ляпов";
@@ -158,13 +176,15 @@ impl Renderer {
                 text_scale,
             );
         } else {
-            let mut current_y = list_y - scroll_y;
             let item_h = 24.0 * s;
+            // Only the rows inside the viewport are touched: lists of tens of thousands of
+            // diagnostics cost the same per frame as short ones.
+            let rows = problems_visible_rows(scroll_y, list_h, item_h, visible_row_count);
+            let first_row = rows.start;
 
-            for (idx, (path, diag_idx)) in ide_panel.flat_diags.iter().enumerate() {
-                if !ide_panel.problem_row_visible(lsp, path, *diag_idx) {
-                    continue;
-                }
+            for (offset, (path, diag_idx)) in ide_panel.flat_diags[rows].iter().enumerate() {
+                let idx = first_row + offset;
+                let current_y = (list_y - scroll_y + idx as f32 * item_h).round();
                 if *diag_idx == usize::MAX {
                     if current_y + item_h > list_y && current_y < list_y + list_h {
                         if hover_settled {
@@ -192,7 +212,7 @@ impl Renderer {
                             );
                         }
 
-                        let is_collapsed = ide_panel.problems_collapsed.contains(path);
+                        let is_collapsed = ide_panel.problems_collapsed.contains(path.as_ref());
                         let icon_sz = 22.0 * s;
                         let icon_x = content_x + pad_x - 3.0 * s;
                         self.draw_tree_disclosure_icon(
@@ -207,7 +227,7 @@ impl Renderer {
                         let text_x = icon_x + icon_sz + 2.0 * s;
                         let text_y = current_y + item_h * 0.7;
 
-                        let (err_count, warn_count) = ide_panel.problem_counts(lsp, path);
+                        let (err_count, warn_count) = ide_panel.problem_group_counts_at(idx);
 
                         let mut scratch = std::mem::take(&mut self.scratch_buffer);
                         scratch.clear();
@@ -255,7 +275,6 @@ impl Renderer {
                         }
                         self.scratch_buffer = scratch;
                     }
-                    current_y += item_h;
                     continue;
                 }
 
@@ -417,7 +436,6 @@ impl Renderer {
                         }
                     }
                 }
-                current_y += item_h;
             }
 
             let total_h = crate::app::problems_scroll_content_height(visible_row_count, item_h);
@@ -439,7 +457,18 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use super::{problems_empty_state_visible, problems_group_expanded};
+    use super::{problems_empty_state_visible, problems_group_expanded, problems_visible_rows};
+
+    #[test]
+    fn problems_visible_rows_cover_only_the_viewport() {
+        assert_eq!(problems_visible_rows(0.0, 100.0, 24.0, 20_000), 0..6);
+        assert_eq!(problems_visible_rows(240.0, 100.0, 24.0, 20_000), 10..16);
+        assert_eq!(problems_visible_rows(250.0, 100.0, 24.0, 20_000), 10..16);
+        assert_eq!(problems_visible_rows(470.0, 100.0, 24.0, 20), 19..20);
+        assert_eq!(problems_visible_rows(9_999.0, 100.0, 24.0, 20), 20..20);
+        assert_eq!(problems_visible_rows(0.0, 100.0, 0.0, 20), 0..0);
+        assert_eq!(problems_visible_rows(f32::NAN, 100.0, 24.0, 20), 0..0);
+    }
 
     #[test]
     fn problems_empty_state_uses_visible_rows_after_filtering() {

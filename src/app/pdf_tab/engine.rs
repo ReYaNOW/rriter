@@ -288,17 +288,22 @@ impl App {
                 if wanted.contains(page) { true } else { textures_to_free.push(texture.tex); false }
             });
             let count = tab.pending_bitmaps.len().min(2);
+            let mut uploaded_large_bitmap = false;
             for bitmap in tab.pending_bitmaps.drain(..count) {
                 if !wanted.contains(&bitmap.page)
                     || bitmap.r#gen != tab.gens.render.load(std::sync::atomic::Ordering::Relaxed)
                     || (bitmap.width_px as usize).checked_mul(bitmap.height_px as usize).and_then(|size| size.checked_mul(4)) != Some(bitmap.rgba.len()) { continue; }
                 if let Some(tex) = renderer.upload_rgba(bitmap.width_px, bitmap.height_px, &bitmap.rgba) {
+                    uploaded_large_bitmap |= bitmap.rgba.len() >= 1024 * 1024;
                     if let Some(old) = tab.textures.insert(bitmap.page, super::PageTexture { tex, width_px: bitmap.width_px, height_px: bitmap.height_px, r#gen: bitmap.r#gen }) {
                         textures_to_free.push(old.tex);
                     }
                 } else {
                     tab.requested.insert((bitmap.page, bitmap.r#gen));
                 }
+            }
+            if uploaded_large_bitmap {
+                crate::platform::trim_allocator();
             }
             if !tab.pending_bitmaps.is_empty() && let Some(window) = window {
                 window.request_redraw();

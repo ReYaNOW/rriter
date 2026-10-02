@@ -20,7 +20,7 @@ const LOGO_TEXTURE_SIZE: u32 = 408;
 fn decode_logo(png: &[u8]) -> Option<image::RgbaImage> {
     let decoded = image::load_from_memory(png).ok()?;
     Some(if decoded.width() > LOGO_TEXTURE_SIZE || decoded.height() > LOGO_TEXTURE_SIZE {
-        decoded.resize(LOGO_TEXTURE_SIZE, LOGO_TEXTURE_SIZE, image::imageops::FilterType::Triangle).into_rgba8()
+        image::imageops::thumbnail(&decoded, LOGO_TEXTURE_SIZE, LOGO_TEXTURE_SIZE)
     } else {
         decoded.into_rgba8()
     })
@@ -65,5 +65,16 @@ impl StartupTrace {
             self.first_frame_done = true;
             self.mark("first-frame");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_logo, LOGO_PNG, LOGO_TEXTURE_SIZE};
+
+    #[test]
+    fn startup_logo_is_downsampled_to_the_upload_size() {
+        let logo = decode_logo(LOGO_PNG).expect("embedded logo should decode");
+        assert_eq!(logo.dimensions(), (LOGO_TEXTURE_SIZE, LOGO_TEXTURE_SIZE));
     }
 }

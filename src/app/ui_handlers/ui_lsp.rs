@@ -302,10 +302,9 @@ impl App {
             UiId::ProblemFileToggle(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if *diag_idx == usize::MAX {
-                        if self.ide_panel.problems_collapsed.contains(path) {
-                            self.ide_panel.problems_collapsed.remove(path);
-                        } else {
-                            self.ide_panel.problems_collapsed.insert(path.clone());
+                        let path = path.to_path_buf();
+                        if !self.ide_panel.problems_collapsed.remove(&path) {
+                            self.ide_panel.problems_collapsed.insert(path);
                         }
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -348,7 +347,7 @@ impl App {
                             .cloned();
                         if let Some(diagnostic) = diagnostic {
                             self.jump_to_lsp_position_in_file(
-                                path,
+                                path.to_path_buf(),
                                 diagnostic.end_line,
                                 diagnostic.end_col,
                                 true,

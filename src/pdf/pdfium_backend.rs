@@ -71,13 +71,14 @@ pub(super) fn render(
     }
     let config = PdfRenderConfig::new()
         .set_fixed_size(width, height)
+        .set_reverse_byte_order(true)
         .set_clear_color(if dark { DARK_PAPER } else { PdfColor::WHITE });
     let bitmap = page
         .render_with_config(&config)
         .map_err(|error| error.to_string())?;
     let actual_width = u32::try_from(bitmap.width()).map_err(|error| error.to_string())?;
     let actual_height = u32::try_from(bitmap.height()).map_err(|error| error.to_string())?;
-    let mut rgba = bitmap.as_rgba_bytes();
+    let mut rgba = bitmap.as_raw_bytes();
     for pixel in rgba.chunks_exact_mut(4) {
         pixel[3] = 255;
     }

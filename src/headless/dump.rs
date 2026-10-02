@@ -190,7 +190,17 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "highlight_version": app.highlighter.current_version,
             "highlight_spans": app.highlighter.spans.iter().map(|span| [span.start, span.end]).collect::<Vec<_>>(),
         },
-        "ide_panel": {"active": active_panel, "open": open_panels, "width": panel.left_width},
+        "ide_panel": {
+            "active": active_panel,
+            "open": open_panels,
+            "width": panel.left_width,
+            "problem_rows": panel.flat_diags.len(),
+            "problems_scroll": panel.problems_scroll.current,
+        },
+        "diagnostics": app.lsp.as_ref().map(|lsp| {
+            let (errors, warnings) = lsp.total_diagnostic_counts();
+            json!({"errors": errors, "warnings": warnings, "generation": lsp.diagnostic_generation()})
+        }),
         "overlays": {
             "settings": app.show_settings,
             "search": app.show_search,

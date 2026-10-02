@@ -368,8 +368,8 @@ impl Renderer {
                     glow::TEXTURE_2D,
                     0,
                     glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
+                    self.color_atlas_width,
+                    self.color_atlas_height,
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
@@ -473,8 +473,8 @@ impl Renderer {
                     glow::TEXTURE_2D,
                     0,
                     glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
+                    COLOR_ATLAS_SIZE_W,
+                    COLOR_ATLAS_SIZE_H,
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
@@ -498,6 +498,8 @@ impl Renderer {
         self.color_atlas_x = 2;
         self.color_atlas_y = 2;
         self.color_max_row_h = 0;
+        self.color_atlas_width = (self.color_atlas_width * 2).min(COLOR_ATLAS_MAX_SIZE);
+        self.color_atlas_height = (self.color_atlas_height * 2).min(COLOR_ATLAS_MAX_SIZE);
         if let Some(color_texture) = self.color_texture {
             unsafe {
                 use glow::HasContext;
@@ -508,8 +510,8 @@ impl Renderer {
                     glow::TEXTURE_2D,
                     0,
                     glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
+                    self.color_atlas_width,
+                    self.color_atlas_height,
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
@@ -532,16 +534,16 @@ impl Renderer {
             return None;
         }
         let color_texture = self.ensure_color_texture()?;
-        if self.color_atlas_x + width + 2 > ATLAS_SIZE_W {
+        if self.color_atlas_x + width + 2 > self.color_atlas_width {
             self.color_atlas_x = 2;
             self.color_atlas_y += self.color_max_row_h + 2;
             self.color_max_row_h = 0;
         }
-        if self.color_atlas_y + height + 2 > ATLAS_SIZE_H {
+        if self.color_atlas_y + height + 2 > self.color_atlas_height {
             self.reset_color_texture_atlas();
         }
-        if self.color_atlas_x + width + 2 > ATLAS_SIZE_W
-            || self.color_atlas_y + height + 2 > ATLAS_SIZE_H
+        if self.color_atlas_x + width + 2 > self.color_atlas_width
+            || self.color_atlas_y + height + 2 > self.color_atlas_height
         {
             return None;
         }
@@ -569,10 +571,10 @@ impl Renderer {
         self.color_atlas_x += width + 2;
         self.color_max_row_h = self.color_max_row_h.max(height);
         Some(IconAtlasEntry {
-            u: x as f32 / ATLAS_SIZE_W as f32,
-            v: y as f32 / ATLAS_SIZE_H as f32,
-            uw: width as f32 / ATLAS_SIZE_W as f32,
-            vh: height as f32 / ATLAS_SIZE_H as f32,
+            u: x as f32 / self.color_atlas_width as f32,
+            v: y as f32 / self.color_atlas_height as f32,
+            uw: width as f32 / self.color_atlas_width as f32,
+            vh: height as f32 / self.color_atlas_height as f32,
             color: true,
         })
     }
@@ -910,6 +912,8 @@ mod tests {
     fn renderer_constants_keep_expected_atlas_and_batch_sizes() {
         assert_eq!(ATLAS_SIZE_W, 1024);
         assert_eq!(ATLAS_SIZE_H, 1024);
+        assert_eq!(COLOR_ATLAS_SIZE_W, 512);
+        assert_eq!(COLOR_ATLAS_SIZE_H, 512);
         assert_eq!(PRIMARY_ATLAS_INTERNAL_FORMAT, glow::R8);
         assert_eq!(PRIMARY_ATLAS_UPLOAD_FORMAT, glow::RED);
         assert_eq!(COLOR_ATLAS_MODE, 10.0);

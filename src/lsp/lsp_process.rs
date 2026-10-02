@@ -207,20 +207,6 @@ pub struct Diagnostic {
     pub tags: Box<[u32]>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DiagnosticSourceKind {
-    Legacy,
-    Ruff,
-    Ty,
-    Dart,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MergedDiagnosticIndex {
-    source: DiagnosticSourceKind,
-    index: usize,
-}
-
 struct PendingRequestCleanup(Arc<Mutex<HashMap<i32, PendingRequestKind>>>);
 
 impl Drop for PendingRequestCleanup {

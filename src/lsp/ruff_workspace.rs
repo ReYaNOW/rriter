@@ -8,7 +8,7 @@ use crate::ui_waker::OneShotState;
 
 pub(super) struct RuffWorkspaceResult {
     pub(super) workspaces: Vec<PathBuf>,
-    pub(super) diagnostics: Result<HashMap<PathBuf, Vec<Diagnostic>>, String>,
+    pub(super) diagnostics: Result<HashMap<PathBuf, Arc<[Diagnostic]>>, String>,
 }
 
 pub(super) fn collect_workspace_diagnostics(workspaces: Vec<PathBuf>) -> RuffWorkspaceResult {
@@ -72,12 +72,10 @@ impl super::LspManager {
     fn apply_ruff_workspace_diagnostics(
         &mut self,
         workspaces: &[PathBuf],
-        diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+        diagnostics: &mut HashMap<PathBuf, Arc<[Diagnostic]>>,
     ) -> usize {
         for workspace in workspaces {
             self.ruff_workspace_diagnostics
-                .retain(|path, _| !crate::platform::path_is_within(path, workspace));
-            self.merged_diagnostic_indices
                 .retain(|path, _| !crate::platform::path_is_within(path, workspace));
         }
 
@@ -95,12 +93,16 @@ impl super::LspManager {
                 continue;
             }
             let mut items = items;
-            self.compact_diagnostic_text(&mut items);
-            self.ruff_workspace_diagnostics
-                .insert(path, Arc::from(items.into_boxed_slice()));
+            // The worker built each file's slice fresh, so it is still uniquely owned here.
+            if let Some(items) = Arc::get_mut(&mut items) {
+                // `parse_ruff_check_json` already shared the run's repeated messages.
+                self.compact_diagnostic_text(items, None);
+            }
+            self.ruff_workspace_diagnostics.insert(path, items);
         }
+        self.ruff_workspace_diagnostics.shrink_to_fit();
 
-        self.rebuild_diag_text_pool();
+        self.prune_diag_text_pool();
         self.mark_diagnostics_changed();
         received
     }
@@ -151,7 +153,7 @@ impl super::LspManager {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn run_ruff_workspace_check(
     workspaces: &[PathBuf],
-) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, String> {
+) -> Result<HashMap<PathBuf, Arc<[Diagnostic]>>, String> {
     if workspaces.is_empty() {
         return Ok(HashMap::new());
     }
@@ -190,33 +192,113 @@ fn run_ruff_check_command(workspaces: &[PathBuf]) -> Result<Output, String> {
 pub(super) fn parse_ruff_check_json(
     raw: &[u8],
     workspaces: &[PathBuf],
-) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, serde_json::Error> {
+) -> Result<HashMap<PathBuf, Arc<[Diagnostic]>>, serde_json::Error> {
     let raw = json_array_payload(raw);
     if raw.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let items = serde_json::from_slice::<Vec<RuffCheckDiagnostic>>(raw)?;
-    let mut out: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
-    for item in items {
-        if item.filename.is_empty() {
-            continue;
-        }
-        let path = resolve_ruff_filename(&item.filename, workspaces);
-        let diagnostic = diagnostic_from_ruff(item);
-        out.entry(path).or_default().push(diagnostic);
+    let mut deserializer = serde_json::Deserializer::from_slice(raw);
+    let out = serde::Deserializer::deserialize_seq(
+        &mut deserializer,
+        RuffCheckVisitor { workspaces },
+    )?;
+    deserializer.end()?;
+    Ok(out)
+}
+
+/// Streams the `ruff check --output-format=json` array straight into per-file diagnostics:
+/// items borrow from the raw output and are converted one by one (no owned intermediate
+/// `Vec`), a file's path is resolved once per run of its items (ruff groups its output by
+/// file), and repeated texts (rule code, URL, message, source) share one allocation.
+struct RuffCheckVisitor<'w> {
+    workspaces: &'w [PathBuf],
+}
+
+impl<'de> serde::de::Visitor<'de> for RuffCheckVisitor<'_> {
+    type Value = HashMap<PathBuf, Arc<[Diagnostic]>>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an array of ruff diagnostics")
     }
 
-    for diagnostics in out.values_mut() {
-        diagnostics.sort_by(|a, b| {
-            a.start_line
-                .cmp(&b.start_line)
-                .then(a.start_col.cmp(&b.start_col))
-                .then_with(|| a.code.as_deref().cmp(&b.code.as_deref()))
-                .then_with(|| a.message.as_ref().cmp(b.message.as_ref()))
-        });
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut grouped: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+        let mut texts = RuffTextPool::default();
+        let mut current_name = String::new();
+        let mut current_path = PathBuf::new();
+        let mut current: Vec<Diagnostic> = Vec::new();
+        while let Some(item) = seq.next_element::<RuffCheckDiagnostic<'de>>()? {
+            if item.filename.is_empty() {
+                continue;
+            }
+            if item.filename != current_name.as_str() {
+                flush_ruff_file(&mut grouped, &mut current_path, &mut current);
+                current_name.clear();
+                current_name.push_str(&item.filename);
+                current_path = resolve_ruff_filename(&item.filename, self.workspaces);
+            }
+            current.push(diagnostic_from_ruff(item, &mut texts));
+        }
+        flush_ruff_file(&mut grouped, &mut current_path, &mut current);
+
+        Ok(grouped
+            .into_iter()
+            .map(|(path, mut diagnostics)| {
+                diagnostics.sort_by(|a, b| {
+                    a.start_line
+                        .cmp(&b.start_line)
+                        .then(a.start_col.cmp(&b.start_col))
+                        .then_with(|| a.code.as_deref().cmp(&b.code.as_deref()))
+                        .then_with(|| a.message.as_ref().cmp(b.message.as_ref()))
+                });
+                (path, Arc::from(diagnostics))
+            })
+            .collect())
     }
-    Ok(out)
+}
+
+fn flush_ruff_file(
+    grouped: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+    path: &mut PathBuf,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if diagnostics.is_empty() {
+        return;
+    }
+    let path = std::mem::take(path);
+    match grouped.entry(path) {
+        std::collections::hash_map::Entry::Occupied(mut entry) => entry.get_mut().append(diagnostics),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(std::mem::take(diagnostics));
+        }
+    }
+}
+
+/// Shared copies of the texts one `ruff check` run repeats across its diagnostics.
+struct RuffTextPool {
+    source: Arc<str>,
+    texts: std::collections::HashSet<Arc<str>>,
+}
+
+impl Default for RuffTextPool {
+    fn default() -> Self {
+        Self {
+            source: Arc::from("ruff"),
+            texts: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl RuffTextPool {
+    fn intern(&mut self, text: &str) -> Arc<str> {
+        if let Some(shared) = self.texts.get(text) {
+            return shared.clone();
+        }
+        let shared = Arc::<str>::from(text);
+        self.texts.insert(shared.clone());
+        shared
+    }
 }
 
 fn json_array_payload(raw: &[u8]) -> &[u8] {
@@ -267,7 +349,7 @@ fn resolve_ruff_filename(filename: &str, workspaces: &[PathBuf]) -> PathBuf {
         .map_or(path.clone(), |workspace| workspace.join(path))
 }
 
-fn diagnostic_from_ruff(item: RuffCheckDiagnostic) -> Diagnostic {
+fn diagnostic_from_ruff(item: RuffCheckDiagnostic<'_>, texts: &mut RuffTextPool) -> Diagnostic {
     let (start_line, start_col) = lsp_position(&item.location);
     let (mut end_line, mut end_col) = item
         .end_location
@@ -288,10 +370,10 @@ fn diagnostic_from_ruff(item: RuffCheckDiagnostic) -> Diagnostic {
         end_line,
         end_col,
         severity: severity_for_ruff_code(item.code.as_deref()),
-        code: item.code.map(Arc::<str>::from),
-        code_href: item.url.map(Arc::<str>::from),
-        message: Arc::<str>::from(item.message),
-        source: Some(Arc::<str>::from("ruff")),
+        code: item.code.as_deref().map(|code| texts.intern(code)),
+        code_href: item.url.as_deref().map(|url| texts.intern(url)),
+        message: texts.intern(&item.message),
+        source: Some(texts.source.clone()),
         quickfixes: Vec::new().into_boxed_slice(),
         tags: Vec::new().into_boxed_slice(),
     }
@@ -322,16 +404,18 @@ fn severity_for_ruff_code(code: Option<&str>) -> DiagSeverity {
 }
 
 #[derive(serde::Deserialize)]
-struct RuffCheckDiagnostic {
-    filename: String,
+struct RuffCheckDiagnostic<'a> {
+    #[serde(borrow)]
+    filename: std::borrow::Cow<'a, str>,
     location: RuffLocation,
     #[serde(default)]
     end_location: Option<RuffLocation>,
-    #[serde(default)]
-    code: Option<String>,
-    message: String,
-    #[serde(default)]
-    url: Option<String>,
+    #[serde(default, borrow)]
+    code: Option<std::borrow::Cow<'a, str>>,
+    #[serde(borrow)]
+    message: std::borrow::Cow<'a, str>,
+    #[serde(default, borrow)]
+    url: Option<std::borrow::Cow<'a, str>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -355,7 +439,7 @@ mod tests {
         PathBuf::from("/tmp/rriter-ruff-ws")
     }
 
-    fn parse(raw: &str) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    fn parse(raw: &str) -> HashMap<PathBuf, Arc<[Diagnostic]>> {
         parse_ruff_check_json(raw.as_bytes(), &[ws()]).unwrap()
     }
 

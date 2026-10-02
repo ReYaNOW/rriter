@@ -78,9 +78,10 @@ fn headless_problems_lists_python_file_line_and_message() {
     let (dir, file, mut session) = python_problem_session("ui-problems-list");
     let state = dump(&mut session);
 
+    let shared = std::sync::Arc::<std::path::Path>::from(file.as_path());
     assert_eq!(
         session.app.ide_panel.flat_diags,
-        vec![(file.clone(), usize::MAX), (file.clone(), 0)]
+        vec![(shared.clone(), usize::MAX), (shared, 0)]
     );
     assert!(has_ui(&state, "ProblemFileToggle(0)"), "file group missing: {state}");
     assert!(has_ui(&state, "ProblemJump(1)"), "diagnostic row missing: {state}");
