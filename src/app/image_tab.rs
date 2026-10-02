@@ -32,7 +32,7 @@ pub(crate) struct ImageTabState {
 impl ImageTabState {
     pub(crate) fn new(path: PathBuf) -> Self {
         let key = crate::platform::PathKey::new(&path);
-        let state = Self {
+        Self {
             path,
             key,
             phase: ImagePhase::Loading,
@@ -49,8 +49,7 @@ impl ImageTabState {
             body: (0.0, 0.0, 0.0, 0.0),
             drag: None,
             last_click: None,
-        };
-        state
+        }
     }
 
     pub(crate) fn start_load(&mut self, waker: &crate::ui_waker::UiWaker) {
@@ -113,7 +112,7 @@ impl ImageTabState {
 
     pub(crate) fn fit_scale(&self, width: f32, height: f32) -> f32 {
         if self.natural.0 <= 0.0 || self.natural.1 <= 0.0 { return 1.0; }
-        (width / self.natural.0).min(height / self.natural.1).min(1.0).max(0.01)
+        (width / self.natural.0).min(height / self.natural.1).clamp(0.01, 1.0)
     }
 
     pub(crate) fn reset_fit(&mut self, width: f32, height: f32) {
