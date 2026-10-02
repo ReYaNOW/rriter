@@ -563,10 +563,9 @@ mod markdown_read_media_tests {
         }
 
         #[test]
-        #[ignore = "bug: resolve_markdown_edit_scroll_transition fallback (root_frame_renderer.rs, origin_read_width branch) maps origin_scroll_y of the old layout onto a Read layout rebuilt with the new media_gen"]
         fn read_to_edit_without_a_captured_anchor_after_the_image_grew_lands_on_the_same_source_range() {
-            // The origin layout is gone at the toggle, so the transition rebuilds it at the
-            // origin width (with the new `media_gen`) and maps the old scroll position.
+            // The origin layout is gone at the toggle and a rebuild would use the new
+            // `media_gen`, so the position must come from the anchor of the last Read frame.
             let (_context, mut app, gate) = rig(&document(true));
             at_rest_on(&mut app, "paragraph010");
             let anchor = app.markdown.read_layout.viewport_source_anchor(app.scroll_y.current).expect("anchor");
