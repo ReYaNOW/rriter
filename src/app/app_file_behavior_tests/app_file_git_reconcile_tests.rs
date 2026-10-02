@@ -770,7 +770,7 @@ fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
     assert_eq!(app.search_current_idx, None);
 
     let path = PathBuf::from("/tmp/main.py");
-    app.ide_panel.flat_diags.push((path.clone(), usize::MAX));
+    app.ide_panel.flat_diags.push((path.as_path().into(), usize::MAX));
     app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));
     assert!(app.ide_panel.problems_collapsed.contains(&path));
     app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));

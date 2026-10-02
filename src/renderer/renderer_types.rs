@@ -13,6 +13,10 @@ pub const MAX_VERTICES: usize = 32_768;
 pub(crate) const EDITOR_SURFACE_BG: [f32; 4] = [0.173, 0.180, 0.224, 1.0];
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
+pub(crate) const COLOR_ATLAS_SIZE_W: i32 = 512;
+pub(crate) const COLOR_ATLAS_SIZE_H: i32 = 512;
+/// The color atlas doubles on overflow up to this side, then resets in place.
+pub(crate) const COLOR_ATLAS_MAX_SIZE: i32 = 2048;
 pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;
 pub(crate) const PRIMARY_ATLAS_UPLOAD_FORMAT: u32 = glow::RED;
 pub(crate) const COLOR_ATLAS_MODE: f32 = 10.0;
@@ -394,6 +398,8 @@ pub struct Renderer {
     pub color_atlas_x: i32,
     pub color_atlas_y: i32,
     pub color_max_row_h: i32,
+    pub color_atlas_width: i32,
+    pub color_atlas_height: i32,
     pub font_size: f32,
     pub scale_factor: f32,
 

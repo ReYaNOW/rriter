@@ -142,7 +142,7 @@ what the cursor is over after `mouse_move`.
 Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
 markdown, `markdown_media` (always an array, empty unless the tab is a Markdown tab in Read mode with a layout; otherwise one object per laid-out media element: `key` (file path, URL or `mermaid:<hash>`), `state` = `pending|ready|failed:<MediaError variant>`, laid-out rectangle `x`/`y`/`w`/`h` in document pixels, `null` for an element drawn without a media rectangle such as a failed Mermaid block), `kind` (`normal|git_diff|api_client|database_table|database_query|pdf`)), `markdown_media_stats` (`media_gen`, `loads_started`, `texture_bytes`, `visible_texture_bytes` of the shared media cache), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
-highlight version and byte-range spans), `ide_panel`, `overlays`,
+highlight version and byte-range spans), `ide_panel` (`active`, `open`, `width`, `problem_rows` — rows of the Problems list, `problems_scroll`), `diagnostics` (`errors`, `warnings`, `generation` of the LSP diagnostics store, `null` without LSP), `overlays`,
 `dialog`, `external_request`, `clipboard`, `writes_allowed`.
 PDF tabs add `pdf` with `phase` (`engine_missing|engine_starting|loading|ready|error|password_required`), `page_count`, zero-based `current_page`, `scroll`, `textures` (number of uploaded page textures), `search_matches`, `search_done`, `selection_chars`, `engine` (`not_started|starting|ready|missing|failed|installing`), and `engine_message`. For PDF tabs, `scroll_y` equals `pdf.scroll`.
 In headless mode, `clipboard` is `{"mode":"memory","text":...}`; `text` is

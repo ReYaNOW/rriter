@@ -486,7 +486,12 @@ pub struct IdePanelState {
     pub lsp_log_source_counts: FxHashMap<String, usize>,
     pub diag_copied_idx: Option<usize>,
     pub problems_tab: usize,
-    pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+    /// Problems list rows: `(file, diagnostic index)`, `usize::MAX` for a file group header.
+    /// Built by `refresh_flat_diagnostics_if_needed` from renderable rows only; all rows of
+    /// one file share one `Arc<Path>`.
+    pub flat_diags: Vec<(std::sync::Arc<std::path::Path>, usize)>,
+    /// `(row, (errors, warnings))` for each file group header row, ascending by row.
+    problem_group_counts: Vec<(usize, (usize, usize))>,
     pub query_problem_path: Option<std::path::PathBuf>,
     pub query_problem_diagnostics: Vec<crate::lsp::Diagnostic>,
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
@@ -603,6 +608,7 @@ impl Default for IdePanelState {
             diag_copied_idx: None,
             problems_tab: 0,
             flat_diags: Vec::new(),
+            problem_group_counts: Vec::new(),
             query_problem_path: None,
             query_problem_diagnostics: Vec::new(),
             problems_collapsed: FxHashSet::default(),
@@ -638,7 +644,12 @@ impl IdePanelState {
         active_file: Option<&std::path::Path>,
         query_problem: Option<(&str, &[crate::lsp::Diagnostic])>,
         lsp: Option<&crate::lsp::LspManager>,
-    ) {
+    ) -> bool {
+        // The rows serve only the open panel; a workspace check that streams thousands of
+        // diagnostics must not rebuild them per update while nobody looks.
+        if !self.is_open(PanelId::Problems) {
+            return false;
+        }
         let lsp_generation = lsp.map_or(0, crate::lsp::LspManager::diagnostic_generation);
         let query_changed = match query_problem {
             Some((database_name, diagnostics)) => {
@@ -656,10 +667,11 @@ impl IdePanelState {
             && self.flat_diags_cache_lsp_generation == lsp_generation
             && self.flat_diags_cache_has_lsp == lsp.is_some()
         {
-            return;
+            return false;
         }
 
         self.flat_diags.clear();
+        self.problem_group_counts.clear();
         self.flat_diags_cache_tab = Some(active_tab);
         self.flat_diags_cache_file = active_file.map(std::path::Path::to_path_buf);
         self.flat_diags_cache_problems_tab = self.problems_tab;
@@ -668,16 +680,17 @@ impl IdePanelState {
         self.flat_diags_cache_has_lsp = lsp.is_some();
         if let Some((database_name, diagnostics)) = query_problem {
             let path = std::path::PathBuf::from(format!("SQL-консоль · {database_name}"));
+            let shared = std::sync::Arc::<std::path::Path>::from(path.as_path());
             self.flat_diags_cache_source_name = Some(database_name.to_owned());
-            self.query_problem_path = Some(path.clone());
+            self.query_problem_path = Some(path);
             self.query_problem_diagnostics.clear();
             self.query_problem_diagnostics.extend_from_slice(diagnostics);
             if self.problems_tab == 1 {
-                self.flat_diags.push((path.clone(), usize::MAX));
+                self.push_problem_group(shared.clone(), problem_severity_counts(diagnostics));
             }
-            if self.problems_tab == 0 || !self.problems_collapsed.contains(&path) {
+            if self.problems_tab == 0 || !self.problems_collapsed.contains(shared.as_ref()) {
                 self.flat_diags
-                    .extend((0..diagnostics.len()).map(|index| (path.clone(), index)));
+                    .extend((0..diagnostics.len()).map(|index| (shared.clone(), index)));
             }
         } else {
             self.flat_diags_cache_source_name = None;
@@ -691,15 +704,12 @@ impl IdePanelState {
                     && let Some(path) = active_file
                 {
                     let mut diagnostics = lsp.diagnostic_entries_for_path(path);
-                    diagnostics.sort_by(|(_, left), (_, right)| {
-                        left.start_line
-                            .cmp(&right.start_line)
-                            .then(left.start_col.cmp(&right.start_col))
-                    });
+                    sort_problem_entries(&mut diagnostics);
+                    let shared = std::sync::Arc::<std::path::Path>::from(path);
                     self.flat_diags.extend(
                         diagnostics
                             .into_iter()
-                            .map(|(index, _)| (path.to_path_buf(), index)),
+                            .map(|(index, _)| (shared.clone(), index)),
                     );
                 }
             } else {
@@ -708,20 +718,33 @@ impl IdePanelState {
                     if diagnostics.is_empty() {
                         continue;
                     }
-                    diagnostics.sort_by(|(_, left), (_, right)| {
-                        left.start_line
-                            .cmp(&right.start_line)
-                            .then(left.start_col.cmp(&right.start_col))
-                    });
-                    self.flat_diags.push((path.clone(), usize::MAX));
+                    sort_problem_entries(&mut diagnostics);
+                    let shared = std::sync::Arc::<std::path::Path>::from(path.as_path());
+                    let counts =
+                        problem_severity_counts(diagnostics.iter().map(|(_, diagnostic)| *diagnostic));
+                    self.push_problem_group(shared.clone(), counts);
                     if !self.problems_collapsed.contains(path) {
                         self.flat_diags.extend(
-                            diagnostics.into_iter().map(|(index, _)| (path.clone(), index)),
+                            diagnostics.into_iter().map(|(index, _)| (shared.clone(), index)),
                         );
                     }
                 }
             }
         }
+        true
+    }
+
+    fn push_problem_group(&mut self, path: std::sync::Arc<std::path::Path>, counts: (usize, usize)) {
+        self.problem_group_counts.push((self.flat_diags.len(), counts));
+        self.flat_diags.push((path, usize::MAX));
+    }
+
+    /// `(errors, warnings)` of the file group header at Problems row `row`, cached when the
+    /// rows are built so drawing a header does not walk the file's diagnostics.
+    pub fn problem_group_counts_at(&self, row: usize) -> (usize, usize) {
+        self.problem_group_counts
+            .binary_search_by_key(&row, |(group_row, _)| *group_row)
+            .map_or((0, 0), |found| self.problem_group_counts[found].1)
     }
 
     pub fn problem_diagnostic<'a>(
@@ -737,11 +760,10 @@ impl IdePanelState {
         }
     }
 
-    pub fn visible_problem_row_count(&self, lsp: Option<&crate::lsp::LspManager>) -> usize {
-        self.flat_diags
-            .iter()
-            .filter(|(path, index)| self.problem_row_visible(lsp, path, *index))
-            .count()
+    /// Rows of the Problems list. O(1): `refresh_flat_diagnostics_if_needed` keeps only
+    /// renderable rows, so the wheel handler and every frame need no walk over them.
+    pub fn visible_problem_row_count(&self) -> usize {
+        self.flat_diags.len()
     }
 
     pub fn problem_row_visible(
@@ -759,14 +781,7 @@ impl IdePanelState {
         path: &std::path::Path,
     ) -> (usize, usize) {
         if self.query_problem_path.as_deref() == Some(path) {
-            self.query_problem_diagnostics.iter().fold(
-                (0, 0),
-                |counts, diagnostic| match diagnostic.severity {
-                    crate::lsp::DiagSeverity::Error => (counts.0 + 1, counts.1),
-                    crate::lsp::DiagSeverity::Warning => (counts.0, counts.1 + 1),
-                    crate::lsp::DiagSeverity::Info | crate::lsp::DiagSeverity::Hint => counts,
-                },
-            )
+            problem_severity_counts(&self.query_problem_diagnostics)
         } else {
             lsp.map_or((0, 0), |manager| manager.diagnostic_counts_for_path(path))
         }
@@ -961,6 +976,22 @@ impl IdePanelState {
         self.open_bottom_panel_id()
             .is_some_and(|id| id != PanelId::Terminal || self.terminal_focused)
     }
+}
+
+fn problem_severity_counts<'a>(
+    diagnostics: impl IntoIterator<Item = &'a crate::lsp::Diagnostic>,
+) -> (usize, usize) {
+    diagnostics
+        .into_iter()
+        .fold((0, 0), |counts, diagnostic| match diagnostic.severity {
+            crate::lsp::DiagSeverity::Error => (counts.0 + 1, counts.1),
+            crate::lsp::DiagSeverity::Warning => (counts.0, counts.1 + 1),
+            crate::lsp::DiagSeverity::Info | crate::lsp::DiagSeverity::Hint => counts,
+        })
+}
+
+fn sort_problem_entries(entries: &mut [(usize, &crate::lsp::Diagnostic)]) {
+    entries.sort_by_key(|(_, diagnostic)| (diagnostic.start_line, diagnostic.start_col));
 }
 
 pub(crate) fn problems_scroll_content_height(visible_rows: usize, item_h: f32) -> f32 {

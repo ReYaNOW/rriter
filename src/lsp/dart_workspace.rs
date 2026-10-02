@@ -182,7 +182,6 @@ impl LspManager {
             process.notify_close(&open.path);
         }
         self.dart_live_diagnostics.remove(&open.path);
-        self.merged_diagnostic_indices.remove(&open.path);
         self.closed_dart_documents.push(open.path.clone());
         self.mark_diagnostics_changed();
 
@@ -512,6 +511,7 @@ impl LspManager {
         self.dart_workspace_diagnostics
             .retain(|path, _| !crate::platform::path_is_within(path, &result.root));
         let mut received = 0usize;
+        let mut messages = std::collections::HashSet::new();
         for (path, items) in diagnostics.drain() {
             if !crate::platform::path_is_within(&path, &result.root) || !path.exists() {
                 continue;
@@ -521,11 +521,11 @@ impl LspManager {
                 continue;
             }
             let mut items = items;
-            self.compact_diagnostic_text(&mut items);
+            self.compact_diagnostic_text(&mut items, Some(&mut messages));
             self.dart_workspace_diagnostics
                 .insert(path, Arc::from(items.into_boxed_slice()));
         }
-        self.rebuild_diag_text_pool();
+        self.prune_diag_text_pool();
         self.mark_diagnostics_changed();
         received
     }
@@ -1011,7 +1011,7 @@ mod tests {
                 Arc::from(vec![test_diagnostic("live")].into_boxed_slice()),
             ),
         );
-        manager.rebuild_merged_diagnostic_indices();
+        manager.rebuild_diagnostic_summary();
         manager.dirty_diagnostics = false;
 
         assert_eq!(manager.diagnostic_count(&path), 1);
@@ -1021,7 +1021,7 @@ mod tests {
         );
 
         manager.notify_close(&path, "dart");
-        manager.rebuild_merged_diagnostic_indices();
+        manager.rebuild_diagnostic_summary();
         manager.dirty_diagnostics = false;
         assert_eq!(manager.diagnostic_count(&path), 1);
         assert_eq!(

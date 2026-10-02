@@ -789,7 +789,7 @@ fn workspace_ruff_diagnostics_cover_closed_files_without_overriding_open_buffers
             diag_arc(vec![test_diag("closed file ty", DiagSeverity::Error, None)]),
         ),
     );
-    manager.rebuild_merged_diagnostic_indices();
+    manager.rebuild_diagnostic_summary();
 
     assert_eq!(manager.diagnostic_count(&open_path), 0);
     assert_eq!(
@@ -853,7 +853,7 @@ fn diagnostic_accessors_use_live_instant_store_while_index_is_dirty() {
             diag_arc(vec![test_diag("old", DiagSeverity::Warning, Some("W1"))]),
         ),
     );
-    manager.rebuild_merged_diagnostic_indices();
+    manager.rebuild_diagnostic_summary();
     assert_eq!(manager.diagnostic_count(&path), 1);
 
     manager.instant_diagnostics.insert(
@@ -926,7 +926,7 @@ fn diagnostic_ancestor_severity_cache_rebuilds_and_clears() {
             diag_arc(vec![test_diag("error", DiagSeverity::Error, Some("E1"))]),
         ),
     );
-    manager.rebuild_merged_diagnostic_indices();
+    manager.rebuild_diagnostic_summary();
 
     assert_eq!(
         manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),

@@ -611,7 +611,7 @@ fn problem_jump_to_closed_large_file_prioritizes_target_region() {
         .into(),
     );
     app.lsp = Some(lsp);
-    app.ide_panel.flat_diags.push((path.clone(), 0));
+    app.ide_panel.flat_diags.push((path.as_path().into(), 0));
 
     app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
 
@@ -663,7 +663,7 @@ fn problem_jump_to_open_file_does_not_restart_highlighter() {
         .into(),
     );
     app.lsp = Some(lsp);
-    app.ide_panel.flat_diags.push((path, 0));
+    app.ide_panel.flat_diags.push((path.into(), 0));
 
     app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
 

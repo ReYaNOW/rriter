@@ -367,30 +367,36 @@
 
     #[test]
     fn bug_34_stale_problem_rows_do_not_consume_layout_slots() {
-        let path = std::path::PathBuf::from("query.sql");
         let mut panel = IdePanelState::default();
-        panel.query_problem_path = Some(path.clone());
-        panel.query_problem_diagnostics = vec![problem_test_diagnostic("valid")];
-        panel.flat_diags = vec![(path.clone(), 0), (path.clone(), 99), (path.clone(), 0)];
+        panel.toggle(PanelId::Problems);
+        let two = [problem_test_diagnostic("first"), problem_test_diagnostic("second")];
+        panel.refresh_flat_diagnostics_if_needed(0, None, Some(("db", &two)), None);
+        assert_eq!(panel.flat_diags.len(), 2);
 
-        let visible = panel
-            .flat_diags
-            .iter()
-            .filter(|(path, index)| panel.problem_row_visible(None, path, *index))
-            .count();
-        assert_eq!(visible, 2);
+        // Fewer diagnostics rebuild the rows: none points past the new list.
+        let one = [problem_test_diagnostic("first")];
+        panel.refresh_flat_diagnostics_if_needed(0, None, Some(("db", &one)), None);
+        assert_eq!(panel.flat_diags.len(), 1);
+        assert!(
+            panel
+                .flat_diags
+                .iter()
+                .all(|(path, index)| panel.problem_row_visible(None, path, *index))
+        );
+        let path = panel.flat_diags[0].0.clone();
         assert!(!panel.problem_row_visible(None, &path, 99));
     }
 
     #[test]
     fn bug_38_problem_scroll_height_counts_only_renderable_rows() {
-        let path = std::path::PathBuf::from("query.sql");
         let mut panel = IdePanelState::default();
-        panel.query_problem_path = Some(path.clone());
-        panel.query_problem_diagnostics = vec![problem_test_diagnostic("valid")];
-        panel.flat_diags = vec![(path.clone(), usize::MAX), (path.clone(), 0), (path, 42)];
-        let rows = panel.visible_problem_row_count(None);
+        panel.toggle(PanelId::Problems);
+        panel.problems_tab = 1;
+        let diagnostics = [problem_test_diagnostic("valid")];
+        panel.refresh_flat_diagnostics_if_needed(0, None, Some(("db", &diagnostics)), None);
+        let rows = panel.visible_problem_row_count();
         assert_eq!(rows, 2);
+        assert_eq!(panel.problem_group_counts_at(0), (1, 0));
         assert_eq!(problems_scroll_content_height(rows, 24.0), 48.0);
         assert_eq!(problems_scroll_content_height(rows, f32::NAN), 0.0);
     }

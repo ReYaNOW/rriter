@@ -130,6 +130,7 @@ fn event_loop_error_message(stage: &str, error: &impl std::fmt::Display) -> Stri
 }
 
 fn main() {
+    crate::platform::configure_allocator();
     let mut startup_trace = startup_trace::StartupTrace::new();
     let startup_args = std::env::args_os().collect::<Vec<_>>();
     if let Some(exit_code) = crate::platform::handle_startup_helper(&startup_args) {
@@ -153,15 +154,6 @@ fn main() {
     crate::platform::initialize_gui_application();
     prefer_egl_vendor();
 
-    #[cfg(target_os = "linux")]
-    unsafe {
-        // Константа M_ARENA_MAX = -8. Настраиваем glibc напрямую,
-        // так как переменные окружения читать уже поздно.
-        unsafe extern "C" {
-            fn mallopt(param: i32, val: i32) -> i32;
-        }
-        mallopt(-8, 2);
-    }
     init_rayon_global_pool();
 
     let args = startup_args

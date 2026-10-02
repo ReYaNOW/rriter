@@ -220,7 +220,7 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
     let (content_x, content_y, content_w, content_h, _) =
         app_panel_scroll_rect(app, crate::app::PanelId::Problems, scale);
     let total_h = crate::app::problems_scroll_content_height(
-        app.ide_panel.visible_problem_row_count(app.lsp.as_ref()),
+        app.ide_panel.visible_problem_row_count(),
         24.0 * scale,
     );
     Some(ProblemsScrollbarLayout {
@@ -232,6 +232,19 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
             scale,
         ),
     })
+}
+
+/// Keeps the Problems scroll inside the list after its rows were rebuilt, so a list that
+/// shrank under a scrolled view does not draw empty.
+pub(crate) fn clamp_problems_scroll(app: &mut App) {
+    let Some(scale) = app.renderer.as_ref().map(|renderer| renderer.scale_factor) else {
+        return;
+    };
+    if let Some(layout) = problems_scrollbar_layout(app, scale) {
+        let max_scroll = layout.bar.extent.max_scroll;
+        app.ide_panel.problems_scroll.clamp_target(0.0, max_scroll);
+        app.ide_panel.problems_scroll.clamp_current(0.0, max_scroll);
+    }
 }
 
 pub(crate) fn git_graph_rows_bounds(app: &App, scale: f32) -> Option<(f32, f32)> {

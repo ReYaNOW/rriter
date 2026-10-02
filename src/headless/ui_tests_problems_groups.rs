@@ -96,7 +96,7 @@ fn headless_problems_current_file_and_all_tabs_filter_diagnostics() {
     wait_until(&mut session, 5000, "current-file diagnostic", |session| {
         session.app.ide_panel.flat_diags.len() == 1
             && session.app.ide_panel.flat_diags.first()
-                .is_some_and(|(path, index)| path == active && *index == 0)
+                .is_some_and(|(path, index)| **path == **active && *index == 0)
     });
     assert!(has_ui(&dump(&mut session), "ProblemJump(0)"));
     assert!(!has_ui(&dump(&mut session), "ProblemFileToggle(0)"));
@@ -108,21 +108,21 @@ fn headless_problems_current_file_and_all_tabs_filter_diagnostics() {
     let state = dump(&mut session);
     assert_eq!(ui_count(&state, "ProblemFileToggle("), 2, "file groups missing: {state}");
     assert_eq!(ui_count(&state, "ProblemJump("), 2, "diagnostic rows missing: {state}");
-    assert!(session.app.ide_panel.flat_diags.iter().any(|(path, idx)| path == active && *idx == 0));
+    assert!(session.app.ide_panel.flat_diags.iter().any(|(path, idx)| **path == **active && *idx == 0));
     assert!(files.iter().all(|path| {
         session
             .app
             .ide_panel
             .flat_diags
             .iter()
-            .any(|(listed, idx)| listed == path && *idx == usize::MAX)
+            .any(|(listed, idx)| **listed == **path && *idx == usize::MAX)
     }));
 
     click_ui(&mut session, "ProblemsTab(0)");
     wait_until(&mut session, 5000, "current-file tab restored", |session| {
         session.app.ide_panel.flat_diags.len() == 1
             && session.app.ide_panel.flat_diags.first()
-                .is_some_and(|(path, index)| path == active && *index == 0)
+                .is_some_and(|(path, index)| **path == **active && *index == 0)
     });
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -40,6 +40,22 @@ pub(crate) use integration::app_paths_for_root;
 pub(crate) type AppPaths = integration::AppPaths;
 pub use window_host::{HeadlessWindow, WindowHost};
 
+pub(crate) fn configure_allocator() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        let _ = libc::mallopt(libc::M_ARENA_MAX, 2);
+        let _ = libc::mallopt(libc::M_MMAP_THRESHOLD, 256 * 1024);
+        let _ = libc::mallopt(libc::M_TRIM_THRESHOLD, 256 * 1024);
+    }
+}
+
+pub(crate) fn trim_allocator() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        let _ = libc::malloc_trim(0);
+    }
+}
+
 #[cfg_attr(test, allow(dead_code))]
 pub fn config_dir() -> PathBuf {
     integration::config_dir()

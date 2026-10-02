@@ -106,12 +106,14 @@ impl App {
                         )),
                         _ => None,
                     });
-                self.ide_panel.refresh_flat_diagnostics_if_needed(
+                if self.ide_panel.refresh_flat_diagnostics_if_needed(
                     self.active_tab,
                     self.file_path.as_deref(),
                     query_problem,
                     self.lsp.as_ref(),
-                );
+                ) {
+                    crate::app::mouse::clamp_problems_scroll(self);
+                }
 
                 if let Some(log) = &mut self.pending_key_log
                     && log.t_render.is_none()
