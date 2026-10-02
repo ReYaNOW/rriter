@@ -1091,6 +1091,7 @@ impl Renderer {
             content_w,
             self.scale_factor,
             self.font_size,
+            scroll.current,
         );
         let scrollbar_w = markdown_read_scrollbar_width(max_scroll, self.scale_factor);
         register_markdown_read_text_surface(
