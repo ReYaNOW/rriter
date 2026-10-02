@@ -58,6 +58,54 @@ impl Renderer {
         Some(texture)
     }
 
+    /// Allocates an uninitialized RGBA8 texture; fill it with `upload_rgba_rows` before drawing it.
+    /// `tex_image_2d` with no data instead of `tex_storage_2d`: desktop GL 3.3 / macOS 4.1 lack the latter.
+    pub fn create_rgba_texture(&mut self, w: u32, h: u32) -> Option<glow::Texture> {
+        let texture = unsafe { self.gl.create_texture().ok()? };
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w as i32, h as i32, 0,
+                glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None),
+            );
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            // A GPU-side clear through a framebuffer makes the driver back the texture with video
+            // memory now. Without it (seen on NVIDIA) every `tex_sub_image_2d` strip is only shadowed
+            // in system memory and the whole page is transferred at its first draw: a 5–10 ms frame.
+            if let Ok(fbo) = self.gl.create_framebuffer() {
+                let previous = self.gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+                let scissor = self.gl.is_enabled(glow::SCISSOR_TEST);
+                if scissor { self.gl.disable(glow::SCISSOR_TEST); }
+                self.gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(fbo));
+                self.gl.framebuffer_texture_2d(glow::DRAW_FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+                self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
+                self.gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, previous);
+                if scissor { self.gl.enable(glow::SCISSOR_TEST); }
+                self.gl.delete_framebuffer(fbo);
+            }
+        }
+        Some(texture)
+    }
+
+    /// Writes `rows` full-width rows starting at row `y` of a texture from `create_rgba_texture`;
+    /// `rgba` holds exactly those rows (`w * rows * 4` bytes).
+    pub fn upload_rgba_rows(&mut self, texture: glow::Texture, w: u32, y: u32, rows: u32, rgba: &[u8]) {
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D, 0, 0, y as i32, w as i32, rows as i32,
+                glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(rgba)),
+            );
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+        }
+    }
+
     pub fn delete_texture(&mut self, texture: glow::Texture) {
         unsafe { self.gl.delete_texture(texture); }
     }

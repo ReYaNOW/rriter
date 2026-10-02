@@ -287,25 +287,10 @@ impl App {
             tab.textures.retain(|page, texture| {
                 if wanted.contains(page) { true } else { textures_to_free.push(texture.tex); false }
             });
-            let count = tab.pending_bitmaps.len().min(2);
-            let mut uploaded_large_bitmap = false;
-            for bitmap in tab.pending_bitmaps.drain(..count) {
-                if !wanted.contains(&bitmap.page)
-                    || bitmap.r#gen != tab.gens.render.load(std::sync::atomic::Ordering::Relaxed)
-                    || (bitmap.width_px as usize).checked_mul(bitmap.height_px as usize).and_then(|size| size.checked_mul(4)) != Some(bitmap.rgba.len()) { continue; }
-                if let Some(tex) = renderer.upload_rgba(bitmap.width_px, bitmap.height_px, &bitmap.rgba) {
-                    uploaded_large_bitmap |= bitmap.rgba.len() >= 1024 * 1024;
-                    if let Some(old) = tab.textures.insert(bitmap.page, super::PageTexture { tex, width_px: bitmap.width_px, height_px: bitmap.height_px, r#gen: bitmap.r#gen }) {
-                        textures_to_free.push(old.tex);
-                    }
-                } else {
-                    tab.requested.insert((bitmap.page, bitmap.r#gen));
-                }
-            }
-            if uploaded_large_bitmap {
+            if pump_page_uploads(tab, renderer, &wanted, textures_to_free, PDF_UPLOAD_BYTES_PER_FRAME) {
                 crate::platform::trim_allocator();
             }
-            if !tab.pending_bitmaps.is_empty() && let Some(window) = window {
+            if (!tab.pending_bitmaps.is_empty() || tab.upload.is_some()) && let Some(window) = window {
                 window.request_redraw();
             }
             let mut requests = tab.take_render_requests(dark_pages);
@@ -321,6 +306,7 @@ impl App {
             let (tabs, textures_to_free) = (&mut self.tabs, &mut self.pdf_textures_to_free);
             if let Some(pdf) = tabs.get_mut(idx).and_then(|tab| tab.pdf.as_deref_mut()) {
                 textures_to_free.extend(pdf.textures.drain().map(|(_, texture)| texture.tex));
+                textures_to_free.extend(pdf.upload.take().map(|upload| upload.tex));
             }
         }
         let id = {
@@ -339,6 +325,7 @@ impl App {
             pdf.requested.clear();
             pdf.gens.clear_wanted();
             textures_to_free.extend(pdf.textures.drain().map(|(_, texture)| texture.tex));
+            textures_to_free.extend(pdf.upload.take().map(|upload| upload.tex));
         }
     }
 
@@ -355,6 +342,63 @@ impl App {
         }
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
     }
+}
+
+/// Bytes of page pixels copied to the GPU per frame. A whole page in one `tex_image_2d`
+/// (5–16 MB) cost 5–12 ms of a 4.17 ms frame at 240 Hz; strips keep a frame near 1.5 ms
+/// and a typical page still lands within 2–3 frames.
+const PDF_UPLOAD_BYTES_PER_FRAME: usize = 3 * 1024 * 1024;
+
+/// Copies pending page bitmaps into textures, at most `budget` bytes of rows per call.
+/// A texture is published to `tab.textures` only when all its rows are written, so a page
+/// never shows half-uploaded; until then the old texture (previous generation) stays drawn.
+/// Returns whether a large bitmap finished (its memory is released, worth trimming the heap).
+fn pump_page_uploads(
+    tab: &mut PdfTabState,
+    renderer: &mut crate::renderer::Renderer,
+    wanted: &std::ops::Range<usize>,
+    textures_to_free: &mut Vec<glow::Texture>,
+    mut budget: usize,
+) -> bool {
+    let render_gen = tab.gens.render.load(std::sync::atomic::Ordering::Relaxed);
+    if tab.upload.as_ref().is_some_and(|upload| !wanted.contains(&upload.bitmap.page) || upload.bitmap.r#gen != render_gen) {
+        textures_to_free.extend(tab.upload.take().map(|upload| upload.tex));
+    }
+    let mut finished_large = false;
+    while budget > 0 {
+        if tab.upload.is_none() {
+            if tab.pending_bitmaps.is_empty() { break; }
+            let bitmap = tab.pending_bitmaps.remove(0);
+            if !wanted.contains(&bitmap.page) || bitmap.r#gen != render_gen || bitmap.width_px == 0 || bitmap.height_px == 0
+                || (bitmap.width_px as usize).checked_mul(bitmap.height_px as usize).and_then(|size| size.checked_mul(4)) != Some(bitmap.rgba.len()) { continue; }
+            let Some(tex) = renderer.create_rgba_texture(bitmap.width_px, bitmap.height_px) else {
+                tab.requested.insert((bitmap.page, bitmap.r#gen));
+                continue;
+            };
+            tab.upload = Some(super::PageUpload { bitmap, tex, next_row: 0 });
+        }
+        let Some(upload) = tab.upload.as_mut() else { break };
+        let (width, height) = (upload.bitmap.width_px, upload.bitmap.height_px);
+        let row_bytes = width as usize * 4;
+        let rows = (budget / row_bytes).min((height - upload.next_row) as usize) as u32;
+        if rows == 0 { break; }
+        let start = upload.next_row as usize * row_bytes;
+        let Some(strip) = upload.bitmap.rgba.get(start..start + rows as usize * row_bytes) else {
+            textures_to_free.extend(tab.upload.take().map(|upload| upload.tex));
+            continue;
+        };
+        renderer.upload_rgba_rows(upload.tex, width, upload.next_row, rows, strip);
+        upload.next_row += rows;
+        budget -= rows as usize * row_bytes;
+        if upload.next_row >= height && let Some(done) = tab.upload.take() {
+            finished_large |= done.bitmap.rgba.len() >= 1024 * 1024;
+            let texture = super::PageTexture { tex: done.tex, width_px: width, height_px: height, r#gen: done.bitmap.r#gen };
+            if let Some(old) = tab.textures.insert(done.bitmap.page, texture) {
+                textures_to_free.push(old.tex);
+            }
+        }
+    }
+    finished_large
 }
 
 /// A finished install whose library `locate()` still cannot find must not loop back into a
@@ -404,6 +448,37 @@ mod tests {
 
         assert_eq!(app.pdf_textures_to_free.as_slice(), &[texture]);
         assert!(matches!(rx.try_recv(), Ok(PdfRequest::Close { id }) if id == doc));
+    }
+
+    #[test]
+    fn page_upload_is_split_across_frames_and_published_only_when_complete() {
+        let (_context, mut app) =
+            crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+        let mut renderer = app.renderer.take().unwrap();
+        let mut tab = PdfTabState::new(PathBuf::from("strips.pdf"), Arc::new(DocGens::new()), PdfPhase::Ready);
+        let r#gen = tab.gens.render.load(std::sync::atomic::Ordering::Relaxed);
+        let bitmap = |page| crate::app::pdf_tab::PendingBitmap { page, r#gen, width_px: 4, height_px: 8, rgba: vec![9; 4 * 8 * 4] };
+        tab.pending_bitmaps.push(bitmap(0));
+        tab.pending_bitmaps.push(bitmap(1));
+        let mut freed = Vec::new();
+        // 3 rows of 16 bytes per frame: 8 rows need 3 frames.
+        for _ in 0..2 {
+            assert!(!pump_page_uploads(&mut tab, &mut renderer, &(0..2), &mut freed, 48));
+            assert!(tab.textures.is_empty(), "a half-written page must not be drawn");
+            assert_eq!(tab.upload.as_ref().map(|upload| upload.bitmap.page), Some(0));
+        }
+        pump_page_uploads(&mut tab, &mut renderer, &(0..2), &mut freed, 48);
+        assert_eq!(tab.textures.get(&0).map(|texture| (texture.width_px, texture.height_px)), Some((4, 8)));
+        // The leftover budget of the finishing frame already starts page 1.
+        assert_eq!(tab.upload.as_ref().map(|upload| (upload.bitmap.page, upload.next_row)), Some((1, 1)));
+        // Page 1 scrolled out of the wanted range: its partial texture is freed, nothing is published.
+        pump_page_uploads(&mut tab, &mut renderer, &(0..1), &mut freed, 48);
+        assert!(tab.upload.is_none());
+        assert_eq!(freed.len(), 1);
+        assert!(!tab.textures.contains_key(&1));
+        for texture in freed.into_iter().chain(tab.textures.drain().map(|(_, texture)| texture.tex)) {
+            renderer.delete_texture(texture);
+        }
     }
 
     #[test]
