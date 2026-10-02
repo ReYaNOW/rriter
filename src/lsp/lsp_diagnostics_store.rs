@@ -571,6 +571,51 @@ impl LspManager {
             .collect()
     }
 
+    pub fn diagnostic_entries_with_slices_for_path(
+        &self,
+        path: &Path,
+    ) -> Vec<(usize, &Arc<[Diagnostic]>, u32)> {
+        let abs_path = self.diagnostic_lookup_path(path);
+        let mut entries = Vec::new();
+        let mut global_index = 0;
+        for diagnostics in self
+            .diagnostic_arc_slices_for_abs_path(&abs_path)
+            .into_iter()
+            .flatten()
+        {
+            entries.extend((0..diagnostics.len()).map(|local_index| {
+                let index = global_index + local_index;
+                (index, diagnostics, local_index as u32)
+            }));
+            global_index += diagnostics.len();
+        }
+        entries
+    }
+
+    fn diagnostic_arc_slices_for_abs_path(&self, path: &Path) -> [Option<&Arc<[Diagnostic]>>; 4] {
+        let ruff = match self.instant_diagnostics.get(path) {
+            Some((_, diagnostics)) => Some(diagnostics),
+            None => self.ruff_workspace_diagnostics_for_abs_path(path),
+        };
+        let ty = self
+            .ty_instant_diagnostics
+            .get(path)
+            .map(|(_, diagnostics)| diagnostics);
+        let dart = match self.dart_live_diagnostics.get(path) {
+            Some((_, diagnostics)) => Some(diagnostics),
+            None => self.dart_workspace_diagnostics_for_abs_path(path),
+        };
+        let legacy = if ruff.is_none_or(|diagnostics| diagnostics.is_empty())
+            && ty.is_none_or(|diagnostics| diagnostics.is_empty())
+            && dart.is_none_or(|diagnostics| diagnostics.is_empty())
+        {
+            self.diagnostics.get(path)
+        } else {
+            None
+        };
+        [ruff, ty, dart, legacy]
+    }
+
     fn update_severity(summary: &mut Option<DiagSeverity>, diagnostic: &Diagnostic) -> bool {
         match diagnostic.severity {
             DiagSeverity::Error => {

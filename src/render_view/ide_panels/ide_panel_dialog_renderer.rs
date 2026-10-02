@@ -240,6 +240,41 @@ impl Renderer {
         progress_elapsed_secs: Option<f32>,
         progress_value: Option<f32>,
     ) {
+        self.draw_status_bar_with_cursor_position(
+            editor,
+            editor_file,
+            markdown_mode,
+            pdf_status,
+            true,
+            lsp,
+            ui_registry,
+            s,
+            mx,
+            my,
+            panel_bottom_h,
+            progress_label,
+            progress_elapsed_secs,
+            progress_value,
+        );
+    }
+
+    pub(crate) fn draw_status_bar_with_cursor_position(
+        &mut self,
+        editor: &crate::editor::Editor,
+        editor_file: Option<(&std::path::PathBuf, crate::platform::TextEncoding)>,
+        markdown_mode: crate::app::MarkdownMode,
+        pdf_status: Option<crate::app::pdf_tab::PdfStatus>,
+        show_cursor_position: bool,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        s: f32,
+        mx: f32,
+        my: f32,
+        panel_bottom_h: f32,
+        progress_label: Option<&str>,
+        progress_elapsed_secs: Option<f32>,
+        progress_value: Option<f32>,
+    ) {
         let bar_h = ide_status_bar_height(s).round();
         let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
         let bar_x = (48.0 * s).round();
@@ -482,7 +517,8 @@ impl Renderer {
             }
             let raw_line_x = position_group_right - 22.0 * s - group_w;
             (
-                (raw_line_x > left_status_limit + 8.0 * s).then_some(raw_line_x),
+                (show_cursor_position && raw_line_x > left_status_limit + 8.0 * s)
+                    .then_some(raw_line_x),
                 true,
                 Some(raw_line_x),
             )

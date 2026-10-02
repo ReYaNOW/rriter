@@ -300,9 +300,9 @@ impl App {
                 }
             }
             UiId::ProblemFileToggle(idx) => {
-                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
-                    if *diag_idx == usize::MAX {
-                        let path = path.to_path_buf();
+                if let Some(row) = self.ide_panel.flat_diags.get(idx) {
+                    if row.is_group_header() {
+                        let path = row.path.to_path_buf();
                         if !self.ide_panel.problems_collapsed.remove(&path) {
                             self.ide_panel.problems_collapsed.insert(path);
                         }
@@ -324,36 +324,32 @@ impl App {
                 }
             }
             UiId::ProblemUrl(idx) => {
-                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx)
-                    && let Some(diag) =
-                        self.ide_panel
-                            .problem_diagnostic(self.lsp.as_ref(), path, *diag_idx)
+                if let Some(row) = self.ide_panel.flat_diags.get(idx)
+                    && let Some(diag) = row.diagnostic()
                     && let Some(href) = &diag.code_href
                 {
                     let _ = crate::platform::open_url(self.external_requests.sink(), href.as_ref());
                 }
             }
             UiId::ProblemJump(idx) => {
-                if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx).cloned() {
+                if let Some((path, diag_idx, end_position)) = self
+                    .ide_panel.flat_diags.get(idx).map(|row| {
+                        (
+                            row.path.clone(),
+                            row.index,
+                            row.diagnostic().map(|diagnostic| {
+                                (diagnostic.end_line, diagnostic.end_col)
+                            }),
+                        )
+                    })
+                {
                     if diag_idx == usize::MAX {
                         return UiClickFlow::Return;
                     }
                     if self.ide_panel.is_query_problem_path(&path) {
                         self.jump_to_active_database_query_diagnostic(diag_idx);
-                    } else {
-                        let diagnostic = self
-                            .ide_panel
-                            .problem_diagnostic(self.lsp.as_ref(), &path, diag_idx)
-                            .cloned();
-                        if let Some(diagnostic) = diagnostic {
-                            self.jump_to_lsp_position_in_file(
-                                path.to_path_buf(),
-                                diagnostic.end_line,
-                                diagnostic.end_col,
-                                true,
-                                0.45,
-                            );
-                        }
+                    } else if let Some((line, col)) = end_position {
+                        self.jump_to_lsp_position_in_file(path.to_path_buf(), line, col, true, 0.45);
                     }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
@@ -365,10 +361,7 @@ impl App {
                     .ide_panel
                     .flat_diags
                     .get(idx)
-                    .and_then(|(path, diag_idx)| {
-                        self.ide_panel
-                            .problem_diagnostic(self.lsp.as_ref(), path, *diag_idx)
-                    })
+                    .and_then(|row| row.diagnostic())
                     .map(|diagnostic| diagnostic.message.to_string());
                 if let Some(message) = message {
                     self.set_clipboard_text(message);

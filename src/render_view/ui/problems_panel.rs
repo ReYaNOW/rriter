@@ -35,7 +35,6 @@ impl Renderer {
         content_w: f32,
         content_h: f32,
         s: f32,
-        lsp: Option<&crate::lsp::LspManager>,
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
@@ -182,10 +181,10 @@ impl Renderer {
             let rows = problems_visible_rows(scroll_y, list_h, item_h, visible_row_count);
             let first_row = rows.start;
 
-            for (offset, (path, diag_idx)) in ide_panel.flat_diags[rows].iter().enumerate() {
+            for (offset, row) in ide_panel.flat_diags[rows].iter().enumerate() {
                 let idx = first_row + offset;
                 let current_y = (list_y - scroll_y + idx as f32 * item_h).round();
-                if *diag_idx == usize::MAX {
+                if row.is_group_header() {
                     if current_y + item_h > list_y && current_y < list_y + list_h {
                         if hover_settled {
                             ui_registry.register_rect_clipped(
@@ -212,7 +211,9 @@ impl Renderer {
                             );
                         }
 
-                        let is_collapsed = ide_panel.problems_collapsed.contains(path.as_ref());
+                        let is_collapsed = ide_panel
+                            .problems_collapsed
+                            .contains(row.path.as_ref());
                         let icon_sz = 22.0 * s;
                         let icon_x = content_x + pad_x - 3.0 * s;
                         self.draw_tree_disclosure_icon(
@@ -278,7 +279,7 @@ impl Renderer {
                     continue;
                 }
 
-                let Some(diag) = ide_panel.problem_diagnostic(lsp, path, *diag_idx) else { continue; };
+                let Some(diag) = row.diagnostic() else { continue; };
                 if current_y + item_h > list_y && current_y < list_y + list_h {
                     let is_all_tab = ide_panel.problems_tab == 1;
                     let indent = if is_all_tab { 24.0 * s } else { 0.0 };

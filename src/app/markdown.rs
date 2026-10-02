@@ -324,6 +324,9 @@ pub struct MarkdownTabState {
     pub(crate) scroll_target_navigation: Option<MarkdownAbsoluteScrollTargetNavigation>,
     pub(crate) deferred_current_geometry: Option<MarkdownDeferredCurrentGeometry>,
     pub(crate) last_read_geometry: Option<MarkdownReadDisplayedGeometry>,
+    /// Written only by `remember_displayed_read_geometry`, together with `last_read_geometry`:
+    /// the `scroll_y` of that frame and its source anchor.
+    pub(super) last_read_anchor: Option<(f32, MarkdownSourceAnchor)>,
     pub(crate) last_edit_geometry: Option<MarkdownEditDisplayedGeometry>,
     pub(crate) read_selection_anchor: Option<usize>,
     pub(crate) read_selection_cursor: Option<usize>,
@@ -374,6 +377,7 @@ impl Default for MarkdownTabState {
             scroll_target_navigation: None,
             deferred_current_geometry: None,
             last_read_geometry: None,
+            last_read_anchor: None,
             last_edit_geometry: None,
             read_selection_anchor: None,
             read_selection_cursor: None,

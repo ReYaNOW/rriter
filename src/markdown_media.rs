@@ -23,8 +23,8 @@ mod tests;
 
 use fetch::{load_media, trim_disk_cache};
 use texture_budget::{
-    BudgetItem, QueueFacts, INVISIBLE_TEXTURE_BUDGET, enqueue_indices, eviction_plan,
-    needs_rerender, should_trim_disk_cache, texture_totals, upload_order,
+    BudgetItem, QueueEntryState, QueueFacts, INVISIBLE_TEXTURE_BUDGET, enqueue_indices,
+    eviction_plan, needs_rerender, should_trim_disk_cache, texture_totals, upload_order,
 };
 
 pub(crate) use render_helper::run_media_helper_if_requested;
@@ -535,10 +535,17 @@ impl MarkdownMedia {
     fn queue_facts(entry: &Entry, visible: bool) -> QueueFacts {
         QueueFacts {
             visible,
-            has_texture: entry.texture.is_some(),
-            in_flight: entry.in_flight,
-            failed: matches!(entry.state, EntryState::Failed(_)),
-            queued: entry.queued,
+            state: if entry.texture.is_some() {
+                QueueEntryState::Textured
+            } else if entry.in_flight {
+                QueueEntryState::InFlight
+            } else if matches!(entry.state, EntryState::Failed(_)) {
+                QueueEntryState::Failed
+            } else if entry.queued {
+                QueueEntryState::Queued
+            } else {
+                QueueEntryState::Idle
+            },
         }
     }
 

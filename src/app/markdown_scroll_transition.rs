@@ -252,12 +252,17 @@ impl MarkdownTabState {
         })
     }
 
+    /// Records the geometry of the Read frame being displayed together with the source
+    /// anchor at its `scroll_y`. The anchor outlives the layout: once the layout is
+    /// invalidated, a rebuild would use the current media generation, in which the old
+    /// `scroll_y` no longer points at the same text.
     pub(crate) fn remember_displayed_read_geometry(
         &mut self,
         version: u64,
         width: f32,
         scale: f32,
         font_size: f32,
+        scroll_y: f32,
     ) {
         if width.is_finite() && scale.is_finite() && font_size.is_finite() {
             self.last_read_geometry = Some(MarkdownReadDisplayedGeometry {
@@ -266,7 +271,28 @@ impl MarkdownTabState {
                 scale,
                 font_size,
             });
+            self.last_read_anchor = self
+                .read_layout
+                .viewport_source_anchor(scroll_y)
+                .map(|anchor| (scroll_y, anchor));
         }
+    }
+
+    /// Source anchor of `scroll_y` in the coordinates of the last displayed Read frame of
+    /// `version`, available even after its layout was invalidated. The scroll may have moved
+    /// since that frame; the offset is shifted by that distance within the same coordinates.
+    pub(crate) fn displayed_read_anchor_at(
+        &self,
+        version: u64,
+        scroll_y: f32,
+    ) -> Option<MarkdownSourceAnchor> {
+        self.last_read_geometry
+            .filter(|geometry| geometry.version == version)?;
+        let (displayed_y, anchor) = self.last_read_anchor.as_ref()?;
+        Some(MarkdownSourceAnchor {
+            source_range: anchor.source_range.clone(),
+            viewport_offset_y: anchor.viewport_offset_y - (scroll_y - displayed_y),
+        })
     }
 
     pub(crate) fn remember_displayed_edit_geometry(&mut self, version: u64, line_height: f32) {
@@ -977,7 +1003,10 @@ impl App {
                 let anchor = if deferred_current_geometry.is_some() {
                     owned_anchor
                 } else {
-                    displayed_anchor.or(current_anchor)
+                    displayed_anchor.or(current_anchor).or_else(|| {
+                        self.markdown
+                            .displayed_read_anchor_at(self.editor.version, origin_scroll_y)
+                    })
                 };
                 let origin_read_width = if deferred_current_geometry.is_some() {
                     owned_geometry.map(|geometry| geometry.width)

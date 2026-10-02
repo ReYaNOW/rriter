@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::texture_budget::{
-    BudgetItem, QueueFacts, enqueue_indices, eviction_plan, needs_rerender, should_trim_disk_cache,
-    texture_totals, upload_order,
+    BudgetItem, QueueEntryState, QueueFacts, enqueue_indices, eviction_plan, needs_rerender,
+    should_trim_disk_cache, texture_totals, upload_order,
 };
 use super::*;
 
@@ -672,32 +672,32 @@ fn rerender_requests_display_width_once() {
     assert_eq!(host.uploaded, vec![(2000, 2000), (1000, 1000)]);
 }
 
-fn facts(visible: bool, has_texture: bool, in_flight: bool, failed: bool, queued: bool) -> QueueFacts {
-    QueueFacts { visible, has_texture, in_flight, failed, queued }
+fn facts(visible: bool, state: QueueEntryState) -> QueueFacts {
+    QueueFacts { visible, state }
 }
 
 #[test]
 fn enqueue_decision_needs_visible_idle_textureless_key() {
     let all = [
-        facts(true, false, false, false, false),
-        facts(false, false, false, false, false),
-        facts(true, true, false, false, false),
-        facts(true, false, true, false, false),
-        facts(true, false, false, true, false),
-        facts(true, false, false, false, true),
+        facts(true, QueueEntryState::Idle),
+        facts(false, QueueEntryState::Idle),
+        facts(true, QueueEntryState::Textured),
+        facts(true, QueueEntryState::InFlight),
+        facts(true, QueueEntryState::Failed),
+        facts(true, QueueEntryState::Queued),
     ];
     assert_eq!(enqueue_indices(&all), vec![0]);
 }
 
 #[test]
 fn evicted_and_visible_again_key_is_queued_exactly_once_in_five_cycles() {
-    let mut entry = facts(true, false, false, false, false);
+    let mut entry = facts(true, QueueEntryState::Idle);
     let mut queued_times = 0;
     for _ in 0..5 {
         for index in enqueue_indices(&[entry]) {
             assert_eq!(index, 0);
             queued_times += 1;
-            entry.queued = true;
+            entry.state = QueueEntryState::Queued;
         }
     }
     assert_eq!(queued_times, 1);

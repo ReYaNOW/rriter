@@ -1516,6 +1516,7 @@ Entrypoints/state:
 * `src/startup_environment.rs` -> startup environment: theme/selection colors, KDE colors, EGL vendor preference, Rayon thread cap, project-search probe, and tests.
 * `src/headless_ty_mem_probe.rs` -> headless ty LSP memory probe (`--headless-ty-mem`): smaps/RSS sampling of LSP child processes.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/app_state_problems.rs` -> Problems panel row cache and its diagnostic source references.
 * `src/app/app_state_tests.rs` -> `app_state.rs` test chunk: panel group/visibility/focus state regressions.
 * `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
 * `src/app/confirm_dialog.rs` -> `ConfirmDialog` + `PendingAction`: the unsaved-changes confirmation flow (dialog window/headless frame, armed action, Save-As queue, ready hand-off to `about_to_wait`) as one phase enum; `impl App` routes to it; transition unit tests.

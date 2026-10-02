@@ -381,9 +381,9 @@
             panel
                 .flat_diags
                 .iter()
-                .all(|(path, index)| panel.problem_row_visible(None, path, *index))
+                .all(|row| panel.problem_row_visible(None, &row.path, row.index))
         );
-        let path = panel.flat_diags[0].0.clone();
+        let path = panel.flat_diags[0].path.clone();
         assert!(!panel.problem_row_visible(None, &path, 99));
     }
 
