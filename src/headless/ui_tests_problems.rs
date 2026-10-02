@@ -81,7 +81,15 @@ fn headless_problems_lists_python_file_line_and_message() {
     let shared = std::sync::Arc::<std::path::Path>::from(file.as_path());
     assert_eq!(
         session.app.ide_panel.flat_diags,
-        vec![(shared.clone(), usize::MAX), (shared, 0)]
+        vec![
+            crate::app::ProblemRow::group_header(shared.clone()),
+            crate::app::ProblemRow::with_diagnostic_source(
+                shared,
+                0,
+                std::sync::Arc::from(vec![problem_diagnostic()]),
+                0,
+            ),
+        ]
     );
     assert!(has_ui(&state, "ProblemFileToggle(0)"), "file group missing: {state}");
     assert!(has_ui(&state, "ProblemJump(1)"), "diagnostic row missing: {state}");
