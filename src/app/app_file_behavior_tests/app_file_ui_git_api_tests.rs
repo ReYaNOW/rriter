@@ -176,7 +176,9 @@ fn ui_handlers_state_only_branches_work_without_window() {
 
     app.ide_panel
         .flat_diags
-        .push((std::path::Path::new("/tmp/main.py").into(), 0));
+        .push(crate::app::ProblemRow::group_header(
+            std::path::Path::new("/tmp/main.py").into(),
+        ));
     app.handle_ui_click(crate::ui_system::UiId::ProblemFileToggle(0));
     assert!(app.ide_panel.problems_collapsed.is_empty());
 }

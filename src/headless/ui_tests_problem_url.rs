@@ -57,11 +57,8 @@ fn headless_problems_click_opens_diagnostic_url_in_external_request_log() {
             .ide_panel
             .flat_diags
             .iter()
-            .any(|(path, diag_idx)| {
-                session
-                    .app
-                    .ide_panel
-                    .problem_diagnostic(session.app.lsp.as_ref(), path, *diag_idx)
+            .any(|row| {
+                row.diagnostic()
                     .is_some_and(|diagnostic| {
                         diagnostic.code_href.as_deref() == Some(DIAGNOSTIC_URL)
                     })
@@ -73,11 +70,8 @@ fn headless_problems_click_opens_diagnostic_url_in_external_request_log() {
         .flat_diags
         .iter()
         .enumerate()
-        .find_map(|(ui_idx, (path, diag_idx))| {
-            session
-                .app
-                .ide_panel
-                .problem_diagnostic(session.app.lsp.as_ref(), path, *diag_idx)
+        .find_map(|(ui_idx, row)| {
+            row.diagnostic()
                 .is_some_and(|diagnostic| diagnostic.code_href.as_deref() == Some(DIAGNOSTIC_URL))
                 .then(|| format!("ProblemUrl({ui_idx})"))
         })

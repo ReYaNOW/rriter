@@ -592,7 +592,6 @@ impl Renderer {
                 panel_w,
                 panel_h,
                 s,
-                lsp,
                 ide_panel,
                 ui_registry,
             ),

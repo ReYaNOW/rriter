@@ -611,7 +611,19 @@ fn problem_jump_to_closed_large_file_prioritizes_target_region() {
         .into(),
     );
     app.lsp = Some(lsp);
-    app.ide_panel.flat_diags.push((path.as_path().into(), 0));
+    let (global_index, slice, local_index) = app
+        .lsp
+        .as_ref()
+        .and_then(|lsp| lsp.diagnostic_entries_with_slices_for_path(&path).into_iter().next())
+        .expect("inserted diagnostic is present");
+    app.ide_panel
+        .flat_diags
+        .push(crate::app::ProblemRow::with_diagnostic_source(
+            path.as_path().into(),
+            global_index,
+            std::sync::Arc::clone(slice),
+            local_index,
+        ));
 
     app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
 
@@ -663,7 +675,19 @@ fn problem_jump_to_open_file_does_not_restart_highlighter() {
         .into(),
     );
     app.lsp = Some(lsp);
-    app.ide_panel.flat_diags.push((path.into(), 0));
+    let (global_index, slice, local_index) = app
+        .lsp
+        .as_ref()
+        .and_then(|lsp| lsp.diagnostic_entries_with_slices_for_path(&path).into_iter().next())
+        .expect("inserted diagnostic is present");
+    app.ide_panel
+        .flat_diags
+        .push(crate::app::ProblemRow::with_diagnostic_source(
+            path.into(),
+            global_index,
+            std::sync::Arc::clone(slice),
+            local_index,
+        ));
 
     app.handle_ui_click(crate::ui_system::UiId::ProblemJump(0));
 
