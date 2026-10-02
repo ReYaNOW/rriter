@@ -203,8 +203,52 @@ pub struct Diagnostic {
     pub code_href: Option<Arc<str>>,
     pub message: Arc<str>,
     pub source: Option<Arc<str>>,
+    pub tags: DiagTags,
+    /// Rarely present fields, boxed to keep the 10k+ live diagnostics small.
+    pub extra: Option<Box<DiagnosticExtra>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticExtra {
     pub quickfixes: Box<[QuickFix]>,
-    pub tags: Box<[u32]>,
+}
+
+impl Diagnostic {
+    /// Quick fixes the server sent with the diagnostic (ruff); usually empty.
+    pub fn quickfixes(&self) -> &[QuickFix] {
+        self.extra.as_deref().map_or(&[], |extra| &extra.quickfixes)
+    }
+
+    /// `extra` for a diagnostic with these quick fixes: `None` when there are none.
+    pub fn extra_for_quickfixes(quickfixes: Vec<QuickFix>) -> Option<Box<DiagnosticExtra>> {
+        (!quickfixes.is_empty()).then(|| {
+            Box::new(DiagnosticExtra {
+                quickfixes: quickfixes.into_boxed_slice(),
+            })
+        })
+    }
+}
+
+/// LSP `DiagnosticTag` set. Only the two tags the protocol defines are kept:
+/// 1 = Unnecessary, 2 = Deprecated.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiagTags(u8);
+
+impl DiagTags {
+    pub const NONE: Self = Self(0);
+
+    pub fn from_lsp(tags: impl IntoIterator<Item = u32>) -> Self {
+        Self(tags.into_iter().fold(0, |bits, tag| match tag {
+            1 => bits | 1,
+            2 => bits | 2,
+            _ => bits,
+        }))
+    }
+
+    /// The diagnostic marks unnecessary (unused) or deprecated code.
+    pub fn is_unnecessary_or_deprecated(self) -> bool {
+        self.0 != 0
+    }
 }
 
 struct PendingRequestCleanup(Arc<Mutex<HashMap<i32, PendingRequestKind>>>);

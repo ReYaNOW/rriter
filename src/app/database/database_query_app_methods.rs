@@ -993,8 +993,8 @@ mod database_query_app_method_tests {
             code_href: None,
             message: std::sync::Arc::from("error"),
             source: None,
-            quickfixes: Box::new([]),
-            tags: Box::new([]),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }
     }
 

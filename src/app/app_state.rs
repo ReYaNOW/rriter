@@ -490,8 +490,8 @@ pub struct IdePanelState {
     /// Built by `refresh_flat_diagnostics_if_needed` from renderable rows only; all rows of
     /// one file share one `Arc<Path>`.
     pub flat_diags: Vec<(std::sync::Arc<std::path::Path>, usize)>,
-    /// `(row, (errors, warnings))` for each file group header row, ascending by row.
-    problem_group_counts: Vec<(usize, (usize, usize))>,
+    /// One entry per file group header row, ascending by row.
+    problem_groups: Vec<ProblemGroupHeader>,
     pub query_problem_path: Option<std::path::PathBuf>,
     pub query_problem_diagnostics: Vec<crate::lsp::Diagnostic>,
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
@@ -608,7 +608,7 @@ impl Default for IdePanelState {
             diag_copied_idx: None,
             problems_tab: 0,
             flat_diags: Vec::new(),
-            problem_group_counts: Vec::new(),
+            problem_groups: Vec::new(),
             query_problem_path: None,
             query_problem_diagnostics: Vec::new(),
             problems_collapsed: FxHashSet::default(),
@@ -671,7 +671,7 @@ impl IdePanelState {
         }
 
         self.flat_diags.clear();
-        self.problem_group_counts.clear();
+        self.problem_groups.clear();
         self.flat_diags_cache_tab = Some(active_tab);
         self.flat_diags_cache_file = active_file.map(std::path::Path::to_path_buf);
         self.flat_diags_cache_problems_tab = self.problems_tab;
@@ -735,16 +735,31 @@ impl IdePanelState {
     }
 
     fn push_problem_group(&mut self, path: std::sync::Arc<std::path::Path>, counts: (usize, usize)) {
-        self.problem_group_counts.push((self.flat_diags.len(), counts));
+        self.problem_groups.push(ProblemGroupHeader {
+            row: self.flat_diags.len(),
+            counts,
+            name: problem_group_name(&path),
+        });
         self.flat_diags.push((path, usize::MAX));
+    }
+
+    fn problem_group_at(&self, row: usize) -> Option<&ProblemGroupHeader> {
+        self.problem_groups
+            .binary_search_by_key(&row, |group| group.row)
+            .ok()
+            .map(|found| &self.problem_groups[found])
     }
 
     /// `(errors, warnings)` of the file group header at Problems row `row`, cached when the
     /// rows are built so drawing a header does not walk the file's diagnostics.
     pub fn problem_group_counts_at(&self, row: usize) -> (usize, usize) {
-        self.problem_group_counts
-            .binary_search_by_key(&row, |(group_row, _)| *group_row)
-            .map_or((0, 0), |found| self.problem_group_counts[found].1)
+        self.problem_group_at(row).map_or((0, 0), |group| group.counts)
+    }
+
+    /// Display name of the file group header at Problems row `row`, cached when the rows
+    /// are built so drawing a header allocates nothing.
+    pub fn problem_group_name_at(&self, row: usize) -> &str {
+        self.problem_group_at(row).map_or("", |group| &group.name)
     }
 
     pub fn problem_diagnostic<'a>(
@@ -976,6 +991,22 @@ impl IdePanelState {
         self.open_bottom_panel_id()
             .is_some_and(|id| id != PanelId::Terminal || self.terminal_focused)
     }
+}
+
+/// A Problems file group header row, cached by `refresh_flat_diagnostics_if_needed`.
+struct ProblemGroupHeader {
+    row: usize,
+    /// `(errors, warnings)` of the file.
+    counts: (usize, usize),
+    name: Box<str>,
+}
+
+/// The file name a Problems group header shows (lossy for non-UTF-8 names).
+fn problem_group_name(path: &std::path::Path) -> Box<str> {
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into()
 }
 
 fn problem_severity_counts<'a>(

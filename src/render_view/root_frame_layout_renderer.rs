@@ -164,7 +164,7 @@ impl Renderer {
 
             if !suppress {
                 self.lsp_diagnostic_indices.push(idx);
-                if d.tags.contains(&1) || d.tags.contains(&2) {
+                if d.tags.is_unnecessary_or_deprecated() {
                     let start = get_byte_offset(d.start_line, d.start_col);
                     let end = get_byte_offset(d.end_line, d.end_col);
                     if start < end {

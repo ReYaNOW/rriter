@@ -871,8 +871,8 @@ mod tests {
             code_href: None,
             message: std::sync::Arc::<str>::from(""),
             source: None,
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         }
     }
 

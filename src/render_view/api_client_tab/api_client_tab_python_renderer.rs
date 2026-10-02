@@ -13,8 +13,8 @@ fn api_mock_ty_diagnostics_as_lsp(
             code_href: None,
             message: std::sync::Arc::<str>::from(diag.message.as_str()),
             source: Some(std::sync::Arc::<str>::from("ty")),
-            quickfixes: Vec::new().into_boxed_slice(),
-            tags: Vec::new().into_boxed_slice(),
+            tags: crate::lsp::DiagTags::NONE,
+            extra: None,
         })
         .collect()
 }

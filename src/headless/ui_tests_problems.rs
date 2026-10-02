@@ -25,8 +25,8 @@ fn problem_diagnostic() -> Diagnostic {
         code_href: None,
         message: Arc::from(PROBLEM_MESSAGE),
         source: Some(Arc::from("ruff")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

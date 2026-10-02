@@ -1,7 +1,7 @@
 use super::{DiagSeverity, Diagnostic};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Output;
 use std::sync::Arc;
 use std::time::Duration;
 use crate::ui_waker::OneShotState;
@@ -160,7 +160,7 @@ fn run_ruff_workspace_check(
 
     let output = run_ruff_check_command(workspaces)?;
 
-    if output.stdout.is_empty() && !output.status.success() {
+    if output.stdout.empty && !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
             "ruff exited with {}{}",
@@ -171,12 +171,26 @@ fn run_ruff_workspace_check(
         ));
     }
 
-    parse_ruff_check_json(&output.stdout, workspaces)
+    output
+        .stdout
+        .parsed
         .map_err(|error| format!("invalid ruff JSON: {error}"))
 }
 
+/// What the stdout reader thread of `run_ruff_check_command` hands back.
+struct RuffStdout {
+    /// The process wrote nothing to stdout.
+    empty: bool,
+    parsed: Result<HashMap<PathBuf, Arc<[Diagnostic]>>, serde_json::Error>,
+}
+
+/// Runs `ruff check` and parses its JSON straight from the pipe: on a big workspace the
+/// output is several MB, and buffering it whole cost the full output plus the doubling
+/// growth copies of the buffer.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn run_ruff_check_command(workspaces: &[PathBuf]) -> Result<Output, String> {
+fn run_ruff_check_command(
+    workspaces: &[PathBuf],
+) -> Result<crate::platform::StreamedOutput<RuffStdout>, String> {
     let mut cmd = crate::platform::command_for_tool("ruff".as_ref(), "RRITER_RUFF_PATH")
         .map_err(|error| error.to_string())?;
     cmd.arg("check")
@@ -185,31 +199,44 @@ fn run_ruff_check_command(workspaces: &[PathBuf]) -> Result<Output, String> {
     for workspace in workspaces {
         cmd.arg(workspace);
     }
-    crate::platform::run_command_output(&mut cmd, Duration::from_secs(120))
-        .map_err(|error| error.to_string())
+    let workspaces = workspaces.to_vec();
+    crate::platform::run_command_stdout_with(&mut cmd, Duration::from_secs(120), move |stdout| {
+        let mut reader = BufReader::new(stdout);
+        let empty = matches!(reader.fill_buf(), Ok(buf) if buf.is_empty());
+        RuffStdout {
+            empty,
+            parsed: parse_ruff_check_reader(reader, &workspaces),
+        }
+    })
+    .map_err(|error| error.to_string())
 }
 
-pub(super) fn parse_ruff_check_json(
+#[cfg(test)]
+fn parse_ruff_check_json(
     raw: &[u8],
     workspaces: &[PathBuf],
 ) -> Result<HashMap<PathBuf, Arc<[Diagnostic]>>, serde_json::Error> {
-    let raw = json_array_payload(raw);
-    if raw.is_empty() {
+    parse_ruff_check_reader(raw, workspaces)
+}
+
+/// Parses `ruff check --output-format=json` output as it is read. A non-JSON header
+/// before the array is skipped and anything after the array is ignored; output with
+/// only whitespace is an empty result.
+fn parse_ruff_check_reader(
+    mut reader: impl BufRead,
+    workspaces: &[PathBuf],
+) -> Result<HashMap<PathBuf, Arc<[Diagnostic]>>, serde_json::Error> {
+    if !skip_to_json_array(&mut reader)? {
         return Ok(HashMap::new());
     }
 
-    let mut deserializer = serde_json::Deserializer::from_slice(raw);
-    let out = serde::Deserializer::deserialize_seq(
-        &mut deserializer,
-        RuffCheckVisitor { workspaces },
-    )?;
-    deserializer.end()?;
-    Ok(out)
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    serde::Deserializer::deserialize_seq(&mut deserializer, RuffCheckVisitor { workspaces })
 }
 
 /// Streams the `ruff check --output-format=json` array straight into per-file diagnostics:
-/// items borrow from the raw output and are converted one by one (no owned intermediate
-/// `Vec`), a file's path is resolved once per run of its items (ruff groups its output by
+/// items are converted one by one as they are read (no owned intermediate `Vec`, no
+/// buffered copy of the whole output), a file's path is resolved once per run of its items (ruff groups its output by
 /// file), and repeated texts (rule code, URL, message, source) share one allocation.
 struct RuffCheckVisitor<'w> {
     workspaces: &'w [PathBuf],
@@ -301,34 +328,28 @@ impl RuffTextPool {
     }
 }
 
-fn json_array_payload(raw: &[u8]) -> &[u8] {
-    let trimmed = trim_ascii_ws(raw);
-    if trimmed.is_empty() || trimmed.first() == Some(&b'[') {
-        return trimmed;
+/// Consumes `reader` up to (not including) the `[` that opens the JSON array. Returns
+/// `Ok(false)` when the output holds only whitespace and an error when it has text but
+/// no array.
+fn skip_to_json_array(reader: &mut impl BufRead) -> Result<bool, serde_json::Error> {
+    let mut saw_text = false;
+    loop {
+        let buf = reader.fill_buf().map_err(serde_json::Error::io)?;
+        if buf.is_empty() {
+            return if saw_text {
+                Err(serde::de::Error::custom("expected a JSON array of ruff diagnostics"))
+            } else {
+                Ok(false)
+            };
+        }
+        if let Some(start) = buf.iter().position(|byte| *byte == b'[') {
+            reader.consume(start);
+            return Ok(true);
+        }
+        saw_text |= buf.iter().any(|byte| !byte.is_ascii_whitespace());
+        let len = buf.len();
+        reader.consume(len);
     }
-
-    let Some(start) = trimmed.iter().position(|byte| *byte == b'[') else {
-        return trimmed;
-    };
-    let Some(end) = trimmed.iter().rposition(|byte| *byte == b']') else {
-        return trimmed;
-    };
-    if start > end {
-        return trimmed;
-    }
-    &trimmed[start..=end]
-}
-
-fn trim_ascii_ws(raw: &[u8]) -> &[u8] {
-    let mut start = 0usize;
-    let mut end = raw.len();
-    while start < end && raw[start].is_ascii_whitespace() {
-        start += 1;
-    }
-    while end > start && raw[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    &raw[start..end]
 }
 
 fn resolve_ruff_filename(filename: &str, workspaces: &[PathBuf]) -> PathBuf {
@@ -374,8 +395,8 @@ fn diagnostic_from_ruff(item: RuffCheckDiagnostic<'_>, texts: &mut RuffTextPool)
         code_href: item.url.as_deref().map(|url| texts.intern(url)),
         message: texts.intern(&item.message),
         source: Some(texts.source.clone()),
-        quickfixes: Vec::new().into_boxed_slice(),
-        tags: Vec::new().into_boxed_slice(),
+        tags: super::DiagTags::NONE,
+        extra: None,
     }
 }
 
@@ -484,8 +505,8 @@ mod tests {
         assert_eq!(items[0].severity, DiagSeverity::Warning);
         assert_eq!(items[0].code.as_deref(), Some("F401"));
         assert_eq!(items[0].source.as_deref(), Some("ruff"));
-        assert!(items[0].quickfixes.is_empty());
-        assert!(items[0].tags.is_empty());
+        assert!(items[0].extra.is_none());
+        assert_eq!(items[0].tags, crate::lsp::DiagTags::NONE);
         assert!(
             items[0]
                 .code_href
@@ -571,13 +592,41 @@ mod tests {
     }
 
     #[test]
-    fn json_array_payload_accepts_wrapped_stdout_and_empty_output() {
-        let wrapped = b"ruff header\n[{\"filename\":\"a.py\",\"location\":{\"row\":1,\"column\":1},\"message\":\"m\"}]\n";
+    fn ruff_json_accepts_wrapped_stdout_and_empty_output() {
+        let wrapped = b"ruff header\n[{\"filename\":\"a.py\",\"location\":{\"row\":1,\"column\":1},\"message\":\"m\"}]\ntrailer\n";
         let parsed = parse_ruff_check_json(wrapped, &[ws()]).unwrap();
         assert_eq!(parsed.get(&ws().join("a.py")).unwrap().len(), 1);
 
         let empty = parse_ruff_check_json(b" \n\t ", &[ws()]).unwrap();
         assert!(empty.is_empty());
+        assert!(parse_ruff_check_json(b"", &[ws()]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn truncated_or_non_utf8_ruff_json_is_an_error() {
+        let item = "{\"filename\":\"a.py\",\"location\":{\"row\":1,\"column\":1},\"message\":\"m\"}";
+        let truncated = format!("[{item},{item}");
+        assert!(parse_ruff_check_json(truncated.as_bytes(), &[ws()]).is_err());
+        let cut_mid_item = &truncated.as_bytes()[..truncated.len() - 5];
+        assert!(parse_ruff_check_json(cut_mid_item, &[ws()]).is_err());
+
+        let non_utf8 = b"[{\"filename\":\"a.py\",\"location\":{\"row\":1,\"column\":1},\"message\":\"\xff\xfe\"}]";
+        assert!(parse_ruff_check_json(non_utf8, &[ws()]).is_err());
+    }
+
+    #[test]
+    fn ruff_json_streams_through_a_small_buffer() {
+        // A 4 MB output parsed through a reader that hands out 7-byte chunks: items
+        // that straddle refills must parse the same as from one contiguous buffer.
+        let item = "{\"filename\":\"pkg/a.py\",\"location\":{\"row\":3,\"column\":5},\"code\":\"F401\",\"message\":\"unused \\\"x\\\"\",\"url\":\"https://docs.astral.sh/ruff/rules/f401\"}";
+        let count = 4 * 1024 * 1024 / item.len();
+        let raw = format!("[{}]", vec![item; count].join(","));
+        let reader = std::io::BufReader::with_capacity(7, raw.as_bytes());
+        let parsed = parse_ruff_check_reader(reader, &[ws()]).unwrap();
+        let items = parsed.get(&ws().join("pkg/a.py")).unwrap();
+        assert_eq!(items.len(), count);
+        assert_eq!(items[0].message.as_ref(), "unused \"x\"");
+        assert_eq!(items[0].code.as_deref(), Some("F401"));
     }
 
     #[test]

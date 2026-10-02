@@ -24,8 +24,8 @@ fn diagnostic(message: &'static str, severity: DiagSeverity, line: u32) -> Diagn
         code_href: None,
         message: Arc::from(message),
         source: Some(Arc::from("headless-test")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

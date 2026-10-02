@@ -12,8 +12,8 @@ fn diagnostic_copy_includes_code_and_normalized_message() {
         code_href: None,
         message: std::sync::Arc::<str>::from("Ошибка\\nПодробность"),
         source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     };
 
     assert_eq!(
@@ -42,8 +42,8 @@ fn test_valid_diagnostic_popup_cache_drops_stale_indices() {
         code_href: None,
         message: std::sync::Arc::<str>::from("Не используйте SELECT *"),
         source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     };
     let diagnostics = [&diagnostic];
     let cache = vec![(0, 1.0, 2.0, 3.0, 4.0), (3, 5.0, 6.0, 7.0, 8.0)];
@@ -65,8 +65,8 @@ fn diagnostic_popup_cache_keeps_unique_messages_and_deduplicates_exact_copies() 
         code_href: None,
         message: std::sync::Arc::<str>::from(message),
         source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     };
     let select_star = make_diagnostic("SQL119", "Не используйте SELECT *");
     let duplicate_select_star = make_diagnostic("SQL119", "Не используйте SELECT *");
@@ -711,8 +711,8 @@ fn test_diagnostic(source: &str, message: &str) -> crate::lsp::Diagnostic {
         code_href: None,
         message: std::sync::Arc::<str>::from(message),
         source: Some(std::sync::Arc::<str>::from(source)),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

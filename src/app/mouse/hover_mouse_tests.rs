@@ -26,8 +26,8 @@ fn sql_warning(
         code_href: None,
         message: std::sync::Arc::<str>::from(message),
         source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
-        quickfixes: Box::new([]),
-        tags: Box::new([]),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

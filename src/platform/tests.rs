@@ -885,6 +885,23 @@ fn managed_command_collects_stdout_stderr_and_status() {
 
 #[cfg(unix)]
 #[test]
+fn stdout_reader_command_drains_what_the_reader_leaves_unread() {
+    // 1 MiB of stdout overflows the pipe buffer: if the unread rest were not drained,
+    // the child would block on write and the call would time out.
+    let mut command = command_for("sh").unwrap();
+    command.args(["-c", "printf head; head -c 1048576 /dev/zero; printf err >&2; exit 3"]);
+    let output = run_command_stdout_with(&mut command, Duration::from_secs(5), |stdout| {
+        let mut head = [0u8; 4];
+        std::io::Read::read_exact(stdout, &mut head).map(|()| head)
+    })
+    .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(&output.stdout.unwrap(), b"head");
+    assert_eq!(output.stderr, b"err");
+}
+
+#[cfg(unix)]
+#[test]
 fn managed_streaming_command_forwards_stdout_and_stderr_lines() {
     let cancel = AtomicBool::new(false);
     let mut command = command_for("sh").unwrap();

@@ -223,7 +223,7 @@ impl Renderer {
                             [0.6, 0.6, 0.6, 1.0],
                         );
 
-                        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+                        let file_name = ide_panel.problem_group_name_at(idx);
                         let text_x = icon_x + icon_sz + 2.0 * s;
                         let text_y = current_y + item_h * 0.7;
 

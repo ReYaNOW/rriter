@@ -88,6 +88,15 @@ pub struct PendingBitmap {
     pub rgba: Vec<u8>,
 }
 
+/// A page bitmap being copied into its texture a strip of rows per frame (see `pump_page_uploads`);
+/// the texture joins `PdfTabState::textures` only once every row is written.
+#[derive(Debug)]
+pub struct PageUpload {
+    pub bitmap: PendingBitmap,
+    pub tex: glow::Texture,
+    pub next_row: u32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PdfLayout {
     pub margin: i32,
@@ -154,6 +163,7 @@ pub struct PdfTabState {
     pub scroll: ScrollState,
     pub textures: HashMap<usize, PageTexture>,
     pub pending_bitmaps: Vec<PendingBitmap>,
+    pub upload: Option<PageUpload>,
     pub requested: HashSet<(usize, u32)>,
     pub text: Vec<Option<Arc<PageText>>>,
     pub links: Vec<Vec<PageLink>>,
@@ -180,7 +190,7 @@ pub struct PdfTabState {
 impl PdfTabState {
     pub fn new(path: PathBuf, gens: Arc<DocGens>, phase: PdfPhase) -> Self {
         Self { path, doc: None, gens, phase, pages: Vec::new(), layout: PdfLayout::default(),
-            scroll: ScrollState::new(15.0), textures: HashMap::new(), pending_bitmaps: Vec::new(),
+            scroll: ScrollState::new(15.0), textures: HashMap::new(), pending_bitmaps: Vec::new(), upload: None,
             requested: HashSet::new(), text: Vec::new(), links: Vec::new(), text_requested: Vec::new(),
             search: PdfSearch::default(), selection: None, pending_copy: None, restore: None,
             hover_link: None, viewport: (0, 0), line_rects_buf: std::cell::Cell::new(Vec::new()), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, layout_scale: 1.0, layout_dirty: true, status_page: None }
@@ -320,7 +330,10 @@ impl PdfTabState {
         let wanted = self.wanted_range();
         let mut requests = Vec::new();
         for page in wanted {
+            // A bitmap already received (queued or mid-upload) must not be rendered again.
             if self.textures.get(&page).is_some_and(|texture| texture.r#gen == r#gen)
+                || self.upload.as_ref().is_some_and(|upload| upload.bitmap.page == page && upload.bitmap.r#gen == r#gen)
+                || self.pending_bitmaps.iter().any(|bitmap| bitmap.page == page && bitmap.r#gen == r#gen)
                 || !self.requested.insert((page, r#gen)) { continue; }
             let Some(geom) = self.pages.get(page) else { continue };
             let (width_px, _) = PdfLayout::raster_size(self.layout.page_w, geom);

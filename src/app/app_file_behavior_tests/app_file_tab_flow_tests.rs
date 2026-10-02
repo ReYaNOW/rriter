@@ -1119,8 +1119,8 @@ fn file_tab_test_diag(message: &str) -> crate::lsp::Diagnostic {
         code_href: None,
         message: std::sync::Arc::<str>::from(message),
         source: Some(std::sync::Arc::<str>::from("ty")),
-        quickfixes: Vec::new().into_boxed_slice(),
-        tags: Vec::new().into_boxed_slice(),
+        tags: crate::lsp::DiagTags::NONE,
+        extra: None,
     }
 }
 

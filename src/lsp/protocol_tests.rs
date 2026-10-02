@@ -3,6 +3,17 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 #[test]
+fn diagnostic_keeps_rare_fields_out_of_line() {
+    // 10k+ diagnostics stay alive on a big workspace; quick fixes live behind
+    // `Diagnostic::extra` and tags in one byte (was 120 bytes with both inline).
+    assert_eq!(std::mem::size_of::<Diagnostic>(), 96);
+    assert_eq!(DiagTags::from_lsp([1, 7]), DiagTags::from_lsp([1]));
+    assert!(DiagTags::from_lsp([2]).is_unnecessary_or_deprecated());
+    assert!(!DiagTags::from_lsp([7]).is_unnecessary_or_deprecated());
+    assert!(Diagnostic::extra_for_quickfixes(Vec::new()).is_none());
+}
+
+#[test]
 fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
     let text = "a\nпривет\n";
     let line_offsets = vec![0, 2, text.len()];
@@ -124,7 +135,8 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
     assert_eq!(diag.code.as_deref(), Some("F401"));
     assert_eq!(diag.source.as_deref(), Some("ruff"));
     assert_eq!(diag.message.as_ref(), "remove unused import\nnext");
-    assert_eq!(diag.quickfixes.len(), 1);
+    assert_eq!(diag.quickfixes().len(), 1);
+    assert!(diag.tags.is_unnecessary_or_deprecated());
 
     let workspace_body = br#"{"jsonrpc":"2.0","id":7,"result":{"items":[{"uri":"file:///tmp/ws/pkg/a.py","kind":"full","resultId":"r1","version":null,"items":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":9}},"severity":2,"source":"ty","message":"Unused `ty: ignore` directive","data":{"edits":{"file:///tmp/ws/pkg/a.py":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":9}},"newText":""}]},"fix_title":"Remove the unused suppression comment"}}]}]}}"#;
     let workspace_events = parse_workspace_diagnostics_frame(workspace_body, LspServerKind::Ty);
@@ -134,7 +146,8 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
             assert_eq!(path, &uri_to_path("file:///tmp/ws/pkg/a.py"));
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].source.as_deref(), Some("ty"));
-            assert!(items[0].quickfixes.is_empty());
+            assert!(items[0].quickfixes().is_empty());
+            assert!(items[0].extra.is_none());
         }
         other => panic!("unexpected event: {other:?}"),
     }
