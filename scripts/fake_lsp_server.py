@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import threading
 
 
 def read_message() -> dict | None:
@@ -23,11 +24,66 @@ def read_message() -> dict | None:
     return json.loads(body)
 
 
+WRITE_LOCK = threading.Lock()
+
+
 def write_message(message: dict) -> None:
     body = json.dumps(message, separators=(",", ":")).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
-    sys.stdout.buffer.write(body)
-    sys.stdout.buffer.flush()
+    # The delayed serverStatus timer writes from another thread.
+    with WRITE_LOCK:
+        sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
+        sys.stdout.buffer.write(body)
+        sys.stdout.buffer.flush()
+
+
+def server_status(quiescent: bool) -> None:
+    write_message(
+        {
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": {"health": "ok", "quiescent": quiescent},
+        }
+    )
+
+
+def record_init_options(params: dict) -> None:
+    """Append the received initializationOptions as one JSON line next to the script."""
+    path = Path(sys.argv[0])
+    path = path.with_name(path.name + ".init.jsonl")
+    line = json.dumps(params.get("initializationOptions"), separators=(",", ":"))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+def sibling_uri(uri: str) -> str | None:
+    """`dir/sibling.rs` next to a file:// URI; None when the URI has no usable directory."""
+    if not uri.startswith("file://"):
+        return None
+    directory, separator, _ = uri.rpartition("/")
+    if not separator or directory in ("file:", "file:/"):
+        return None
+    return f"{directory}/sibling.rs"
+
+
+def diagnostics_message(uri: str, version: int | None, text: str) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "method": "textDocument/publishDiagnostics",
+        "params": {
+            "uri": uri,
+            "version": version,
+            "diagnostics": [
+                {
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 1},
+                    },
+                    "message": text,
+                    "severity": 1,
+                }
+            ],
+        },
+    }
 
 
 def record_start() -> None:
@@ -49,10 +105,17 @@ def main() -> None:
     definition_never_answers = "_nodefinition" in mode
     # A server that answers textDocument/definition with a JSON-RPC error.
     definition_error = "_definitionerror" in mode
+    # rust-analyzer style: experimental/serverStatus after `initialized`.
+    send_server_status = "_serverstatus" in mode
+    # Also publish diagnostics for a file that was never opened (sibling.rs).
+    publish_unopened = "_unopened" in mode
+    log_init_options = "_initlog" in mode
     while message := read_message():
         method = message.get("method")
         request_id = message.get("id")
         if method == "initialize":
+            if log_init_options:
+                record_init_options(message.get("params") or {})
             write_message(
                 {
                     "jsonrpc": "2.0",
@@ -67,6 +130,9 @@ def main() -> None:
             )
         elif method == "initialized" and crash_after_initialize:
             return
+        elif method == "initialized" and send_server_status:
+            server_status(False)
+            threading.Timer(0.3, server_status, args=(True,)).start()
         elif method == "shutdown":
             write_message({"jsonrpc": "2.0", "id": request_id, "result": None})
         elif method == "exit":
@@ -127,6 +193,10 @@ def main() -> None:
                     },
                 }
             )
+            if publish_unopened:
+                sibling = sibling_uri(opened_uri)
+                if sibling is not None:
+                    write_message(diagnostics_message(sibling, None, "fake: unopened sibling"))
 
 
 if __name__ == "__main__":
