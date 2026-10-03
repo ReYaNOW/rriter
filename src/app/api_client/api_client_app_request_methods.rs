@@ -2,6 +2,42 @@ pub(crate) fn api_request_disconnect_message(request_id: u64) -> String {
     format!("HTTP-запрос #{request_id} неожиданно завершился")
 }
 
+#[cfg(test)]
+mod api_client_keymap_tests {
+    use super::*;
+    use crate::app::git_panel::GitBottomPane;
+
+    fn api_app_with_global_graph_command() -> (crate::app::App, crate::keymap::Chord) {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            panic!("test app must initialize");
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.ide_panel.open(crate::app::PanelId::ApiClient);
+        app.ide_panel.open(crate::app::PanelId::Git);
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("test chord parses");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::GitToggleGraph, chord);
+        app.keymap = crate::keymap::Keymap::build(&overrides);
+        (app, chord)
+    }
+
+    #[test]
+    fn api_client_runs_global_commands_when_no_text_field_is_focused() {
+        let (mut app, chord) = api_app_with_global_graph_command();
+        let event = crate::app::keyboard::KeyInput {
+            physical_key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyG),
+            logical_text: None,
+            text: None,
+            state: winit::event::ElementState::Pressed,
+            repeat: false,
+        };
+        assert!(app.handle_api_client_keyboard_input_with_chord(&event, Some(chord)), "API surface consumes the global command: event={event:?}");
+        assert_eq!(app.ide_panel.git.bottom_pane, GitBottomPane::Graph, "Global GitToggleGraph must run before the API catch-all: pane={:?}", app.ide_panel.git.bottom_pane);
+    }
+}
+
 fn api_request_disconnect_response(
     request_id: u64,
     spec_id: ApiSpecId,
@@ -416,6 +452,15 @@ impl crate::app::App {
             return true;
         }
         if self.ide_panel.api.focused.is_none() {
+            if key_event.state == winit::event::ElementState::Pressed
+                && self.run_bound_commands(
+                    chord,
+                    Some(crate::keymap::KeyContext::Global),
+                    key_event.repeat,
+                )
+            {
+                return true;
+            }
             if key_event.state == winit::event::ElementState::Pressed
                 && self.run_bound_commands(
                     chord,

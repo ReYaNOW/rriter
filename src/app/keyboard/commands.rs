@@ -81,21 +81,26 @@ impl App {
                 });
             }
             C::LspRestartServer | C::LspFixAll => {
-                let index = if command == C::LspRestartServer {
-                    self.file_path
+                if command == C::LspRestartServer {
+                    let extension = self.file_path
                         .as_deref()
                         .and_then(|path| path.extension())
                         .and_then(|extension| extension.to_str())
-                        .and_then(|extension| match extension {
-                            "py" | "pyi" => Some("ty"),
-                            "dart" => Some("dart"),
-                            _ => None,
-                        })
-                        .and_then(|name| self.ide_panel.lsp_servers.iter().position(|server| server.name == name))
-                } else {
-                    self.ide_panel.lsp_servers.first().map(|_| 0)
-                };
-                let Some(index) = index else {
+                        .unwrap_or_default();
+                    let names = crate::lsp::server_names_for_extension(extension);
+                    let indices: Vec<usize> = self.ide_panel.lsp_servers.iter().enumerate()
+                        .filter(|(_, server)| names.contains(&server.name))
+                        .map(|(index, _)| index)
+                        .collect();
+                    if indices.is_empty() {
+                        return CommandOutcome::Unavailable("Нет LSP-сервера активного документа");
+                    }
+                    for index in indices {
+                        self.handle_ui_click(UiId::LspServerRestart(index));
+                    }
+                    return CommandOutcome::Done;
+                }
+                let Some(index) = self.ide_panel.lsp_servers.first().map(|_| 0) else {
                     return CommandOutcome::Unavailable("Нет LSP-сервера активного документа");
                 };
                 if command == C::LspFixAll
@@ -104,11 +109,7 @@ impl App {
                 {
                     return CommandOutcome::Unavailable("Исправления недоступны");
                 }
-                self.handle_ui_click(if command == C::LspRestartServer {
-                    UiId::LspServerRestart(index)
-                } else {
-                    UiId::LspServerFixAll(index)
-                });
+                self.handle_ui_click(UiId::LspServerFixAll(index));
             }
             C::ApiImportOpenapiFile | C::ApiSendRequest | C::ApiMockToggleServer | C::ApiMockExportOpenapi => {
                 let api_open = self.active_tab_is_api_client()
@@ -190,7 +191,8 @@ impl App {
     }
 
     pub(crate) fn database_table_command_context_unowned(&self) -> bool {
-        self.ide_panel.database.table_modal.is_none()
+        !self.show_settings
+            && self.ide_panel.database.table_modal.is_none()
             && self.active_database_table_tab_id()
                 .and_then(|tab_id| self.database_table_meta_state(tab_id))
                 .is_some_and(|(_, state)| {

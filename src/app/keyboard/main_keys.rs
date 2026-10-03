@@ -221,6 +221,8 @@ impl App {
             return;
         }
 
+        if self.handle_keymap_settings_key(&key_event, chord) { return; }
+
         let query_review_open = self
             .active_database_query_meta_state()
             .is_some_and(|(_, state)| state.review.is_some());
@@ -241,8 +243,6 @@ impl App {
             }
             return;
         }
-
-        if self.handle_keymap_settings_key(&key_event, chord) { return; }
 
         let terminal_owns_chord = chord.is_some_and(|chord| {
             super::input_owner::terminal_intercepts(chord, crate::platform::CURRENT_PLATFORM)
@@ -396,6 +396,7 @@ impl App {
                 }
             }
             if key_event.state == ElementState::Pressed
+                && !self.show_settings
                 && self.database_table_command_context_unowned()
                 && self.run_bound_commands(
                     chord,
@@ -782,7 +783,7 @@ impl App {
                 return;
             }
 
-            if self.handle_api_client_keyboard_input_with_chord(&key_event, chord) {
+            if !self.show_settings && self.handle_api_client_keyboard_input_with_chord(&key_event, chord) {
                 return;
             }
 
@@ -889,6 +890,65 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keymap_recording_precedes_database_query_review_and_early_routes_respect_settings() {
+        let source = include_str!("main_keys.rs");
+        let handler = source.find("fn handle_main_keyboard_input_inner").expect("main handler exists");
+        let source = &source[handler..];
+        let capture = source.find("if self.handle_keymap_settings_key(&key_event, chord)").expect("recording capture route exists");
+        let query_review = source.find("let query_review_open =").expect("query review route exists");
+        assert!(capture < query_review, "recording capture must reject Enter before SQL review commits it: capture={capture}, review={query_review}");
+        assert!(source.contains("&& !self.show_settings\n                && self.database_table_command_context_unowned()"), "DatabaseTable early dispatch must defer while Settings is open");
+        assert!(source.contains("if !self.show_settings && self.handle_api_client_keyboard_input_with_chord"), "API early dispatch must defer while Settings is open");
+    }
+
+    #[test]
+    fn api_early_command_route_is_after_modal_and_text_input_owners() {
+        let source = include_str!("main_keys.rs");
+        let handler = source.find("fn handle_main_keyboard_input_inner").expect("main handler exists");
+        let source = &source[handler..];
+        let modal = source.find("if self.modal_dialog_open()").expect("modal route exists");
+        let database_table = source.find("self.database_table_command_context_unowned()").expect("database route exists");
+        let api = source.find("self.handle_api_client_keyboard_input_with_chord").expect("API route exists");
+        let generic = source.find("self.run_bound_commands(chord, None").expect("generic command route exists");
+        assert!(modal < database_table, "modal must own keyboard before DatabaseTable early dispatch: modal={modal}, table={database_table}");
+        assert!(database_table < api, "database panel routing precedes API early dispatch: table={database_table}, api={api}");
+        assert!(api < generic, "API handler owns keyboard before generic command dispatch: api={api}, generic={generic}");
+        assert!(source.contains("self.database_table_command_context_unowned()"), "DatabaseTable route checks modal and text-input ownership in its predicate");
+    }
+
+    #[test]
+    fn api_global_command_does_not_fire_through_main_handler_while_settings_is_open() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            panic!("test app must initialize");
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.show_settings = true;
+        app.ide_panel.open(crate::app::PanelId::ApiClient);
+        app.ide_panel.open(crate::app::PanelId::Git);
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("test chord parses");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::GitToggleGraph, chord);
+        app.keymap = crate::keymap::Keymap::build(&overrides);
+        app.modifiers = if crate::platform::CURRENT_PLATFORM == crate::platform::PlatformKind::Macos {
+            winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::ALT
+        } else {
+            winit::keyboard::ModifiersState::CONTROL | winit::keyboard::ModifiersState::ALT
+        };
+        let state = crate::app::events::host_loop::HeadlessLoopState::default();
+        let event = KeyInput {
+            physical_key: PhysicalKey::Code(KeyCode::KeyG),
+            logical_text: None,
+            text: None,
+            state: ElementState::Pressed,
+            repeat: false,
+        };
+        app.handle_main_key_input(&crate::app::events::host_loop::HostLoop::headless(&state), event);
+        assert_eq!(app.ide_panel.git.bottom_pane, crate::app::git_panel::GitBottomPane::Closed, "Settings must own the key before API/global command dispatch: pane={:?}", app.ide_panel.git.bottom_pane);
+    }
 
     fn terminal_open(panels: &crate::app::IdePanelState) -> bool {
         panels.is_open(crate::app::PanelId::Terminal)
@@ -1509,7 +1569,7 @@ mod tests {
         }
 
         let api_route = source
-            .find("if self.handle_api_client_keyboard_input_with_chord(&key_event, chord)")
+            .find("if !self.show_settings && self.handle_api_client_keyboard_input_with_chord(&key_event, chord)")
             .expect("API Client keyboard owner");
         let terminal_route = source
             .find("self.handle_terminal_keyboard_input(key_event);")
@@ -1527,7 +1587,7 @@ mod tests {
         assert!(dialog_window < route_apply);
         assert!(
             include_str!("../app_bootstrap.rs")
-                .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование")
+                .contains("{cmd:markdown.toggle_mode}\\tMarkdown: чтение / редактирование")
         );
     }
 }

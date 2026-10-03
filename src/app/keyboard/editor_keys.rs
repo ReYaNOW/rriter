@@ -158,17 +158,6 @@ pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum MarkdownEditorKeyAction {
-    CopySelection,
-    ReadonlyNotice,
-    ScrollLines(i8),
-    ScrollPages(i8),
-    ScrollStart,
-    ScrollEnd,
-    Consume,
-}
-
 fn markdown_editor_key_action(
     markdown_document: bool,
     read_mode: bool,
@@ -194,7 +183,30 @@ fn markdown_editor_key_action(
         primary_paste,
         primary_undo,
         primary_redo,
+        primary && physical_key == PhysicalKey::Code(KeyCode::KeyW),
     )
+}
+
+fn multicursor_keeps_bound_edit_command(
+    keymap: &crate::keymap::Keymap,
+    chord: crate::keymap::Chord,
+    alt: bool,
+) -> bool {
+    keymap.hit(crate::keymap::Command::EditPaste, chord)
+        || (!alt
+            && (keymap.hit(crate::keymap::Command::EditorUndo, chord)
+                || keymap.hit(crate::keymap::Command::EditorRedo, chord)))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MarkdownEditorKeyAction {
+    CopySelection,
+    ReadonlyNotice,
+    ScrollLines(i8),
+    ScrollPages(i8),
+    ScrollStart,
+    ScrollEnd,
+    Consume,
 }
 
 fn markdown_editor_key_action_with_commands(
@@ -209,6 +221,7 @@ fn markdown_editor_key_action_with_commands(
     paste_bound: bool,
     undo_bound: bool,
     redo_bound: bool,
+    expand_selection_bound: bool,
 ) -> Option<MarkdownEditorKeyAction> {
     if !markdown_document || !read_mode {
         return None;
@@ -241,7 +254,7 @@ fn markdown_editor_key_action_with_commands(
         PhysicalKey::Code(KeyCode::Home) => Some(MarkdownEditorKeyAction::ScrollStart),
         PhysicalKey::Code(KeyCode::End) => Some(MarkdownEditorKeyAction::ScrollEnd),
         PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight)
-        | PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyW)
+        | PhysicalKey::Code(KeyCode::KeyA)
             if primary =>
         {
             Some(MarkdownEditorKeyAction::Consume)
@@ -249,6 +262,7 @@ fn markdown_editor_key_action_with_commands(
         PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight) => {
             Some(MarkdownEditorKeyAction::Consume)
         }
+        _ if expand_selection_bound => Some(MarkdownEditorKeyAction::Consume),
         _ => None,
     }
 }
@@ -560,10 +574,7 @@ impl App {
                 || (!ctrl && !self.modifiers.alt_key()
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter)))
                 || chord.is_some_and(|chord| {
-                    !self.modifiers.alt_key()
-                        && (self.keymap.hit(crate::keymap::Command::EditPaste, chord)
-                            || self.keymap.hit(crate::keymap::Command::EditorUndo, chord)
-                            || self.keymap.hit(crate::keymap::Command::EditorRedo, chord))
+                    multicursor_keeps_bound_edit_command(&self.keymap, chord, self.modifiers.alt_key())
                 })
                 || (plain_navigation
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
@@ -601,6 +612,7 @@ impl App {
             chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditPaste, chord)),
             chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorUndo, chord)),
             chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorRedo, chord)),
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorExpandSelection, chord)),
         );
         if let Some(action) = markdown_action {
             match action {
@@ -1453,3 +1465,42 @@ impl App {
 }
 
 include!("editor_keys_tests.rs");
+
+#[cfg(test)]
+mod markdown_read_keymap_tests {
+    use super::*;
+
+    #[test]
+    fn markdown_read_mode_does_not_swallow_search_rebound_to_ctrl_w() {
+        let action = markdown_editor_key_action_with_commands(
+            true, true, PhysicalKey::Code(KeyCode::KeyW), true, false, false,
+            false, false, false, false, false, false,
+        );
+        assert_eq!(action, None, "SearchEditorOpen on Ctrl+W with expand_selection unbound must reach search: {action:?}");
+    }
+
+    #[test]
+    fn markdown_read_mode_consumes_bound_expand_selection() {
+        let action = markdown_editor_key_action_with_commands(
+            true, true, PhysicalKey::Code(KeyCode::KeyW), true, false, false,
+            false, false, false, false, false, true,
+        );
+        assert_eq!(action, Some(MarkdownEditorKeyAction::Consume), "bound expand_selection remains unavailable in read mode: {action:?}");
+    }
+}
+
+#[cfg(test)]
+mod multicursor_keymap_tests {
+    use super::*;
+
+    #[test]
+    fn rebound_alt_paste_preserves_multicursor_action() {
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "alt+v")
+            .expect("test chord parses");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::EditPaste, chord);
+        let keymap = crate::keymap::Keymap::build(&overrides);
+        let keeps_cursors = multicursor_keeps_bound_edit_command(&keymap, chord, true);
+        assert!(keeps_cursors, "Alt+V is EditPaste and must preserve extra cursors: chord={chord:?}, keeps={keeps_cursors}");
+    }
+}

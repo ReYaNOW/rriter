@@ -50,7 +50,7 @@ pub(crate) fn is_default_chord(command: crate::keymap::Command, chord: crate::ke
 }
 
 pub(crate) fn terminal_intercepts(chord: Chord, platform: PlatformKind) -> bool {
-    let ctrl_letter = chord.mods.contains(Mods::CTRL)
+    let ctrl_byte = chord.mods.contains(Mods::CTRL)
         && matches!(
             chord.key,
             KeyCode::KeyA
@@ -79,6 +79,14 @@ pub(crate) fn terminal_intercepts(chord: Chord, platform: PlatformKind) -> bool 
                 | KeyCode::KeyX
                 | KeyCode::KeyY
                 | KeyCode::KeyZ
+                | KeyCode::Space
+                | KeyCode::Digit2
+                | KeyCode::Digit6
+                | KeyCode::Minus
+                | KeyCode::Slash
+                | KeyCode::BracketLeft
+                | KeyCode::Backslash
+                | KeyCode::BracketRight
         );
     let primary = if platform == PlatformKind::Macos {
         Mods::SUPER
@@ -87,7 +95,7 @@ pub(crate) fn terminal_intercepts(chord: Chord, platform: PlatformKind) -> bool 
     };
     let primary_terminal_shortcut = chord.mods.contains(primary)
         && matches!(chord.key, KeyCode::KeyC | KeyCode::KeyF | KeyCode::KeyV);
-    ctrl_letter || primary_terminal_shortcut
+    ctrl_byte || primary_terminal_shortcut
 }
 
 #[cfg(test)]
@@ -100,19 +108,25 @@ mod tests {
 
     #[test]
     fn terminal_intercepts_control_bytes_and_primary_copy() {
-        assert!(terminal_intercepts(chord(PlatformKind::Linux, "ctrl+c"), PlatformKind::Linux));
-        assert!(terminal_intercepts(chord(PlatformKind::Macos, "cmd+c"), PlatformKind::Macos));
-        assert!(terminal_intercepts(chord(PlatformKind::Macos, "ctrl+c"), PlatformKind::Macos));
-        assert!(!terminal_intercepts(chord(PlatformKind::Linux, "ctrl+space"), PlatformKind::Linux));
+        let linux_ctrl_c = chord(PlatformKind::Linux, "ctrl+c");
+        assert!(terminal_intercepts(linux_ctrl_c, PlatformKind::Linux), "PTY consumes Ctrl+C: {linux_ctrl_c:?}");
+        let mac_cmd_c = chord(PlatformKind::Macos, "cmd+c");
+        assert!(terminal_intercepts(mac_cmd_c, PlatformKind::Macos), "PTY consumes Cmd+C: {mac_cmd_c:?}");
+        let mac_ctrl_c = chord(PlatformKind::Macos, "ctrl+c");
+        assert!(terminal_intercepts(mac_ctrl_c, PlatformKind::Macos), "PTY consumes Ctrl+C on macOS: {mac_ctrl_c:?}");
+        for text in ["ctrl+space", "ctrl+2", "ctrl+6", "ctrl+-", "ctrl+/", "ctrl+[", "ctrl+\\", "ctrl+]"] {
+            let key = chord(PlatformKind::Linux, text);
+            assert!(terminal_intercepts(key, PlatformKind::Linux), "PTY consumes {text}: {key:?}");
+        }
     }
 
     #[test]
     fn terminal_command_exception_matches_only_its_original_chord() {
         let default = chord(PlatformKind::Linux, "ctrl+shift+f");
         let reassigned = chord(PlatformKind::Linux, "ctrl+p");
-        assert!(terminal_intercepts(default, PlatformKind::Linux));
-        assert!(terminal_intercepts(reassigned, PlatformKind::Linux));
-        assert!(is_default_chord(crate::keymap::Command::SearchProjectOpen, default, PlatformKind::Linux));
-        assert!(!is_default_chord(crate::keymap::Command::SearchProjectOpen, reassigned, PlatformKind::Linux));
+        assert!(terminal_intercepts(default, PlatformKind::Linux), "PTY consumes default Ctrl+Shift+F: {default:?}");
+        assert!(terminal_intercepts(reassigned, PlatformKind::Linux), "PTY consumes reassigned Ctrl+P as a control byte: {reassigned:?}");
+        assert!(is_default_chord(crate::keymap::Command::SearchProjectOpen, default, PlatformKind::Linux), "default search chord matches: {default:?}");
+        assert!(!is_default_chord(crate::keymap::Command::SearchProjectOpen, reassigned, PlatformKind::Linux), "reassigned chord is not the search default: {reassigned:?}");
     }
 }
