@@ -1,5 +1,6 @@
 mod dart_workspace;
 mod rooted_language;
+mod lsp_manager_rust;
 mod rust_workspace;
 mod ruff_workspace;
 

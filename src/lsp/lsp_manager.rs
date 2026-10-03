@@ -22,7 +22,7 @@ mod language_route_tests {
             LspManager::language_for_ext(concat!("da", "rt")),
             Some(LangRoute::Rooted(rooted_language::RootedLanguage::Dart))
         );
-        assert_eq!(LspManager::language_for_ext("rs"), None);
+        assert_eq!(LspManager::language_for_ext("rs"), Some(LangRoute::Rooted(rooted_language::RootedLanguage::Rust)));
         assert_eq!(LspManager::language_for_ext("PY"), None);
         assert_eq!(LspManager::language_for_ext("txt"), None);
     }
@@ -68,6 +68,17 @@ pub struct LspManager {
     active_workspaces: Vec<PathBuf>,
     open_python_files: HashMap<crate::platform::PathKey, OpenPythonFile>,
     pub(super) dart: rooted_language::RootedWorkspaces,
+    pub(super) rust: rooted_language::RootedWorkspaces,
+    pub(super) rust_documents: HashMap<crate::platform::PathKey, rooted_language::OpenRootedFile>,
+    pub(super) rust_roots: HashMap<crate::platform::PathKey, rust_workspace::RustRootEntry>,
+    pub(super) rust_pending_docs: HashMap<crate::platform::PathKey, rooted_language::OpenRootedFile>,
+    pub(super) rust_tools: Option<rust_workspace::RustTools>,
+    pub(super) rust_roots_generation: u64,
+    pub(super) rust_last_health_message: Option<String>,
+    #[cfg(test)]
+    rust_tools_override_for_test: Option<rust_workspace::RustTools>,
+    #[cfg(test)]
+    rust_run_cmd: Option<std::sync::Arc<rust_workspace::RunCmd>>,
     pub(super) dart_jobs: HashMap<crate::platform::PathKey, dart_workspace::DartAnalyzerState>,
     pub(super) dart_job_roots: HashMap<crate::platform::PathKey, PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
@@ -114,6 +125,8 @@ impl LspManager {
         self.dart.status()
     }
 
+    pub fn rust_status(&self) -> LspServerStatus { self.rust.status() }
+
     pub fn diagnostic_generation(&self) -> u64 {
         self.diagnostic_generation
     }
@@ -127,6 +140,7 @@ impl LspManager {
         match ext {
             "py" | "pyi" => Some(LangRoute::Python),
             "dart" => Some(LangRoute::Rooted(rooted_language::RootedLanguage::Dart)),
+            "rs" => Some(LangRoute::Rooted(rooted_language::RootedLanguage::Rust)),
             _ => None,
         }
     }
@@ -137,6 +151,7 @@ impl LspManager {
     ) -> &mut rooted_language::RootedWorkspaces {
         match lang {
             rooted_language::RootedLanguage::Dart => &mut self.dart,
+            rooted_language::RootedLanguage::Rust => &mut self.rust,
         }
     }
 
@@ -146,6 +161,7 @@ impl LspManager {
     ) -> &rooted_language::RootedWorkspaces {
         match lang {
             rooted_language::RootedLanguage::Dart => &self.dart,
+            rooted_language::RootedLanguage::Rust => &self.rust,
         }
     }
 
@@ -168,6 +184,17 @@ impl LspManager {
             active_workspaces: Vec::new(),
             open_python_files: HashMap::new(),
             dart: rooted_language::RootedWorkspaces::new(rooted_language::RootedLanguage::Dart, true),
+            rust: rooted_language::RootedWorkspaces::new(rooted_language::RootedLanguage::Rust, true),
+            rust_documents: HashMap::new(),
+            rust_roots: HashMap::new(),
+            rust_pending_docs: HashMap::new(),
+            rust_tools: None,
+            rust_roots_generation: 0,
+            rust_last_health_message: None,
+            #[cfg(test)]
+            rust_tools_override_for_test: None,
+            #[cfg(test)]
+            rust_run_cmd: None,
             dart_jobs: HashMap::new(),
             dart_job_roots: HashMap::new(),
             diagnostics: HashMap::new(),
@@ -354,6 +381,7 @@ impl LspManager {
     pub fn set_workspaces(&mut self, workspaces: Vec<PathBuf>) {
         self.workspaces = crate::platform::dedup_paths(workspaces);
         self.reconfigure_dart_workspaces();
+        self.refresh_rust_resolution();
         if self.dart.open_files().is_empty() {
             self.schedule_configured_dart_projects();
         }
@@ -444,6 +472,10 @@ impl LspManager {
     }
 
     pub fn restart_server(&mut self, name: &str) {
+        if name == RUST_ANALYZER_SERVER.program {
+            self.refresh_rust_resolution();
+            return;
+        }
         if name == DART_SERVER.program {
             self.dart.set_enabled(true);
             self.dart.clear_missing();
@@ -479,6 +511,10 @@ impl LspManager {
     }
 
     pub fn set_server_enabled(&mut self, name: &str, enabled: bool) {
+        if name == RUST_ANALYZER_SERVER.program {
+            self.set_rust_enabled(enabled);
+            return;
+        }
         if name == DART_SERVER.program {
             if enabled {
                 self.dart.set_enabled(true);
@@ -564,7 +600,7 @@ impl LspManager {
     }
 
     /// Лёгкая информация о серверах без клонирования логов.
-    pub fn server_summaries(&self) -> [LspServerSummary<'_>; 3] {
+    pub fn server_summaries(&self) -> [LspServerSummary<'_>; 4] {
         [
             LspServerSummary {
                 name: RUFF_SERVER.program,
@@ -587,6 +623,11 @@ impl LspManager {
                     .get(dart_workspace::DART_SERVER_NAME)
                     .map_or(0, Vec::len),
             },
+            LspServerSummary {
+                name: RUST_ANALYZER_SERVER.program,
+                status: self.rust.status_ref(),
+                log_count: self.server_logs.get(RUST_ANALYZER_SERVER.program).map_or(0, Vec::len),
+            },
         ]
     }
 
@@ -607,6 +648,7 @@ impl LspManager {
             .get(dart_workspace::DART_SERVER_NAME)
             .cloned()
             .unwrap_or_default();
+        let rust_logs = self.server_logs.get(RUST_ANALYZER_SERVER.program).cloned().unwrap_or_default();
         vec![
             LspServerInfo {
                 name: RUFF_SERVER.program,
@@ -622,6 +664,11 @@ impl LspManager {
                 name: dart_workspace::DART_SERVER_NAME,
                 status: self.dart_status(),
                 logs: dart_logs,
+            },
+            LspServerInfo {
+                name: RUST_ANALYZER_SERVER.program,
+                status: self.rust_status(),
+                logs: rust_logs,
             },
         ]
     }
@@ -658,6 +705,7 @@ impl LspManager {
         let root = self.rooted(lang).root_for_open_path(path)?.to_path_buf();
         let executable = match lang {
             rooted_language::RootedLanguage::Dart => dart_workspace::dart_executable_for_root(&root),
+            rooted_language::RootedLanguage::Rust => self.rust_executable_for_root(&root)?,
         };
         let ui_waker = self.ui_waker.clone();
         self.rooted_mut(lang)
@@ -709,6 +757,9 @@ impl LspManager {
                 match lang {
                     rooted_language::RootedLanguage::Dart => {
                         self.open_dart_document(abs_path, Arc::<str>::from(text), version);
+                    }
+                    rooted_language::RootedLanguage::Rust => {
+                        self.open_rust_document(abs_path, Arc::<str>::from(text), version);
                     }
                 }
             }
@@ -765,13 +816,20 @@ impl LspManager {
             self.mark_diagnostics_changed();
             }
             LangRoute::Rooted(lang) => {
-                if self.rooted(lang).open_files().contains_key(&crate::platform::PathKey::new(&abs_path)) {
+                let path_key = crate::platform::PathKey::new(&abs_path);
+                let is_open = self.rooted(lang).open_files().contains_key(&path_key);
+                let is_rust_pending = lang == rooted_language::RootedLanguage::Rust
+                    && self.rust_documents.contains_key(&path_key);
+                if is_open || is_rust_pending {
                     self.current_path = Some(abs_path.clone());
                     self.current_python_file = None;
                     self.current_python_lines = None;
                     match lang {
                         rooted_language::RootedLanguage::Dart => {
                             self.change_dart_document(abs_path, Arc::<str>::from(text), version);
+                        }
+                        rooted_language::RootedLanguage::Rust => {
+                            self.change_rust_document(abs_path, Arc::<str>::from(text), version);
                         }
                     }
                 }
@@ -976,6 +1034,7 @@ impl LspManager {
                 }
                 match lang {
                     rooted_language::RootedLanguage::Dart => self.close_dart_document(&abs_path),
+                    rooted_language::RootedLanguage::Rust => self.close_rust_document(&abs_path),
                 }
             }
         }

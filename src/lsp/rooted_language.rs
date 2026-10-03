@@ -1,4 +1,4 @@
-use super::{DART_SERVER, Diagnostic, LspEvent, LspProcess, LspServerStatus};
+use super::{DART_SERVER, RUST_ANALYZER_SERVER, Diagnostic, LspEvent, LspProcess, LspServerStatus};
 use crate::platform::{PathKey, ToolKind};
 use crate::ui_waker::UiWaker;
 use std::collections::HashMap;
@@ -8,12 +8,14 @@ use std::sync::Arc;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RootedLanguage {
     Dart,
+    Rust,
 }
 
 impl RootedLanguage {
     pub fn server_def(self) -> &'static super::LspServerDef {
         match self {
             Self::Dart => &DART_SERVER,
+            Self::Rust => &RUST_ANALYZER_SERVER,
         }
     }
 
@@ -49,16 +51,19 @@ impl RootedLanguage {
                     .or_else(|| configured.cloned())
                     .or_else(|| Some(file_dir.to_path_buf()))
             }
+            Self::Rust => super::rust_workspace::cargo_root_for_path(path, workspaces, locate),
         }
     }
 
     pub fn tool_kind(self) -> ToolKind {
         match self {
             Self::Dart => ToolKind::Dart,
+            Self::Rust => ToolKind::RustAnalyzer,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct OpenRootedFile {
     pub path: PathBuf,
     pub root: PathBuf,
@@ -103,6 +108,7 @@ impl RootedWorkspaces {
     pub fn new(lang: RootedLanguage, enabled: bool) -> Self {
         let init_options = match lang {
             RootedLanguage::Dart => Some(super::dart_workspace::DART_INIT_OPTIONS.clone()),
+            RootedLanguage::Rust => None,
         };
         Self {
             lang,
@@ -137,6 +143,19 @@ impl RootedWorkspaces {
     pub fn clear_missing(&mut self) {
         self.missing = false;
         self.recompute_status(false);
+    }
+
+    pub(super) fn set_pending_status(&mut self, pending: bool) {
+        self.recompute_status(pending);
+    }
+
+    pub(super) fn apply_server_status(
+        &mut self,
+        busy: bool,
+        health: ServerHealth,
+    ) {
+        self.busy = busy;
+        self.health = Some(health);
     }
 
     pub fn open_document(
@@ -183,7 +202,9 @@ impl RootedWorkspaces {
             process.notify_close(&open.path);
         }
         self.remove_live_diagnostics(&open.path);
-        self.closed_documents.push(open.path);
+        if self.lang == RootedLanguage::Dart {
+            self.closed_documents.push(open.path);
+        }
         let still_open = self.open_files.values().any(|file| crate::platform::paths_equal(&file.root, &open.root));
         (!still_open).then_some(root_key)
     }
@@ -321,7 +342,7 @@ impl RootedWorkspaces {
         self.recompute_status(false);
     }
 
-    fn recompute_status(&mut self, has_pending: bool) {
+    pub(super) fn recompute_status(&mut self, has_pending: bool) {
         self.status = if !self.enabled { LspServerStatus::Disabled }
         else if self.missing { LspServerStatus::Missing }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Crashed) { LspServerStatus::Crashed }

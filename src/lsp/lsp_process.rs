@@ -303,6 +303,7 @@ fn spawn_server(
     workspace: Option<&Path>,
     event_tx: WakeSender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+    init_options: Option<serde_json::Value>,
 ) -> io::Result<SpawnedProcess> {
     let mut cmd = command_for_server(def, executable, workspace)?;
     cmd.stdin(Stdio::piped())
@@ -382,13 +383,14 @@ fn spawn_server(
                     continue;
                 }
 
-                dispatch_frame_for_server(
+                dispatch_frame_for_server_with_init_options(
                     &body,
                     &event_tx,
                     def.kind,
                     def.kind.name(),
                     &reader_out_tx,
                     &pending_requests,
+                    init_options.as_ref(),
                 );
             }
         })
@@ -679,6 +681,7 @@ fn run_supervisor_with_init_options(
             workspaces.first().map(|p| p.as_path()),
             event_tx.clone(),
             pending_requests.clone(),
+            init_options.clone(),
         ) {
             Ok(p) => p,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {

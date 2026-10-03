@@ -618,6 +618,26 @@ pub(super) fn dispatch_frame_for_server(
     out_tx: &Sender<Vec<u8>>,
     pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) {
+    dispatch_frame_for_server_with_init_options(
+        body,
+        event_tx,
+        server,
+        server_name,
+        out_tx,
+        pending_requests,
+        None,
+    );
+}
+
+pub(super) fn dispatch_frame_for_server_with_init_options(
+    body: &[u8],
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
+    server: LspServerKind,
+    server_name: &'static str,
+    out_tx: &Sender<Vec<u8>>,
+    pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+    init_options: Option<&serde_json::Value>,
+) {
     let header = match serde_json::from_slice::<RpcHeader<'_>>(body) {
         Ok(header) => header,
         Err(e) => {
@@ -826,16 +846,16 @@ pub(super) fn dispatch_frame_for_server(
                 {
                     let values = items
                         .iter()
-                        .map(|item| configuration_response_for(server, item, None).to_string())
+                        .map(|item| configuration_response_for(server, item, init_options).to_string())
                         .collect::<Vec<_>>();
                     if values.is_empty() {
-                        configuration_response_for(server, &serde_json::Value::Null, None)
+                        configuration_response_for(server, &serde_json::Value::Null, init_options)
                             .to_string()
                     } else {
                         values.join(",")
                     }
                 } else {
-                    configuration_response_for(server, &serde_json::Value::Null, None).to_string()
+                    configuration_response_for(server, &serde_json::Value::Null, init_options).to_string()
                 };
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());

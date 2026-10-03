@@ -174,7 +174,13 @@ impl LspManager {
         if let Some(proc) = &mut self.ty_process {
             proc.poll(&mut all);
         }
-        self.poll_dart_processes(&mut all);
+        for lang in [
+            rooted_language::RootedLanguage::Dart,
+            rooted_language::RootedLanguage::Rust,
+        ] {
+            self.rooted_mut(lang).poll_processes(&mut all);
+        }
+        self.poll_rust_root_jobs();
 
         // Обновляем кешированные диагностики и статусы
         let mut received_diagnostics = 0usize;
@@ -245,7 +251,7 @@ impl LspManager {
                             if is_dart {
                                 for diagnostic in items.iter_mut() {
                                     diagnostic.source =
-                                        Some(Arc::<str>::from(dart_workspace::DART_SERVER_NAME));
+                                    Some(Arc::<str>::from(dart_workspace::DART_SERVER_NAME));
                                 }
                             }
                             self.compact_diagnostic_text(items, Some(&mut batch_messages));
@@ -284,6 +290,12 @@ impl LspManager {
                     if *server == LspServerKind::Dart {
                         if *status == LspServerStatus::Missing {
                             self.mark_dart_missing();
+                        }
+                        continue;
+                    }
+                    if *server == LspServerKind::RustAnalyzer {
+                        if *status == LspServerStatus::Missing {
+                            self.rust.mark_missing();
                         }
                         continue;
                     }
@@ -346,6 +358,27 @@ impl LspManager {
                         created_at: now,
                     });
                     trim_lsp_logs(logs, now);
+                }
+                LspEvent::ServerStatus { server, quiescent, health, message } => {
+                    if *server != LspServerKind::RustAnalyzer {
+                        continue;
+                    }
+                    self.rust.apply_server_status(!*quiescent, *health);
+                    if *health == rooted_language::ServerHealth::Error
+                        && message.as_ref() != self.rust_last_health_message.as_ref()
+                    {
+                        if let Some(message) = message {
+                            self.server_logs.entry(RUST_ANALYZER_SERVER.program)
+                                .or_default()
+                                .push(LogEntry {
+                                    text: format!("[LSP] {message}"),
+                                    spans: Vec::new(),
+                                    folds: Vec::new(),
+                                    created_at: Instant::now(),
+                                });
+                        }
+                    }
+                    self.rust_last_health_message = message.clone();
                 }
                 _ => {}
             }

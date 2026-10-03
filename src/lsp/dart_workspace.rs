@@ -177,6 +177,7 @@ impl LspManager {
                 .dart_jobs
                 .get(root)
                 .is_none_or(|state| state.job.is_none()),
+            super::rooted_language::RootedLanguage::Rust => true,
         }
     }
 
@@ -220,10 +221,6 @@ impl LspManager {
 
     pub(super) fn dart_document_version(&self, path: &Path) -> Option<i32> {
         self.dart.document_version(path)
-    }
-
-    pub(super) fn poll_dart_processes(&mut self, events: &mut Vec<super::LspEvent>) {
-        self.dart.poll_processes(events);
     }
 
     pub(super) fn poll_dart_workspace_diagnostics(&mut self) -> usize {
@@ -305,6 +302,9 @@ impl LspManager {
             return;
         };
         if let super::LangRoute::Rooted(lang) = route {
+            if lang != super::rooted_language::RootedLanguage::Dart {
+                return;
+            }
             if let Some(root) = self.rooted(lang).root_for_open_path(path).map(Path::to_path_buf) {
                 self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
             }
@@ -324,8 +324,14 @@ impl LspManager {
                     super::rooted_language::RootedLanguage::Dart => {
                         dart_root_for_path(path, &self.workspaces).path
                     }
+                    super::rooted_language::RootedLanguage::Rust => {
+                        super::rust_workspace::nearest_cargo_toml_dir(path, &self.workspaces)
+                            .unwrap_or_else(|| path.parent().unwrap_or(path).to_path_buf())
+                    }
                 });
-            self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
+            if lang == super::rooted_language::RootedLanguage::Dart {
+                self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
+            }
         }
     }
 
