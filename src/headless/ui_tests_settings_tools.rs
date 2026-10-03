@@ -216,8 +216,10 @@ fn headless_settings_tools_row_buttons_leave_room_for_tool_status() {
     open_general_settings(&mut session);
     let state = dump(&mut session);
 
-    // `SettingsOpenDirectory(0)` starts at the content column where row labels are drawn.
-    let [content_x, ..] = ui_rect(&state, "SettingsOpenDirectory(0)");
+    // The Rust Analyzer row makes the directory buttons scroll below the initial viewport.
+    // The General tab's right edge is 40 px left of the tool content column.
+    let [tab_x, _, tab_w, _] = ui_rect(&state, "SettingsTab(1)");
+    let content_x = tab_x + tab_w + 40.0;
     let [refresh_x, _, refresh_w, _] = ui_rect(&state, "SettingsRefreshTools");
     let content_w = refresh_x + refresh_w - content_x;
     let [pick_x, ..] = ui_rect(&state, &format!("SettingsToolPick({})", ToolKind::Git.index()));
