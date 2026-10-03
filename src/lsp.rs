@@ -1,4 +1,5 @@
 mod dart_workspace;
+mod rooted_language;
 mod ruff_workspace;
 
 include!("lsp/lsp_process.rs");
