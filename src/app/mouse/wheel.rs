@@ -797,7 +797,7 @@ impl App {
                 dy,
                 self.keymap_settings.max_scroll,
             );
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return;
         }
 

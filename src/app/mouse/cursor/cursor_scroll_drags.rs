@@ -282,6 +282,22 @@ impl App {
             return true;
         }
 
+        if self.keymap_settings.scroll.is_dragging {
+            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsKeymapScrollY) {
+                let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, self.keymap_settings.max_scroll,
+                    self.keymap_settings.scroll.current, 6.0, 36.0,
+                    [0.7, 0.33, 0.54, 1.0],
+                );
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.keymap_settings.scroll, bar.geometry(s), 0.0, py,
+                );
+            }
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return true;
+        }
+
         if self.tool_installer.log_scroll_is_dragging() {
             if let Some(rect) = self
                 .ui_registry

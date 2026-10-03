@@ -16,16 +16,16 @@ impl App {
             UiId::SettingsTab(idx) => {
                 self.keymap_settings.cancel_recording();
                 self.settings_tab = idx;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             }
             UiId::SettingsKeymapFilter => {
                 self.keymap_settings.filter_focused = true;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             }
             UiId::SettingsKeymapAdd(index) => {
                 if let Some(info) = crate::keymap::COMMANDS.get(index) {
                     self.keymap_settings.begin_recording(info.command);
-                    self.window.as_ref().unwrap().request_redraw();
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
                 }
             }
             UiId::SettingsKeymapRemove(index, chord_index) => {
@@ -52,7 +52,7 @@ impl App {
             }
             UiId::SettingsKeymapConflictCancel => {
                 self.keymap_settings.cancel_recording();
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             }
             UiId::SettingsKeymapConflictAccept => {
                 if let Some((command, chord, owners)) = self.keymap_settings.confirm_conflict() {

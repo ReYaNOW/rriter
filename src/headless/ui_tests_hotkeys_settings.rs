@@ -141,9 +141,7 @@ fn headless_hotkeys_settings_recording_owns_terminal_chord_before_pty() {
     assert!(session.app.ide_panel.terminal_focused, "terminal did not retain focus before opening Settings");
     session.app.ide_panel.terminal_focused = false;
     begin_recording(&mut session, Command::GitRefresh, "refresh");
-    // Settings is modal, so the terminal cannot receive a focus click while recording.
     session.app.ide_panel.terminal_focused = true;
-    assert!(session.app.ide_panel.terminal_focused, "opening Settings changed terminal focus");
 
     run_ok(&mut session, "key ctrl+e\nwait 150\n");
 
