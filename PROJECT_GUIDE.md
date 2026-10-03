@@ -1659,6 +1659,7 @@ Input:
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
+* `src/keymap.rs` and `src/keymap/defaults.rs` -> command metadata, physical-key chords, parsing, validation, overrides, and resolved keymaps.
 * `src/app/mouse.rs` -> mouse module shell.
 * `src/app/mouse/input.rs` -> mouse button module shell + shared click helpers.
 * `src/app/mouse/input/mouse_dispatch.rs` -> `handle_main_mouse_input_inner`: ordered press/release phase dispatch.

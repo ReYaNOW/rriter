@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::app::events::host_loop::HostLoop;
+use crate::keymap::parse_key_token;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey, SmolStr};
 
@@ -69,65 +70,18 @@ impl KeyInput {
             }
             modifiers |= modifier;
         };
-        let lower = key.to_ascii_lowercase();
-        let (code, logical) = match lower.as_str() {
-            "enter" => (KeyCode::Enter, Some("\r")),
-            "tab" => (KeyCode::Tab, Some("\t")),
-            "escape" | "esc" => (KeyCode::Escape, Some("\x1b")),
-            "backspace" => (KeyCode::Backspace, Some("\x08")),
-            "delete" => (KeyCode::Delete, None),
-            "space" => (KeyCode::Space, Some(" ")),
-            "up" => (KeyCode::ArrowUp, None),
-            "down" => (KeyCode::ArrowDown, None),
-            "left" => (KeyCode::ArrowLeft, None),
-            "right" => (KeyCode::ArrowRight, None),
-            "home" => (KeyCode::Home, None),
-            "end" => (KeyCode::End, None),
-            "pageup" => (KeyCode::PageUp, None),
-            "pagedown" => (KeyCode::PageDown, None),
-            "insert" => (KeyCode::Insert, None),
-            "f1" => (KeyCode::F1, None),
-            "f2" => (KeyCode::F2, None),
-            "f3" => (KeyCode::F3, None),
-            "f4" => (KeyCode::F4, None),
-            "f5" => (KeyCode::F5, None),
-            "f6" => (KeyCode::F6, None),
-            "f7" => (KeyCode::F7, None),
-            "f8" => (KeyCode::F8, None),
-            "f9" => (KeyCode::F9, None),
-            "f10" => (KeyCode::F10, None),
-            "f11" => (KeyCode::F11, None),
-            "f12" => (KeyCode::F12, None),
-            "." => (KeyCode::Period, Some(".")),
-            "," => (KeyCode::Comma, Some(",")),
-            "/" => (KeyCode::Slash, Some("/")),
-            "-" => (KeyCode::Minus, Some("-")),
-            "=" => (KeyCode::Equal, Some("=")),
-            ";" => (KeyCode::Semicolon, Some(";")),
-            "'" => (KeyCode::Quote, Some("'")),
-            "[" => (KeyCode::BracketLeft, Some("[")),
-            "]" => (KeyCode::BracketRight, Some("]")),
-            "\\" => (KeyCode::Backslash, Some("\\")),
-            "`" => (KeyCode::Backquote, Some("`")),
-            _ => {
-                let bytes = lower.as_bytes();
-                if bytes.len() == 1 && bytes[0].is_ascii_lowercase() {
-                    let code = LETTER_CODES[(bytes[0] - b'a') as usize];
-                    let text = if modifiers.contains(ModifiersState::SHIFT) {
-                        key.to_ascii_uppercase()
-                    } else {
-                        lower
-                    };
-                    return Ok((Self::pressed(code, &text, modifiers), modifiers));
-                }
-                if bytes.len() == 1 && bytes[0].is_ascii_digit() {
-                    let code = DIGIT_CODES[(bytes[0] - b'0') as usize];
-                    return Ok((Self::pressed(code, &lower, modifiers), modifiers));
-                }
-                return Err(format!("unknown key token '{key}'"));
+        let (code, logical) = parse_key_token(key)?;
+        let logical_text = logical.map(str::to_string).or_else(|| {
+            if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() {
+                Some(if modifiers.contains(ModifiersState::SHIFT) && key.as_bytes()[0].is_ascii_alphabetic() {
+                    key.to_ascii_uppercase()
+                } else {
+                    key.to_ascii_lowercase()
+                })
+            } else {
+                None
             }
-        };
-        let logical_text = logical.map(SmolStr::new);
+        }).map(SmolStr::new);
         let text = if modifiers.intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
             || matches!(code, KeyCode::Escape | KeyCode::Backspace)
         {
@@ -138,19 +92,6 @@ impl KeyInput {
         Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, text, state: ElementState::Pressed, repeat: false }, modifiers))
     }
 
-    fn pressed(code: KeyCode, logical: &str, modifiers: ModifiersState) -> Self {
-        Self {
-            physical_key: PhysicalKey::Code(code),
-            logical_text: Some(SmolStr::new(logical)),
-            text: if modifiers.intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER) {
-                None
-            } else {
-                Some(SmolStr::new(logical))
-            },
-            state: ElementState::Pressed,
-            repeat: false,
-        }
-    }
 }
 
 fn modifier_token(token: &str) -> Option<ModifiersState> {
@@ -162,19 +103,6 @@ fn modifier_token(token: &str) -> Option<ModifiersState> {
         _ => None,
     }
 }
-
-const LETTER_CODES: [KeyCode; 26] = [
-    KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE,
-    KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ,
-    KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM, KeyCode::KeyN, KeyCode::KeyO,
-    KeyCode::KeyP, KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT,
-    KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX, KeyCode::KeyY,
-    KeyCode::KeyZ,
-];
-const DIGIT_CODES: [KeyCode; 10] = [
-    KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4,
-    KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9,
-];
 
 /// A key combo held down by [`App::press_key_combo`]: the matching release and the modifiers
 /// to put back when the combo ends.
@@ -233,6 +161,12 @@ mod tests {
             let (input, _) = KeyInput::parse_combo(combo).unwrap();
             assert_eq!(input.physical_key, PhysicalKey::Code(code), "{combo}");
             assert_eq!(input.logical_text.as_deref(), logical, "{combo}");
+            if logical.is_none() { assert_eq!(input.text, None, "{combo}"); }
+        }
+        for combo in ["delete", "up", "insert", "pause", "numpadenter"] {
+            let (input, _) = KeyInput::parse_combo(combo).unwrap();
+            assert_eq!(input.logical_text, None, "{combo}");
+            assert_eq!(input.text, None, "{combo}");
         }
         let (input, modifiers) = KeyInput::parse_combo("ctrl+shift+p").unwrap();
         assert_eq!(modifiers, ModifiersState::CONTROL | ModifiersState::SHIFT);

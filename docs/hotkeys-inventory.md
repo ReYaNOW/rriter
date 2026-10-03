@@ -19,9 +19,9 @@ Guard приведён из текущей ветки; лакс = дополни
 | main_keys.rs:721; file_tree_dialog.rs:457-507 | selection nonempty; !ctrl возвращает false; match KeyC/KeyX/KeyV | File tree focused: copy/cut/paste selection. | file_tree.copy/cut/paste — «Копировать/вырезать/вставить файлы» — FileTree — mod+c/x/v |
 | main_keys.rs:826-829; app_ide_tab_methods.rs:716-721 | ctrl && Pressed && switch_tab_from_keyboard(physical_key); helper matches PageDown => next, PageUp => previous | IDE tab strip cycles to next/previous tab; returns false for other keys and outside IDE (вне IDE Ctrl+PgUp/PgDn падает в редакторный PageUp/PageDown, editor_keys.rs:925-938). Стоит до финальной маршрутизации (main_keys.rs:826 < :841), поэтому работает и в фокусе терминала/поиска — контекст не Editor. | tabs.switch_next — «Следующая вкладка» — Global (IDE) — mod+pagedown; tabs.switch_previous — «Предыдущая вкладка» — Global (IDE) — mod+pageup |
 | main_keys.rs:57-66,832-839 | primary && Digit4 && terminal open && (terminal_focused || term_search_focused) | Close active terminal tab. | terminal.close_tab — «Закрыть вкладку терминала» — Terminal — mod+4 |
-| main_keys.rs:732-766 | ctrl && KeyC; сначала graph selection, далее git_logs_keyboard_copy_eligible(...) | IDE: копировать выделение Git graph/log, иначе continue dispatch. | git.copy_selection — «Копировать выделение Git» — Global — mod+c |
-| main_keys.rs:383-393 | Enter или NumpadEnter if ctrl | Активный SQL query: запуск. | database.query.run — «Выполнить SQL-запрос» — Database — mod+enter, mod+numpadenter |
-| main_keys.rs:394-400 | Space if ctrl | SQL completion. | database.query.complete — «Дополнение SQL» — Database — mod+space |
+| main_keys.rs:732-766 | ctrl && KeyC; сначала graph selection, далее git_logs_keyboard_copy_eligible(...) | IDE: копировать выделение Git graph/log, иначе continue dispatch. | git.copy_selection — «Копировать выделение Git» — Git — mod+c |
+| main_keys.rs:383-393 | Enter или NumpadEnter if ctrl | Активный SQL query: запуск. | database.query.run — «Выполнить SQL-запрос» — DatabaseQuery — mod+enter, mod+numpadenter |
+| main_keys.rs:394-400 | Space if ctrl | SQL completion. | database.query.complete — «Дополнение SQL» — DatabaseQuery — mod+space |
 | editor_keys.rs:440-447 | Pressed && ctrl && shift && KeyO && active_document_is_markdown() | Toggle Markdown TOC. | markdown.toggle_toc — «Оглавление Markdown» — Markdown — mod+shift+o |
 | editor_keys.rs:450-454,786-792 | welcome: KeyO if ctrl; editor: KeyO if ctrl | Open picker; dirty document asks confirmation; PDF filter can block. | file.open — «Открыть файл» — Editor (проверяется и на Welcome-сайте :452, т.е. активна в Editor и Welcome) — mod+o |
 | editor_keys.rs:455-483 | show_welcome: KeyQ if ctrl | Save window config and quit. Достижимо только на экране приветствия: welcome-ветка возвращает при любой клавише (:486) до центрального match. | app.quit — «Выйти из RRiter» — Welcome — mod+q |
@@ -42,8 +42,8 @@ Guard приведён из текущей ветки; лакс = дополни
 | pdf_tab/input.rs:5-20 | primary && !alt_key() && KeyC; active PDF and editor input focus | On Pressed copy selection; consumes event. | pdf.copy — «Копировать текст PDF» — Pdf — mod+c |
 | file_tree_dialog.rs:457-480 | nonempty selection; Delete/F2 physical key, no modifier test | Delete opens confirmation; F2 renames only one selected path. | file_tree.rename — «Переименовать файл» — FileTree — f2. Delete: голый Delete — Reserved (§2), умолчанием быть не может (spec §2.3) → фиксированная локальная ветка FileTree. |
 | image_tab.rs:184-214 | reject Control/Alt/Super/Shift and F1-F24, then Pressed Digit0 | Image tab resets fit (only with editor_has_input_focus, :186). | Решено: не команда. Голая цифра — NeedsModifier (spec §2.3), модифицированный вариант сменил бы умолчание → фиксированная локальная ветка Image (как навигация PDF, pdf_tab/input.rs:35-40); в RESERVED не нужна. |
-| database_table_edit_methods.rs:1178-1189 | KeyC/KeyZ if primary && focus.is_none(); Delete/Insert if focus.is_none() | Active DB table (no table_modal), no cell/filter focus. Фокус терминала не проверяется (:931-935, :1083-1085) — см. §4. | database.table.copy — «Копировать строки» — Database — mod+c; database.table.undo — «Отменить изменение таблицы» — Database — mod+z; database.table.add_row — «Добавить строку» — Database — insert (spec §2.3 допускает). Delete — Reserved → фиксированная ветка. |
-| database_table_edit_methods.rs:1139-1147 | filter_focus && primary && Space | Фокус в WHERE/ORDER BY: SQL-дополнение фильтра. | database.table.filter_complete — «Дополнение фильтра таблицы» — Database — mod+space |
+| database_table_edit_methods.rs:1178-1189 | KeyC/KeyZ if primary && focus.is_none(); Delete/Insert if focus.is_none() | Active DB table (no table_modal), no cell/filter focus. Фокус терминала не проверяется (:931-935, :1083-1085) — см. §4. | database.table.copy — «Копировать строки» — DatabaseTable — mod+c; database.table.undo — «Отменить изменение таблицы» — DatabaseTable — mod+z; database.table.add_row — «Добавить строку» — DatabaseTable — insert (spec §2.3 допускает). Delete — Reserved → фиксированная ветка. |
+| database_table_edit_methods.rs:1139-1147 | filter_focus && primary && Space | Фокус в WHERE/ORDER BY: SQL-дополнение фильтра. | database.table.filter_complete — «Дополнение фильтра таблицы» — DatabaseTable — mod+space |
 | editor_keys.rs:626-632 | alt && Enter (лакс: Ctrl+Alt/Shift+Alt+Enter тоже) | Editor: меню быстрых действий LSP. В Markdown read — readonly notice (editor_keys.rs:181). | lsp.code_actions — «Быстрые действия LSP» — Editor — alt+enter |
 | editor_keys.rs:186-199 | markdown read mode: KeyC if primary → CopySelection; ArrowLeft/Right, KeyA/KeyW if primary → Consume | Markdown read: копирование выделения рендера; select-all/expand глушатся. | edit.copy (тот же id); Consume проверяет edit.select_all/editor.expand_selection |
 | keyboard.rs:713-715 | editor search focused: KeyF if ctrl | Повторный Ctrl+F в поле поиска выделяет запрос. | search.editor.open (тот же id, другое состояние) |
@@ -145,14 +145,15 @@ run_bound_commands нужен только на входе API Client (spec §4.
 |---|---|---|
 | Pdf / Image | Exclusive | Single active-tab kind guard (editor_keys.rs:492-495); input handlers check active tab (pdf_tab/input.rs:7; image_tab.rs:218). |
 | Global / each local | Compatible | Global routes occur before final focus route (main_keys.rs:698-709,841-854). |
-| Editor / Database | Compatible | DB key path then later editor route (main_keys.rs:404-405,854). |
+| Editor / DatabaseQuery, DatabaseTable | Compatible | DB key path then later editor route (main_keys.rs:404-405,854). |
 | Editor / ApiClient | Compatible | API handler can return false (main_keys.rs:775-777; api_client_app_request_methods.rs:420-425). |
 | FileTree / Editor | Compatible | File tree helper may fall through, editor route follows (main_keys.rs:719-722,854). |
 | Terminal / Editor | Exclusive | Финальный маршрут — if/else: терминал (main_keys.rs:848-852) или редактор (:853-854); editor_has_input_focus ложен при terminal_focused/term_search_focused (app_file_tab_methods.rs:622-623). |
-| Terminal / Database, FileTree, ApiClient | Compatible | DB-хендлеры (main_keys.rs:303-404) и file-tree (:721) не проверяют фокус терминала (§4); API Client — панель может быть открыта при фокусе терминала. |
+| Terminal / DatabaseQuery, DatabaseTable, FileTree, ApiClient | Compatible | DB-хендлеры (main_keys.rs:303-404) и file-tree (:721) не проверяют фокус терминала (§4); API Client — панель может быть открыта при фокусе терминала. |
 | Welcome / Editor | Exclusive | show_welcome: welcome-match и return до центрального match (editor_keys.rs:450-487); editor_has_input_focus требует !show_welcome (app_file_tab_methods.rs:616). Нужен для app.quit vs tabs.close_all на mod+q. |
-| Pdf / Database, Image / Database | Exclusive | Один active_tab с одним kind: PDF/Image (editor_keys.rs:492), DB table/query (database_table_app_methods.rs:218-223; database_app_methods.rs:229-233). Только если Database = «активна вкладка БД» (spec §4.1), без панельных команд. database.refresh_selected (панель) ломает это — тогда Compatible. |
-| Markdown / Pdf, Image, Database | Exclusive | active_document_is_markdown требует EditorTabKind::Normal в IDE (markdown.rs:629-636). |
+| DatabaseQuery / DatabaseTable | Exclusive | `KeyContext::exclusive` перечисляет обе стороны этой пары. |
+| Pdf / DatabaseQuery, DatabaseTable; Image / DatabaseQuery, DatabaseTable | Compatible | В `KeyContext::exclusive` эти пары не перечислены; немаркированные пары совместимы по правилу ниже. |
+| Markdown / Pdf, Image, DatabaseQuery, DatabaseTable | Exclusive | `KeyContext::exclusive` перечисляет Markdown с этими четырьмя контекстами. |
 
 Unlisted context pairs default to compatible; exclusive pairs require evidence (spec risk R6: design spec:222).
 
@@ -194,14 +195,14 @@ Spec list has 24 commands, no defaults (docs/superpowers/specs/2026-10-03-hotkey
 | api.send_request | «Отправить запрос» — ApiClient | ApiTryRequest starts active request: api_client_app_click_methods.rs:735-737; id ui_ids.rs:122 | Active route/input; «Нет активного запроса». |
 | api.mock.toggle_server | «Запустить/остановить API Mock» — ApiClient | ApiMockServerToggle: api_client_app_click_methods.rs:280-282; id ui_ids.rs:158 | Mock configuration; «API Mock не настроен». |
 | api.mock.export_openapi | «Экспортировать OpenAPI» — ApiClient | ApiMockExportOpenApi triggers export: api_client_app_click_methods.rs:424-426; id ui_ids.rs:183 | Mock configuration; same. |
-| database.refresh_selected | «Обновить подключение БД» — Database | DatabaseRefresh calls refresh_selected_database: ui_database.rs:70; id ui_ids.rs:239 | Selected connection; «Не выбрано подключение БД». |
-| database.table.refresh | «Обновить таблицу» — Database | DatabaseTableRefresh active tab: ui_database.rs:309-312; id ui_ids.rs:283 | Active table; «Таблица не открыта». |
-| database.table.save | «Сохранить изменения таблицы» — Database | DatabaseTableSave active tab: ui_database.rs:299-302; id ui_ids.rs:281 | Pending edits; «Нет изменений таблицы». |
-| database.table.preview_sql | «Предпросмотр SQL изменений» — Database | DatabaseTablePreview active tab: ui_database.rs:304-307; id ui_ids.rs:282 | Active table; «Таблица не открыта». |
-| database.query.explain | «План запроса (EXPLAIN)» — Database | DatabaseQueryExplain: ui_database.rs:484-486; id ui_ids.rs:317 | Active SQL query; «SQL-консоль не активна». |
-| database.query.explain_analyze | «План с анализом» — Database | DatabaseQueryExplainAnalyze: ui_database.rs:487-488; id ui_ids.rs:318 | Active SQL query; same. |
-| database.query.format | «Форматировать SQL» — Database | DatabaseQueryFormat: ui_database.rs:489; id ui_ids.rs:319 | Active console; same. |
-| database.query.next_diagnostic | «Следующая ошибка SQL» — Database | DatabaseQueryNextDiagnostic: ui_database.rs:491-493; id ui_ids.rs:321 | Active console/diagnostic; «Нет ошибок SQL». |
+| database.refresh_selected | «Обновить подключение БД» — Global | DatabaseRefresh calls refresh_selected_database: ui_database.rs:70; id ui_ids.rs:239 | Selected connection; «Не выбрано подключение БД». |
+| database.table.refresh | «Обновить таблицу» — DatabaseTable | DatabaseTableRefresh active tab: ui_database.rs:309-312; id ui_ids.rs:283 | Active table; «Таблица не открыта». |
+| database.table.save | «Сохранить изменения таблицы» — DatabaseTable | DatabaseTableSave active tab: ui_database.rs:299-302; id ui_ids.rs:281 | Pending edits; «Нет изменений таблицы». |
+| database.table.preview_sql | «Предпросмотр SQL изменений» — DatabaseTable | DatabaseTablePreview active tab: ui_database.rs:304-307; id ui_ids.rs:282 | Active table; «Таблица не открыта». |
+| database.query.explain | «План запроса (EXPLAIN)» — DatabaseQuery | DatabaseQueryExplain: ui_database.rs:484-486; id ui_ids.rs:317 | Active SQL query; «SQL-консоль не активна». |
+| database.query.explain_analyze | «План с анализом» — DatabaseQuery | DatabaseQueryExplainAnalyze: ui_database.rs:487-488; id ui_ids.rs:318 | Active SQL query; same. |
+| database.query.format | «Форматировать SQL» — DatabaseQuery | DatabaseQueryFormat: ui_database.rs:489; id ui_ids.rs:319 | Active console; same. |
+| database.query.next_diagnostic | «Следующая ошибка SQL» — DatabaseQuery | DatabaseQueryNextDiagnostic: ui_database.rs:491-493; id ui_ids.rs:321 | Active console/diagnostic; «Нет ошибок SQL». |
 
 Recon also suggested 3 Settings commands (hotkeys-commands.md:62-66); excluded because absent from normative C1-C24 list.
 
@@ -229,7 +230,7 @@ Parser key table is src/app/keyboard/key_input.rs:50-111. Defaults here need let
 | Tree clipboard | KeyC/X/V map to three operations (file_tree_dialog.rs:489-501). | Separate copy/cut/paste IDs. |
 | Slash comment | line comment marker receives extension, key and ctrl (editor_keys.rs:677-679); Slash branch acts on it (:1057-1069). | Semantic command, preserve default trigger. |
 | Ctrl+Q | IDE vs non-IDE chooses CloseAllTabs or CloseFile (editor_keys.rs:719-734); welcome → quit (:455-483). | tabs.close_all (ветвление по режиму, не по клавише) + app.quit в Welcome; см. §1. |
-| DB cell Enter | Enter/NumpadEnter → commit_database_table_cell_editor(tab_id, primary) (database_table_edit_methods.rs:1169-1174); флаг = `literal` (:419-428). | Enter фиксирован; Ctrl+Enter — команда database.table.commit_cell_literal — «Записать значение ячейки буквально» — Database — mod+enter, mod+numpadenter. |
+| DB cell Enter | Enter/NumpadEnter → commit_database_table_cell_editor(tab_id, primary) (database_table_edit_methods.rs:1169-1174); флаг = `literal` (:419-428). | Enter фиксирован; Ctrl+Enter — команда database.table.commit_cell_literal — «Записать значение ячейки буквально» — DatabaseTable — mod+enter, mod+numpadenter. |
 | Search Enter | Shift решает направление (keyboard.rs:585-597, 723-737). | Фиксированные Enter/Shift+Enter (§2). |
 | SQL Enter | Ctrl+Enter/NumpadEnter runs (main_keys.rs:383-393); review Enter commits (main_keys.rs:244-262). | Keep plain Enter state-specific and fixed. |
 
