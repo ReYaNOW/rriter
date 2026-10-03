@@ -320,6 +320,7 @@ include!("app/database/database_app_methods.rs");
 include!("app/database/database_app_event_methods.rs");
 include!("app/database/database_table_app_methods.rs");
 include!("app/database/database_table_edit_methods.rs");
+include!("app/database/database_table_key_methods.rs");
 include!("app/database/database_query_app_methods.rs");
 include!("app/app_ide_tab_methods.rs");
 include!("app/app_ide_startup_methods.rs");

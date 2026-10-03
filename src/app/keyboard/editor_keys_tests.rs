@@ -174,6 +174,14 @@ mod tests {
     }
 
     #[test]
+    fn editor_insert_text_rejects_ascii_control_characters() {
+        assert_eq!(key_text_for_editor_insert(PhysicalKey::Code(KeyCode::KeyA), Some("\u{8}"), None, false), None);
+        assert_eq!(key_text_for_editor_insert(PhysicalKey::Code(KeyCode::KeyA), Some("\u{7f}"), None, false), None);
+        assert_eq!(key_text_for_editor_insert(PhysicalKey::Code(KeyCode::KeyA), Some("a"), None, false), Some("a"));
+        assert_eq!(key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Tab), Some("\t"), None, false), Some("\t"));
+    }
+
+    #[test]
     fn paired_editor_insert_text_reuses_file_editor_pairs() {
         assert_eq!(paired_editor_insert_text("("), ("()", true));
         assert_eq!(paired_editor_insert_text("["), ("[]", true));

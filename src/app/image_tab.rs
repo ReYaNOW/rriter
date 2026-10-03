@@ -181,8 +181,15 @@ pub(crate) fn image_origin(body: (f32, f32), image: (f32, f32)) -> (f32, f32) {
 }
 
 impl crate::app::App {
-    pub(crate) fn handle_image_key(&mut self, input: &crate::app::keyboard::KeyInput) -> bool {
+    pub(crate) fn handle_image_key(
+        &mut self,
+        input: &crate::app::keyboard::KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         if !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image()) { return false; }
+        if chord.is_some_and(|chord| crate::keymap::COMMANDS.iter().any(|info| self.keymap.hit(info.command, chord))) {
+            return false;
+        }
         if !self.editor_has_input_focus()
             || self.modifiers.control_key()
             || self.modifiers.alt_key()

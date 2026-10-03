@@ -79,6 +79,7 @@ fn api_mock_focus_for_part(route_idx: usize, part: ApiMockSourcePart) -> Option<
     }
 }
 
+#[cfg(test)]
 fn api_mock_alt_enter_route_target(
     mock_python_target: Option<(usize, ApiMockSourcePart)>,
     alt: bool,
@@ -377,6 +378,19 @@ impl crate::app::App {
     }
 
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &crate::app::keyboard::KeyInput) -> bool {
+        let chord = crate::keymap::Chord::from_event(
+            crate::platform::CURRENT_PLATFORM,
+            key_event,
+            self.modifiers,
+        );
+        self.handle_api_client_keyboard_input_with_chord(key_event, chord)
+    }
+
+    pub(crate) fn handle_api_client_keyboard_input_with_chord(
+        &mut self,
+        key_event: &crate::app::keyboard::KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         if !self.api_client_keyboard_surface_visible() {
             self.ide_panel.api.focused = None;
             return false;
@@ -384,9 +398,7 @@ impl crate::app::App {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
         if key_event.state == winit::event::ElementState::Pressed
-            && ctrl
-            && key_event.physical_key
-                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC)
+            && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCopy, chord))
             && self.active_tab_is_api_client()
             && (self.copy_api_route_text_selection()
                 || self.copy_hover_popup_selection_or_diagnostic())
@@ -397,9 +409,7 @@ impl crate::app::App {
             return true;
         }
         if key_event.state == winit::event::ElementState::Pressed
-            && ctrl
-            && key_event.physical_key
-                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Digit4)
+            && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsClose, chord))
             && self.active_tab_is_api_client()
         {
             self.close_tab_at(self.active_tab);
@@ -425,16 +435,10 @@ impl crate::app::App {
         }
         let shift = self.modifiers.shift_key();
         let mock_python_target = self.ide_panel.api.api_mock_python_focus_target();
-        let is_enter_key = matches!(
-            key_event.physical_key,
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
-                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter)
-        );
-        if let Some(route_idx) = api_mock_alt_enter_route_target(
-            mock_python_target,
-            self.modifiers.alt_key(),
-            is_enter_key,
-        ) {
+        if let Some(route_idx) = mock_python_target
+            .map(|(route_idx, _)| route_idx)
+            .filter(|_| chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::ApiMockRunRouteTools, chord)))
+        {
             self.start_api_mock_route_tools_now(route_idx);
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();

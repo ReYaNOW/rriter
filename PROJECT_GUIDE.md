@@ -1564,6 +1564,7 @@ Entrypoints/state:
 * `src/app/database/database_grid_selection_state.rs` -> grid cell position/selection, editor state, table prompts, and selection restoration state.
 * `src/app/database/database_table.rs` -> autocommit COUNT/chunk SQL, immutable parameterized DML plans, PK+`xmin` conflict checks, and dedicated pending transaction execution.
 * `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
+* `src/app/database/database_table_key_methods.rs` -> database table keyboard handling for table inputs, selection, and modals.
 * `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
 * `src/app/database/database_query_analysis_completion.rs` -> SQL formatting, semantic diagnostics, and completion candidate generation.
 * `src/app/database/database_query_analysis_completion_tests.rs` -> SQL completion and editor diagnostic regressions included by `database_query.rs`.

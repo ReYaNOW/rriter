@@ -14,7 +14,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 mod editor_keys;
 mod key_input;
 mod main_keys;
-mod input_owner;
+pub(crate) mod input_owner;
 pub(crate) use editor_keys::paired_editor_insert_text;
 pub(crate) use key_input::{KeyComboHold, KeyInput};
 
@@ -695,7 +695,11 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyInput) {
+    pub fn handle_search_keyboard_input(
+        &mut self,
+        key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -711,7 +715,7 @@ impl App {
                     self.pdf_restart_search_if_open();
                     self.window.as_ref().unwrap().request_redraw();
                 }
-                PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
+                _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchEditorOpen, chord)) => {
                     self.search_editor.select_all();
                 }
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::ArrowUp | KeyCode::ArrowDown)
@@ -832,7 +836,11 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyInput) {
+    pub fn handle_project_search_keyboard_input(
+        &mut self,
+        key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) {
         if key_event.state != ElementState::Pressed {
             return;
         }
@@ -853,6 +861,7 @@ impl App {
             key_event.physical_key,
             key_event.logical_text.as_deref(),
             ctrl,
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchProjectRun, chord)),
             word,
             shift,
             crate::platform::text_input_modifiers_allowed(self.modifiers),

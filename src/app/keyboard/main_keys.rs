@@ -56,13 +56,28 @@ fn apply_problems_alt_w_shortcut(panels: &mut crate::app::IdePanelState) {
 
 fn is_terminal_tab_close_shortcut(
     panels: &crate::app::IdePanelState,
-    physical_key: PhysicalKey,
-    primary: bool,
 ) -> bool {
-    primary
-        && physical_key == PhysicalKey::Code(KeyCode::Digit4)
-        && panels.is_open(crate::app::PanelId::Terminal)
+    panels.is_open(crate::app::PanelId::Terminal)
         && (panels.terminal_focused || (panels.term_show_search && panels.term_search_focused))
+}
+
+fn default_file_tree_chord_for_hit(keymap: &crate::keymap::Keymap, chord: crate::keymap::Chord) -> bool {
+    let mut has_hit = false;
+    for command in [
+        crate::keymap::Command::FileTreeUndo,
+        crate::keymap::Command::FileTreeRename,
+        crate::keymap::Command::FileTreeCopy,
+        crate::keymap::Command::FileTreeCut,
+        crate::keymap::Command::FileTreePaste,
+    ] {
+        if keymap.hit(command, chord) {
+            has_hit = true;
+            if !super::input_owner::is_default_chord(command, chord, crate::platform::CURRENT_PLATFORM) {
+                return false;
+            }
+        }
+    }
+    has_hit
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,51 +86,9 @@ enum MarkdownGlobalToggleAction {
     Consume,
 }
 
-fn terminal_owns_keyboard_context(
-    is_ide_mode: bool,
-    show_settings: bool,
-    show_search: bool,
-    search_focused: bool,
-    panels: &crate::app::IdePanelState,
-) -> bool {
-    if !is_ide_mode || !panels.is_open(crate::app::PanelId::Terminal) {
-        return false;
-    }
-
-    let higher_priority_non_terminal_owner = show_settings
-        || file_tree_text_input_owns_keyboard_context(panels)
-        || (panels.is_open(crate::app::PanelId::Search) && panels.project_search.focused.is_some())
-        || (panels.is_open(crate::app::PanelId::LspServers) && panels.lsp_log_filter_focused)
-        || (panels.is_open(crate::app::PanelId::Git) && panels.git.message_focused)
-        || (panels.is_open(crate::app::PanelId::ApiClient) && panels.api.focused.is_some())
-        || (panels.is_open(crate::app::PanelId::LspServers) && panels.lsp_logs_focused.is_some());
-    if higher_priority_non_terminal_owner {
-        return false;
-    }
-
-    if panels.term_show_search && panels.term_search_focused {
-        return true;
-    }
-    if show_search && search_focused {
-        return false;
-    }
-    panels.terminal_focused
-}
-
 #[path = "main_keys_vcs_copy.rs"]
 mod vcs_copy;
 use vcs_copy::git_logs_keyboard_copy_eligible;
-
-fn file_tree_text_input_owns_keyboard_context(panels: &crate::app::IdePanelState) -> bool {
-    let hard_modal_open = panels.api.mock_contract_field_delete_dialog.is_some()
-        || panels.api.mock_route_reset_dialog.is_some()
-        || panels.git.confirm_dialog.is_some()
-        || panels.file_tree_context_menu.is_some()
-        || panels.file_tree_move_dialog.is_some()
-        || panels.file_tree_delete_dialog.is_some();
-    !hard_modal_open
-        && (panels.file_tree_rename_dialog.is_some() || panels.file_tree_create_dialog.is_some())
-}
 
 fn markdown_global_toggle_action(
     markdown_document: bool,
@@ -130,7 +103,7 @@ fn markdown_global_toggle_action(
     repeat: bool,
 ) -> Option<MarkdownGlobalToggleAction> {
     if !markdown_document
-        || terminal_owns_keyboard_context(
+        || super::input_owner::terminal_keyboard_owner(
             is_ide_mode,
             show_settings,
             show_search,
@@ -243,7 +216,7 @@ impl App {
             None
         };
         let defer_file_tree_text_input = markdown_toggle.is_some()
-            && file_tree_text_input_owns_keyboard_context(&self.ide_panel);
+            && super::input_owner::file_tree_text_input_owns_keyboard_context(&self.ide_panel);
         if !defer_file_tree_text_input && self.handle_file_tree_modal_keyboard(&key_event) {
             return;
         }
@@ -269,9 +242,23 @@ impl App {
             return;
         }
 
+        let terminal_owns_chord = chord.is_some_and(|chord| {
+            super::input_owner::terminal_intercepts(chord, crate::platform::CURRENT_PLATFORM)
+        }) && super::input_owner::terminal_keyboard_owner(
+            self.is_ide_mode, self.show_settings, self.show_search, self.search_focused, &self.ide_panel,
+        ) && !(self.ide_panel.term_show_search && self.ide_panel.term_search_focused);
         let terminal_close = chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalClose, chord));
         let terminal_toggle = chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalToggleFocus, chord));
-        if key_event.state == ElementState::Pressed && (terminal_close || terminal_toggle) {
+        if key_event.state == ElementState::Pressed
+            && (terminal_close || terminal_toggle)
+            && (!terminal_owns_chord || chord.is_some_and(|chord| {
+                super::input_owner::is_default_chord(
+                    if terminal_close { crate::keymap::Command::TerminalClose } else { crate::keymap::Command::TerminalToggleFocus },
+                    chord,
+                    crate::platform::CURRENT_PLATFORM,
+                )
+            }))
+        {
             if self.is_ide_mode {
                 let has_terminal = !self.ide_panel.terminals.is_empty();
                 let needs_terminal = apply_terminal_alt_q_shortcut(
@@ -386,7 +373,7 @@ impl App {
                             return;
                         }
                     }
-                    _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryRun, chord)) =>
+                    _ if !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryRun, chord)) =>
                     {
                         self.run_active_database_query(
                             crate::app::database::DatabaseQueryMode::Run,
@@ -396,7 +383,7 @@ impl App {
                         }
                         return;
                     }
-                    _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryComplete, chord)) => {
+                    _ if !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryComplete, chord)) => {
                         self.show_active_database_query_completion();
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -406,7 +393,10 @@ impl App {
                     _ => {}
                 }
             }
-            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) || self.handle_image_key(&key_event) {
+            if self.handle_database_table_key(&key_event, chord, terminal_owns_chord)
+                || self.handle_pdf_key(&key_event, chord)
+                || self.handle_image_key(&key_event, chord)
+            {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -690,6 +680,7 @@ impl App {
             }
 
             if self.is_ide_mode && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::ViewToggleProblems, chord))
+                && (!terminal_owns_chord || chord.is_some_and(|chord| super::input_owner::is_default_chord(crate::keymap::Command::ViewToggleProblems, chord, crate::platform::CURRENT_PLATFORM)))
             {
                 apply_problems_alt_w_shortcut(&mut self.ide_panel);
                 crate::save_panel_state(&self.ide_panel);
@@ -702,6 +693,7 @@ impl App {
 
             if self.is_ide_mode
                 && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchProjectOpen, chord))
+                && (!terminal_owns_chord || chord.is_some_and(|chord| super::input_owner::is_default_chord(crate::keymap::Command::SearchProjectOpen, chord, crate::platform::CURRENT_PLATFORM)))
             {
                 self.open_project_search_panel();
                 self.last_action = std::time::Instant::now();
@@ -715,13 +707,15 @@ impl App {
                 && self.ide_panel.is_open(crate::app::PanelId::Search)
                 && self.ide_panel.project_search.focused.is_some()
             {
-                self.handle_project_search_keyboard_input(key_event);
+                self.handle_project_search_keyboard_input(key_event, chord);
                 return;
             }
 
             // File-tree focus is exclusive. Handle F2/Delete/clipboard shortcuts
             // before stale editor/API focus can consume the key on another OS.
-            if self.handle_file_tree_shortcut_with_chord(key_event.physical_key, ctrl, chord) {
+            let default_file_tree_chord = chord.is_some_and(|chord| default_file_tree_chord_for_hit(&self.keymap, chord));
+            if (!terminal_owns_chord || default_file_tree_chord)
+                && self.handle_file_tree_shortcut_with_chord(key_event.physical_key, ctrl, chord) {
                 return;
             }
 
@@ -732,7 +726,8 @@ impl App {
                 return;
             }
 
-            if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::GitCopySelection, chord)) {
+            if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::GitCopySelection, chord))
+                && (!terminal_owns_chord || chord.is_some_and(|chord| super::input_owner::is_default_chord(crate::keymap::Command::GitCopySelection, chord, crate::platform::CURRENT_PLATFORM))) {
                 let graph_copy = self
                     .renderer
                     .as_ref()
@@ -768,20 +763,6 @@ impl App {
                 }
             }
 
-            if chord.is_some_and(|chord| {
-                super::input_owner::terminal_intercepts(chord, crate::platform::CURRENT_PLATFORM)
-            }) && terminal_owns_keyboard_context(
-                self.is_ide_mode,
-                self.show_settings,
-                self.show_search,
-                self.search_focused,
-                &self.ide_panel,
-            ) && !(self.ide_panel.term_show_search && self.ide_panel.term_search_focused)
-            {
-                self.handle_terminal_keyboard_input(key_event);
-                return;
-            }
-
             if self.ide_panel.git.message_focused
                 && self.ide_panel.is_open(crate::app::PanelId::Git)
             {
@@ -789,7 +770,12 @@ impl App {
                 return;
             }
 
-            if self.handle_api_client_keyboard_input(&key_event) {
+            if self.handle_api_client_keyboard_input_with_chord(&key_event, chord) {
+                return;
+            }
+
+            if terminal_owns_chord {
+                self.handle_terminal_keyboard_input(key_event);
                 return;
             }
 
@@ -851,7 +837,7 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+            if is_terminal_tab_close_shortcut(&self.ide_panel)
                 && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalCloseTab, chord)) {
                 self.close_terminal_tab_at(self.ide_panel.active_terminal);
                 self.last_action = std::time::Instant::now();
@@ -867,8 +853,8 @@ impl App {
             {
                 self.handle_terminal_search_keyboard_input(key_event);
             } else if self.show_search && self.search_focused {
-                self.handle_search_keyboard_input(key_event);
-            } else if terminal_owns_keyboard_context(
+                self.handle_search_keyboard_input(key_event, chord);
+            } else if super::input_owner::terminal_keyboard_owner(
                 self.is_ide_mode,
                 self.show_settings,
                 self.show_search,
@@ -1020,48 +1006,57 @@ mod tests {
     }
 
     #[test]
-    fn terminal_ctrl4_shortcut_targets_terminal_or_search_focus_only() {
+    fn remapped_terminal_close_tab_uses_focus_and_keymap_chord() {
+        let overrides = crate::keymap::KeymapOverrides::from_value(serde_json::json!({
+            "terminal.close_tab": ["alt+4"]
+        }));
+        let keymap = crate::keymap::Keymap::build_for(crate::platform::PlatformKind::Linux, &overrides);
+        let chord = crate::keymap::Chord::parse(crate::platform::PlatformKind::Linux, "alt+4").unwrap();
         let mut panels = crate::app::IdePanelState::default();
         panels.open(crate::app::PanelId::Terminal);
         panels.terminal_focused = true;
 
-        assert!(is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::Digit4),
-            true,
-        ));
-        assert!(!is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::Digit4),
-            false,
-        ));
+        assert!(is_terminal_tab_close_shortcut(&panels) && keymap.hit(crate::keymap::Command::TerminalCloseTab, chord));
 
         panels.terminal_focused = false;
+        assert!(!is_terminal_tab_close_shortcut(&panels) && keymap.hit(crate::keymap::Command::TerminalCloseTab, chord));
+
         panels.term_show_search = true;
         panels.term_search_focused = true;
-        assert!(is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::Digit4),
-            true,
-        ));
+        assert!(is_terminal_tab_close_shortcut(&panels) && keymap.hit(crate::keymap::Command::TerminalCloseTab, chord));
+    }
 
-        panels.term_show_search = false;
-        assert!(!is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::Digit4),
-            true,
-        ));
-        panels.term_search_focused = false;
-        assert!(!is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::Digit4),
-            true,
-        ));
-        assert!(!is_terminal_tab_close_shortcut(
-            &panels,
-            PhysicalKey::Code(KeyCode::KeyC),
-            true,
-        ));
+    #[test]
+    fn terminal_focus_only_allows_default_file_tree_chord_for_its_hit_command() {
+        let overrides = crate::keymap::KeymapOverrides::from_value(serde_json::json!({
+            "file_tree.paste": ["ctrl+z"]
+        }));
+        let keymap = crate::keymap::Keymap::build_for(crate::platform::PlatformKind::Linux, &overrides);
+        let chord = crate::keymap::Chord::parse(crate::platform::PlatformKind::Linux, "ctrl+z").unwrap();
+        assert!(keymap.hit(crate::keymap::Command::FileTreePaste, chord));
+        let mut panels = crate::app::IdePanelState::default();
+        panels.open(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+        assert!(super::input_owner::terminal_keyboard_owner(true, false, false, false, &panels));
+        assert!(!default_file_tree_chord_for_hit(&keymap, chord));
+    }
+
+    #[test]
+    fn reassigned_project_search_open_passes_through_terminal_focus() {
+        let overrides = crate::keymap::KeymapOverrides::from_value(serde_json::json!({
+            "search.project.open": ["ctrl+p"]
+        }));
+        let keymap = crate::keymap::Keymap::build_for(crate::platform::PlatformKind::Linux, &overrides);
+        let chord = crate::keymap::Chord::parse(crate::platform::PlatformKind::Linux, "ctrl+p").unwrap();
+        let mut panels = crate::app::IdePanelState::default();
+        panels.open(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+        let terminal_owns_chord = super::input_owner::terminal_keyboard_owner(true, false, false, false, &panels);
+
+        assert!(keymap.hit(crate::keymap::Command::SearchProjectOpen, chord));
+        assert!(terminal_owns_chord);
+        assert!(!(!terminal_owns_chord
+            || super::input_owner::is_default_chord(crate::keymap::Command::SearchProjectOpen, chord, crate::platform::PlatformKind::Linux)));
     }
 
     #[test]
@@ -1200,7 +1195,7 @@ mod tests {
     #[test]
     fn markdown_global_toggle_uses_actual_terminal_keyboard_owner() {
         let mut panels = stale_terminal_focus_state();
-        assert!(terminal_owns_keyboard_context(
+        assert!(super::input_owner::terminal_keyboard_owner(
             true, false, false, false, &panels
         ));
         assert_eq!(
@@ -1212,7 +1207,7 @@ mod tests {
         panels.terminal_focused = false;
         panels.term_show_search = true;
         panels.term_search_focused = true;
-        assert!(terminal_owns_keyboard_context(
+        assert!(super::input_owner::terminal_keyboard_owner(
             true, false, false, false, &panels
         ));
         assert_eq!(
@@ -1222,7 +1217,7 @@ mod tests {
         );
 
         panels.term_search_focused = false;
-        assert!(!terminal_owns_keyboard_context(
+        assert!(!super::input_owner::terminal_keyboard_owner(
             true, false, false, false, &panels
         ));
         assert_eq!(
@@ -1247,7 +1242,7 @@ mod tests {
             panels.project_search.focused,
             Some(crate::app::project_search::ProjectSearchField::Query)
         );
-        assert!(!terminal_owns_keyboard_context(
+        assert!(!super::input_owner::terminal_keyboard_owner(
             true, false, false, false, &panels
         ));
         assert_eq!(
@@ -1310,23 +1305,23 @@ mod tests {
             editor: crate::editor::Editor::new(64),
             error: None,
         });
-        assert!(file_tree_text_input_owns_keyboard_context(&panels));
+        assert!(super::input_owner::file_tree_text_input_owns_keyboard_context(&panels));
 
         panels.file_tree_delete_dialog = Some(crate::app::file_tree::FileTreeDeleteDialog {
             paths: vec![std::path::PathBuf::from("/tmp/example.md")],
             error: None,
         });
         assert!(
-            !file_tree_text_input_owns_keyboard_context(&panels),
+            !super::input_owner::file_tree_text_input_owns_keyboard_context(&panels),
             "hard confirmation must retain priority over the underlying name field"
         );
     }
 
     #[test]
     fn graph_tooltip_copy_keeps_priority_over_owned_vcs_console_copy() {
-        let source = include_str!("main_keys.rs");
+        let source = include_str!("main_keys.rs").split("\n#[cfg(test)]").next().unwrap();
         let copy_route = &source[source
-            .find("if ctrl && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC)")
+            .find("if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::GitCopySelection, chord))")
             .expect("global copy route")..];
         let graph = copy_route
             .find("selected_git_graph_tooltip_text")
@@ -1375,12 +1370,12 @@ mod tests {
 
         for marker in [
             "if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused",
-            "self.handle_project_search_keyboard_input(key_event);",
+            "self.handle_project_search_keyboard_input(key_event, chord);",
             "self.handle_lsp_log_filter_keyboard_input(key_event);",
             "self.handle_git_message_keyboard_input(key_event);",
-            "if self.handle_api_client_keyboard_input(&key_event)",
+            "if self.handle_api_client_keyboard_input_with_chord(&key_event, chord)",
             "self.handle_terminal_search_keyboard_input(key_event);",
-            "self.handle_search_keyboard_input(key_event);",
+            "self.handle_search_keyboard_input(key_event, chord);",
             "self.handle_terminal_keyboard_input(key_event);",
             "self.handle_editor_keyboard_input(event_loop, key_event, chord);",
         ] {
@@ -1394,7 +1389,7 @@ mod tests {
         }
 
         let api_route = source
-            .find("if self.handle_api_client_keyboard_input(&key_event)")
+            .find("if self.handle_api_client_keyboard_input_with_chord(&key_event, chord)")
             .expect("API Client keyboard owner");
         let terminal_route = source
             .find("self.handle_terminal_keyboard_input(key_event);")
@@ -1403,6 +1398,7 @@ mod tests {
             .find("self.handle_editor_keyboard_input(event_loop, key_event, chord);")
             .expect("editor keyboard route");
         assert!(api_route < editor_route);
+        assert!(api_route < terminal_route);
         assert!(terminal_route < editor_route);
 
         let dialog_window = source

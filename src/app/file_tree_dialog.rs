@@ -475,7 +475,9 @@ impl App {
         if self.ide_panel.file_tree_selection.is_empty() {
             return false;
         }
-        if physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) {
+        if physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete)
+            && chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord))
+        {
             let fallback = match self.ide_panel.file_tree_selection.iter().next() {
                 Some(path) => path.clone(),
                 None => return false,
@@ -487,7 +489,7 @@ impl App {
             }
             return true;
         }
-        if physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F2) {
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::FileTreeRename, chord)) {
             if let Some(path) = self.file_tree_single_selected_path() {
                 self.open_file_tree_rename_dialog(path);
                 if let Some(window) = self.window.as_ref() {
@@ -497,11 +499,17 @@ impl App {
             }
             return false;
         }
-        let command = chord.and_then(|chord| [
-            crate::keymap::Command::FileTreeCopy,
-            crate::keymap::Command::FileTreeCut,
-            crate::keymap::Command::FileTreePaste,
-        ].into_iter().find(|command| self.keymap.hit(*command, chord)));
+        let command = chord.and_then(|chord| {
+            if self.keymap.hit(crate::keymap::Command::FileTreeCopy, chord) {
+                Some(crate::keymap::Command::FileTreeCopy)
+            } else if self.keymap.hit(crate::keymap::Command::FileTreeCut, chord) {
+                Some(crate::keymap::Command::FileTreeCut)
+            } else if self.keymap.hit(crate::keymap::Command::FileTreePaste, chord) {
+                Some(crate::keymap::Command::FileTreePaste)
+            } else {
+                None
+            }
+        });
         let Some(command) = command else { return false; };
         let fallback = match self.ide_panel.file_tree_selection.iter().next() {
             Some(path) => path.clone(),

@@ -456,4 +456,23 @@ mod tests {
         assert!(overrides.to_value().get("edit.copy").is_none());
         assert_eq!(effective_chords(PlatformKind::Linux, Command::EditCopy, overrides.raw.get("edit.copy")), vec![chord(PlatformKind::Linux, "mod+c")]);
     }
+
+    #[test]
+    fn every_existing_command_has_a_dispatcher_hit() {
+        let dispatchers = [
+            include_str!("app/keyboard/main_keys.rs"),
+            include_str!("app/keyboard/editor_keys.rs"),
+            include_str!("app/keyboard.rs"),
+            include_str!("app/pdf_tab/input.rs"),
+            include_str!("app/image_tab.rs"),
+            include_str!("app/file_tree_dialog.rs"),
+            include_str!("app/database/database_table_edit_methods.rs"),
+            include_str!("app/database/database_table_key_methods.rs"),
+            include_str!("app/api_client/api_client_app_request_methods.rs"),
+        ];
+        for info in COMMANDS.iter().filter(|info| !info.defaults.is_empty()) {
+            let hit = format!("hit(crate::keymap::Command::{:?}", info.command);
+            assert!(dispatchers.iter().any(|source| source.contains(&hit)), "{} has no dispatcher hit", info.id);
+        }
+    }
 }

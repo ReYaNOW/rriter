@@ -68,10 +68,10 @@ fn key_text_for_editor_insert<'a>(
     shift: bool,
 ) -> Option<&'a str> {
     if let Some(text) = event_text {
-        return Some(text);
+        return (!text.bytes().any(|byte| (byte < 0x20 && byte != b'\t') || byte == 0x7f)).then_some(text);
     }
     if let Some(text) = logical_text {
-        return Some(text);
+        return (!text.bytes().any(|byte| (byte < 0x20 && byte != b'\t') || byte == 0x7f)).then_some(text);
     }
     match physical_key {
         PhysicalKey::Code(KeyCode::Period) if !shift => Some("."),
