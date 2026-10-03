@@ -66,7 +66,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `click [left\|right\|middle] [down\|up] [alt]` | Press+release, or one phase. Default `left`; `alt` synthesizes Alt/Option for this click. | `ok` |
 | `dblclick [btn]` | Two clicks with no pause. | `ok` |
 | `wheel dx dy [lines\|px]` | Scroll; default `lines`. | `ok` |
-| `key <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`. Unknown token → `err unknown key token '<t>'`. | `ok` |
+| `key [--repeat N] <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`; `key --repeat N <combo>` sends N repeated press events before release (N ≤ 1000). Unknown token → `err unknown key token '<t>'`. | `ok` |
 | `type <text>` | Commit text as IME input. Escapes `\n`, `\t`, `\\`. | `ok` |
 | `settle [ms]` | Run frames until idle or the budget ends (default 500). | `ok frames=<n> settled=<bool>` |
 | `wait <ms>` | Run frames for real time `ms` (≤ 60000). | `ok frames=<n>` |

@@ -10,6 +10,7 @@ const MAX_WAIT_MS: u64 = 60_000;
 const DEFAULT_SETTLE_MS: u64 = 500;
 const MAX_BENCH_FRAMES: u32 = 100_000;
 const MAX_RECORD_FRAMES: u32 = 600;
+const MAX_KEY_REPEATS: u32 = 1000;
 // Longest piece of user input echoed back inside an error reason.
 const MAX_ECHO_CHARS: usize = 64;
 
@@ -58,7 +59,7 @@ pub(crate) enum Command {
     Click { button: MouseButtonArg, phase: ClickPhase, alt: bool },
     DblClick { button: MouseButtonArg },
     Wheel { dx: f64, dy: f64, unit: WheelUnit },
-    Key { input: KeyInput, mods: ModifiersState, combo: String },
+    Key { input: KeyInput, mods: ModifiersState, combo: String, repeats: u32 },
     Type(String),
     Settle { ms: u64 },
     Wait { ms: u64 },
@@ -191,10 +192,19 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             Command::Wheel { dx, dy, unit }
         }
         "key" => {
-            let combo = args.required("key combo")?;
+            let first = args.required("key combo or --repeat")?;
+            let (combo, repeats) = if first == "--repeat" {
+                let repeats = parse_uint::<u32>(args.required("repeat count")?)?;
+                if repeats > MAX_KEY_REPEATS {
+                    return Err(format!("repeat count exceeds {MAX_KEY_REPEATS}"));
+                }
+                (args.required("key combo")?, repeats)
+            } else {
+                (first, 0)
+            };
             let (input, mods) = KeyInput::parse_combo(combo)?;
             args.finish()?;
-            Command::Key { input, mods, combo: combo.to_string() }
+            Command::Key { input, mods, combo: combo.to_string(), repeats }
         }
         "settle" => {
             let ms = match args.token() {
@@ -527,7 +537,9 @@ mod tests {
     #[test]
     fn headless_protocol_parses_key_and_type() {
         let (input, mods) = combo("ctrl+shift+p");
-        assert_eq!(cmd("key ctrl+shift+p"), Command::Key { input, mods, combo: "ctrl+shift+p".to_string() });
+        assert_eq!(cmd("key ctrl+shift+p"), Command::Key { input, mods, combo: "ctrl+shift+p".to_string(), repeats: 0 });
+        assert_eq!(cmd("key --repeat 2 ctrl+z"), Command::Key { input: combo("ctrl+z").0, mods: combo("ctrl+z").1, combo: "ctrl+z".to_string(), repeats: 2 });
+        assert!(parse("key --repeat 1001 ctrl+z").is_err());
         assert_eq!(err("key ctrl+"), KeyInput::parse_combo("ctrl+").unwrap_err());
         assert_eq!(err("key ctrl+foo"), "unknown key token 'foo'");
         assert!(parse("key").is_err());
