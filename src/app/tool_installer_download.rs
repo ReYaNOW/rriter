@@ -127,6 +127,9 @@ fn install_tool(
     cancel: &AtomicBool,
     reporter: &ToolInstallReporter,
 ) -> Result<ToolInstallOutcome, String> {
+    if kind == ToolKind::RustAnalyzer {
+        return Err("установка rust-analyzer появится в следующем шаге".to_string());
+    }
     let target_layout = ToolInstallLayout::current(kind);
     target_layout
         .create()

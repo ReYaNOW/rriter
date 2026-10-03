@@ -106,6 +106,14 @@ fn tool_kind_indices_keys_and_sources_are_stable() {
         assert!(kind.override_env().starts_with("RRITER_"));
     }
     assert_eq!(ToolKind::from_index(ToolKind::ALL.len()), None);
+    assert_eq!(ToolKind::RustAnalyzer.config_key(), "rust_analyzer");
+    assert_eq!(ToolKind::RustAnalyzer.override_env(), "RRITER_RUST_ANALYZER_PATH");
+    assert_eq!(ToolKind::RustAnalyzer.label(), "rust-analyzer");
+    assert_eq!(
+        ToolKind::RustAnalyzer.managed_install_plan(),
+        Some(ManagedToolInstallPlan::RustAnalyzerArchive)
+    );
+    assert!(ToolKind::RustAnalyzer.supports_managed_install());
     assert_eq!(
         integration::ToolPathSource::Environment.label(),
         "RRITER_*_PATH"
@@ -121,10 +129,16 @@ fn tool_paths_keep_native_paths_and_ignore_empty_values() {
     let shell = PathBuf::from("/opt/Оболочка/bin/zsh");
     paths.set(ToolKind::Git, Some(git.clone()));
     paths.set(ToolKind::Shell, Some(shell.clone()));
+    let rust_analyzer = PathBuf::from("/opt/rust/bin/rust-analyzer");
+    paths.set(ToolKind::RustAnalyzer, Some(rust_analyzer.clone()));
     paths.set(ToolKind::Ruff, Some(PathBuf::new()));
 
     assert_eq!(paths.get(ToolKind::Git), Some(git.as_path()));
     assert_eq!(paths.get(ToolKind::Shell), Some(shell.as_path()));
+    assert_eq!(
+        paths.get(ToolKind::RustAnalyzer),
+        Some(rust_analyzer.as_path())
+    );
     assert_eq!(paths.get(ToolKind::Ruff), None);
     assert_eq!(paths.iter().count(), ToolKind::ALL.len());
 }

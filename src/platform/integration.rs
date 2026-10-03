@@ -8,6 +8,7 @@ pub enum ManagedToolInstallPlan {
     UvBootstrap,
     UvPackage(&'static str),
     DartSdkArchive,
+    RustAnalyzerArchive,
     PdfiumArchive,
 }
 
@@ -20,13 +21,14 @@ pub enum ToolKind {
     Python,
     Shell,
     Dart,
+    RustAnalyzer,
     /// PDF engine library. Installed by `tool_installer` but deliberately absent from
     /// `ALL`: it has no settings row, no config path and no resolution cache slot.
     Pdfium,
 }
 
 impl ToolKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Git,
         Self::Ruff,
         Self::Ty,
@@ -34,6 +36,7 @@ impl ToolKind {
         Self::Python,
         Self::Shell,
         Self::Dart,
+        Self::RustAnalyzer,
     ];
 
     pub const fn index(self) -> usize {
@@ -45,6 +48,7 @@ impl ToolKind {
             Self::Python => 4,
             Self::Shell => 5,
             Self::Dart => 6,
+            Self::RustAnalyzer => 7,
             // Outside `ALL`; `ToolPaths` and the resolution cache ignore this index.
             Self::Pdfium => ToolKind::ALL.len(),
         }
@@ -59,6 +63,7 @@ impl ToolKind {
             4 => Some(Self::Python),
             5 => Some(Self::Shell),
             6 => Some(Self::Dart),
+            7 => Some(Self::RustAnalyzer),
             _ => None,
         }
     }
@@ -72,6 +77,7 @@ impl ToolKind {
             Self::Python => "Python",
             Self::Shell => "Терминал",
             Self::Dart => "Dart SDK",
+            Self::RustAnalyzer => "rust-analyzer",
             Self::Pdfium => "PDF-движок",
         }
     }
@@ -85,6 +91,7 @@ impl ToolKind {
             Self::Python => "python",
             Self::Shell => "shell",
             Self::Dart => "dart",
+            Self::RustAnalyzer => "rust_analyzer",
             Self::Pdfium => "pdfium",
         }
     }
@@ -98,6 +105,7 @@ impl ToolKind {
             Self::Python => "RRITER_PYTHON_PATH",
             Self::Shell => "RRITER_SHELL",
             Self::Dart => "RRITER_DART_PATH",
+            Self::RustAnalyzer => "RRITER_RUST_ANALYZER_PATH",
             Self::Pdfium => "RRITER_PDFIUM_PATH",
         }
     }
@@ -108,6 +116,7 @@ impl ToolKind {
             Self::Ruff => Some(ManagedToolInstallPlan::UvPackage("ruff")),
             Self::Ty => Some(ManagedToolInstallPlan::UvPackage("ty")),
             Self::Dart => Some(ManagedToolInstallPlan::DartSdkArchive),
+            Self::RustAnalyzer => Some(ManagedToolInstallPlan::RustAnalyzerArchive),
             // Archive download with a pinned hash, not a uv package; see `start_pdfium_install`.
             Self::Pdfium => Some(ManagedToolInstallPlan::PdfiumArchive),
             Self::Git | Self::Python | Self::Shell => None,
@@ -117,7 +126,11 @@ impl ToolKind {
     pub const fn supports_managed_install(self) -> bool {
         matches!(
             self.managed_install_plan(),
-            Some(ManagedToolInstallPlan::UvBootstrap | ManagedToolInstallPlan::UvPackage(_))
+            Some(
+                ManagedToolInstallPlan::UvBootstrap
+                    | ManagedToolInstallPlan::UvPackage(_)
+                    | ManagedToolInstallPlan::RustAnalyzerArchive
+            )
         )
     }
 
@@ -131,7 +144,7 @@ impl ToolKind {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ToolPaths {
-    paths: [Option<PathBuf>; 7],
+    paths: [Option<PathBuf>; ToolKind::ALL.len()],
 }
 
 impl ToolPaths {
@@ -207,7 +220,7 @@ impl ToolResolution {
 
 static TOOL_PATHS: LazyLock<RwLock<ToolPaths>> =
     LazyLock::new(|| RwLock::new(ToolPaths::default()));
-static TOOL_RESOLUTION_CACHE: LazyLock<RwLock<[Option<ToolResolution>; 7]>> =
+static TOOL_RESOLUTION_CACHE: LazyLock<RwLock<[Option<ToolResolution>; ToolKind::ALL.len()]>> =
     LazyLock::new(|| RwLock::new(std::array::from_fn(|_| None)));
 static DART_WORKSPACE_ROOT: LazyLock<RwLock<Option<PathBuf>>> = LazyLock::new(|| RwLock::new(None));
 
@@ -273,6 +286,28 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
     if kind == ToolKind::Dart {
         return resolve_dart_uncached();
     }
+    if kind == ToolKind::RustAnalyzer {
+        let env_override = std::env::var_os(kind.override_env())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        let configured_path = configured_tool_path(kind);
+        let path_hit = resolve_executable(OsStr::new(if CURRENT_PLATFORM == PlatformKind::Windows {
+            "rust-analyzer.exe"
+        } else {
+            "rust-analyzer"
+        }));
+        let managed_root = data_dir()
+            .join("tools")
+            .join("managed")
+            .join(super::MANAGED_RUST_ANALYZER_DIR);
+        return resolve_rust_analyzer_in(
+            configured_path,
+            env_override,
+            path_hit,
+            &managed_root,
+            CURRENT_PLATFORM,
+        );
+    }
     if let Some(path) = std::env::var_os(kind.override_env()).filter(|value| !value.is_empty()) {
         let configured_path = PathBuf::from(path);
         return ToolResolution {
@@ -301,7 +336,7 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
         (ToolKind::Shell, PlatformKind::Windows) => &["pwsh.exe", "powershell.exe", "cmd.exe"],
         (ToolKind::Shell, PlatformKind::Macos) => &["/bin/zsh", "/bin/bash", "/bin/sh"],
         (ToolKind::Shell, _) => &["/bin/bash", "/bin/sh"],
-        (ToolKind::Dart | ToolKind::Pdfium, _) => &[],
+        (ToolKind::Dart | ToolKind::RustAnalyzer | ToolKind::Pdfium, _) => &[],
     };
     let path = candidates
         .iter()
@@ -449,12 +484,12 @@ pub(super) fn resolve_dart_candidate(candidate: &Path, platform: PlatformKind) -
         ];
         return candidates
             .into_iter()
-            .find(|path| is_usable_dart_executable(path));
+            .find(|path| is_usable_executable(path));
     }
-    resolve_executable(candidate.as_os_str()).filter(|path| is_usable_dart_executable(path))
+    resolve_executable(candidate.as_os_str()).filter(|path| is_usable_executable(path))
 }
 
-fn is_usable_dart_executable(path: &Path) -> bool {
+fn is_usable_executable(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
@@ -546,11 +581,79 @@ fn managed_dart_executable_in(root: &Path, platform: PlatformKind) -> Option<Pat
             .join("dart-sdk")
             .join("bin")
             .join(dart_executable_name(platform));
-        if is_usable_dart_executable(&executable) {
+        if is_usable_executable(&executable) {
             return Some(executable);
         }
     }
     None
+}
+
+pub const MANAGED_RUST_ANALYZER_DIR: &str = "rust-analyzer";
+
+pub fn managed_rust_analyzer_executable_in(
+    root: &Path,
+    platform: PlatformKind,
+) -> Option<PathBuf> {
+    let executable_name = if platform == PlatformKind::Windows {
+        "rust-analyzer.exe"
+    } else {
+        "rust-analyzer"
+    };
+    let mut generations = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .collect::<Vec<_>>();
+    generations.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    generations.into_iter().find_map(|entry| {
+        let executable = entry.path().join(executable_name);
+        is_usable_executable(&executable).then_some(executable)
+    })
+}
+
+fn resolve_rust_analyzer_in(
+    configured_path: Option<PathBuf>,
+    env_override: Option<PathBuf>,
+    path_hit: Option<PathBuf>,
+    managed_root: &Path,
+    platform: PlatformKind,
+) -> ToolResolution {
+    for (candidate, source) in [
+        (env_override, ToolPathSource::Environment),
+        (configured_path, ToolPathSource::Settings),
+    ] {
+        if let Some(configured_path) = candidate {
+            return ToolResolution {
+                path: resolve_executable(configured_path.as_os_str())
+                    .filter(|path| is_usable_executable(path)),
+                configured_path: Some(configured_path),
+                source: Some(source),
+                sdk_root: None,
+            };
+        }
+    }
+    if let Some(path) = path_hit.filter(|path| is_usable_executable(path)) {
+        return ToolResolution {
+            path: Some(path),
+            configured_path: None,
+            source: Some(ToolPathSource::Path),
+            sdk_root: None,
+        };
+    }
+    if let Some(path) = super::managed_rust_analyzer_executable_in(managed_root, platform) {
+        return ToolResolution {
+            path: Some(path),
+            configured_path: None,
+            source: Some(ToolPathSource::Managed),
+            sdk_root: None,
+        };
+    }
+    ToolResolution {
+        path: None,
+        configured_path: None,
+        source: None,
+        sdk_root: None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1044,5 +1147,89 @@ pub(crate) fn app_paths_with(
                 state: state_root.join(APP_DIR_NAME),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod rust_analyzer_tests {
+    use super::*;
+
+    fn root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rriter_rust_analyzer_{}_{}",
+            std::process::id(),
+            name
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn executable(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn managed_rust_analyzer_uses_newest_usable_tag() {
+        let root = root("newest");
+        let newest = root.join("2026-10-01/rust-analyzer");
+        std::fs::create_dir_all(newest.parent().unwrap()).unwrap();
+        std::fs::write(&newest, b"not executable").unwrap();
+        executable(&root.join("2026-09-28/rust-analyzer"));
+        executable(&root.join("2026-08-01/rust-analyzer"));
+
+        assert_eq!(
+            managed_rust_analyzer_executable_in(&root, PlatformKind::Linux),
+            Some(root.join("2026-09-28/rust-analyzer"))
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rust_analyzer_resolution_prefers_configured_then_path_then_managed() {
+        let root = root("priority");
+        let configured = root.join("configured/rust-analyzer");
+        let path_hit = root.join("path/rust-analyzer");
+        let managed = root.join("managed/2026-09-28/rust-analyzer");
+        executable(&configured);
+        executable(&path_hit);
+        executable(&managed);
+
+        let resolution = resolve_rust_analyzer_in(
+            Some(configured.clone()),
+            None,
+            Some(path_hit.clone()),
+            &root.join("managed"),
+            PlatformKind::Linux,
+        );
+        assert_eq!(resolution.path, Some(configured));
+        assert_eq!(resolution.source, Some(ToolPathSource::Settings));
+
+        let resolution = resolve_rust_analyzer_in(
+            None,
+            None,
+            Some(path_hit.clone()),
+            &root.join("managed"),
+            PlatformKind::Linux,
+        );
+        assert_eq!(resolution.path, Some(path_hit));
+        assert_eq!(resolution.source, Some(ToolPathSource::Path));
+
+        let resolution = resolve_rust_analyzer_in(
+            None,
+            None,
+            None,
+            &root.join("managed"),
+            PlatformKind::Linux,
+        );
+        assert_eq!(resolution.path, Some(managed));
+        assert_eq!(resolution.source, Some(ToolPathSource::Managed));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
