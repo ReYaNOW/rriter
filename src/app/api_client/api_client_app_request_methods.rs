@@ -417,6 +417,15 @@ impl crate::app::App {
         }
         if self.ide_panel.api.focused.is_none() {
             if key_event.state == winit::event::ElementState::Pressed
+                && self.run_bound_commands(
+                    chord,
+                    Some(crate::keymap::KeyContext::ApiClient),
+                    key_event.repeat,
+                )
+            {
+                return true;
+            }
+            if key_event.state == winit::event::ElementState::Pressed
                 && key_event.physical_key
                     == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F2)
             {
@@ -455,6 +464,13 @@ impl crate::app::App {
         if mock_python_target.is_some()
             && self.mark_pending_autocomplete_apply_for_key(key_event.physical_key)
         {
+            return true;
+        }
+        if self.run_bound_commands(
+            chord,
+            Some(crate::keymap::KeyContext::ApiClient),
+            key_event.repeat,
+        ) {
             return true;
         }
         let input_version_before = self.ide_panel.api.input_editor.version;

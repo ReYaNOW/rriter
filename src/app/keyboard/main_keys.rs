@@ -393,6 +393,16 @@ impl App {
                     _ => {}
                 }
             }
+            if key_event.state == ElementState::Pressed
+                && self.database_table_command_context_unowned()
+                && self.run_bound_commands(
+                    chord,
+                    Some(crate::keymap::KeyContext::DatabaseTable),
+                    key_event.repeat,
+                )
+            {
+                return;
+            }
             if self.handle_database_table_key(&key_event, chord, terminal_owns_chord)
                 || self.handle_pdf_key(&key_event, chord)
                 || self.handle_image_key(&key_event, chord)
@@ -844,6 +854,10 @@ impl App {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+                return;
+            }
+
+            if self.run_bound_commands(chord, None, key_event.repeat) {
                 return;
             }
 
@@ -1339,6 +1353,110 @@ mod tests {
         assert!(
             vcs < message,
             "owned VCS copy must stay before Git message routing"
+        );
+    }
+
+    #[test]
+    fn reassigned_editor_command_routes_through_main_keyboard_input() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else { return; };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.tabs.push(crate::app::app_behavior_tests::tab_with(
+            "hotkeys.rs",
+            Some("/tmp/hotkeys.rs"),
+            "",
+        ));
+        app.active_tab = 0;
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("test chord");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(
+            crate::platform::CURRENT_PLATFORM,
+            crate::keymap::Command::EditorGitDiffPrevHunk,
+            chord,
+        );
+        app.keymap = crate::keymap::Keymap::build(&overrides);
+        app.modifiers = if crate::platform::CURRENT_PLATFORM == crate::platform::PlatformKind::Macos {
+            winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::ALT
+        } else {
+            winit::keyboard::ModifiersState::CONTROL | winit::keyboard::ModifiersState::ALT
+        };
+        let state = crate::app::events::host_loop::HeadlessLoopState::default();
+        app.handle_main_key_input(
+            &crate::app::events::host_loop::HostLoop::headless(&state),
+            KeyInput {
+                physical_key: PhysicalKey::Code(KeyCode::KeyG),
+                logical_text: None,
+                text: None,
+                state: ElementState::Pressed,
+                repeat: false,
+            },
+        );
+        assert_eq!(app.readonly_notice_text, "Нет изменений Git в документе");
+    }
+
+    #[test]
+    fn reassigned_sql_command_routes_through_main_keyboard_input() {
+        fn sql_app() -> Option<App> {
+            let text = "select  'a;  b'  from  t where x=$tag$keep  spaces$tag$; -- keep  comment";
+            let mut app = crate::app::app_behavior_tests::test_app()?;
+            app.is_ide_mode = true;
+            app.show_welcome = false;
+            app.editor = crate::app::app_behavior_tests::editor_with(text);
+            let mut tab = crate::app::app_behavior_tests::tab_with("SQL Console", None, text);
+            tab.kind = crate::app::EditorTabKind::DatabaseQuery(
+                crate::app::database::DatabaseQueryTabMeta {
+                    console_id: crate::app::database::SqlConsoleId(7),
+                    connection_id: crate::app::database::DatabaseConnectionId(3),
+                    database_name: "postgres".to_string(),
+                    title: "SQL Console".to_string(),
+                },
+                crate::app::database::DatabaseQueryTabState::default(),
+            );
+            app.tabs = vec![tab];
+            app.active_tab = 0;
+            Some(app)
+        }
+
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("test chord");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(
+            crate::platform::CURRENT_PLATFORM,
+            crate::keymap::Command::DatabaseQueryFormat,
+            chord,
+        );
+
+        let Some(mut direct_app) = sql_app() else { return; };
+        direct_app.keymap = crate::keymap::Keymap::build(&overrides);
+        assert!(direct_app.active_tab_is_database_query());
+        assert!(direct_app.run_bound_commands(Some(chord), None, false));
+        assert_ne!(
+            direct_app.editor.get_full_text(),
+            "select  'a;  b'  from  t where x=$tag$keep  spaces$tag$; -- keep  comment"
+        );
+
+        let Some(mut app) = sql_app() else { return; };
+        app.keymap = crate::keymap::Keymap::build(&overrides);
+        app.modifiers = if crate::platform::CURRENT_PLATFORM == crate::platform::PlatformKind::Macos {
+            winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::ALT
+        } else {
+            winit::keyboard::ModifiersState::CONTROL | winit::keyboard::ModifiersState::ALT
+        };
+        let state = crate::app::events::host_loop::HeadlessLoopState::default();
+        app.handle_main_key_input(
+            &crate::app::events::host_loop::HostLoop::headless(&state),
+            KeyInput {
+                physical_key: PhysicalKey::Code(KeyCode::KeyG),
+                logical_text: None,
+                text: None,
+                state: ElementState::Pressed,
+                repeat: false,
+            },
+        );
+        assert_ne!(
+            app.editor.get_full_text(),
+            "select  'a;  b'  from  t where x=$tag$keep  spaces$tag$; -- keep  comment"
         );
     }
 

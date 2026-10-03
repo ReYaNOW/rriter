@@ -398,8 +398,7 @@ impl Renderer {
         }
     }
 
-    fn draw_readonly_notice(&mut self, tab_bar_h: f32, s: f32) {
-        let text = "Файл открыт в режиме только чтение";
+    fn draw_readonly_notice(&mut self, text: &str, tab_bar_h: f32, s: f32) {
         let text_w = self.measure_ui_width(text, 1.0);
         let pad_x = 16.0 * s;
         let w = text_w + pad_x * 2.0;
@@ -626,6 +625,7 @@ impl Renderer {
         ui_my: f32,
         blink_alpha: f32,
         show_readonly_notice: bool,
+        readonly_notice_text: &'static str,
         tab_bar_h: f32,
         is_ui_disabled: bool,
         modal_overlay_open: bool,
@@ -662,7 +662,7 @@ impl Renderer {
         );
 
         if show_readonly_notice {
-            self.draw_readonly_notice(tab_bar_h, s);
+            self.draw_readonly_notice(readonly_notice_text, tab_bar_h, s);
         }
 
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {

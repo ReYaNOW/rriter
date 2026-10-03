@@ -217,6 +217,7 @@ pub(crate) fn test_app() -> Option<App> {
         inline_git_diff_rx: None,
         inline_git_popup: None,
         readonly_notice_until: None,
+        readonly_notice_text: "Файл открыт в режиме только чтение",
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,

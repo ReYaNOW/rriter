@@ -183,6 +183,7 @@ impl App {
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
+                    self.readonly_notice_text,
                     self.inline_git_popup.as_ref(),
                     &self.pdf_engine,
                     self.pdf_dark_pages,

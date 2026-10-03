@@ -1655,6 +1655,7 @@ Entrypoints/state:
 Input:
 
 * `src/app/keyboard.rs` -> keyboard router + terminal/search helpers.
+* `src/app/keyboard/commands.rs` -> contextual dispatch for configurable panel commands.
 * `src/app/keyboard/main_keys.rs` -> global shortcuts + mode routing.
 * `src/app/keyboard/input_owner.rs` -> terminal shortcut interception and input-owner routing predicates.
 * `src/app/keyboard/main_keys_vcs_copy.rs` -> Ctrl+C eligibility of the VCS log selection and its tests (child module of `main_keys.rs`).

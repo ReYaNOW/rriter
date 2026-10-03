@@ -584,6 +584,7 @@ pub(crate) mod reviewer_stage2_integration {
             &[],
             &app.ide_workspaces,
             false,
+            "Файл открыт в режиме только чтение",
             None,
             &app.pdf_engine,
             app.pdf_dark_pages,
