@@ -520,7 +520,8 @@ impl App {
                     // Помечаем границу: элементы оверлея регистрируются ниже.
                     // find_overlay_at() будет искать только среди них.
                     self.ui_registry.mark_overlay_start();
-                    settings_cursor_mode = self.renderer.as_mut().unwrap().draw_settings(
+                    let rust_row = self.lsp.as_ref().map(crate::lsp::LspManager::rust_row_info);
+                    settings_cursor_mode =self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
                         &self.faq_editor,
@@ -539,12 +540,14 @@ impl App {
                         &self.tool_paths,
                         &self.tool_installer,
                         &self.dart_settings,
+                        &self.rust_settings,
                         &self.dart_tool_state,
                         self.ide_panel
                             .lsp_servers
                             .iter()
                             .find(|server| server.name == "dart")
                             .map(|server| server.status),
+                        rust_row.as_ref(),
                         self.ide_panel.database.settings(),
                         self.ctrl_wheel_multiplier,
                         &mut self.keymap_settings,

@@ -6,10 +6,16 @@
 fn about_to_wait_lsp_events(app: &mut App) {
     // LSP: опрашиваем события (диагностика, code actions) — раз в кадр, не блокирует
     let mut lsp_events = Vec::new();
+    let mut diagnostics_committed = false;
     if app.is_ide_mode {
         if let Some(lsp) = &mut app.lsp {
             lsp_events = lsp.poll();
+            diagnostics_committed = lsp.take_diagnostics_commit();
         }
+    }
+
+    if diagnostics_committed && let Some(w) = app.window.as_ref() {
+        w.request_redraw();
     }
 
     for event in lsp_events {
@@ -133,6 +139,7 @@ fn about_to_wait_lsp_events(app: &mut App) {
             }
             crate::lsp::LspEvent::ServerReady { .. } => {}
             crate::lsp::LspEvent::StatusChanged { .. } => {}
+            crate::lsp::LspEvent::ServerStatus { .. } => {}
             crate::lsp::LspEvent::ConfigurationServed { .. } => {}
             crate::lsp::LspEvent::ClosingLabels { .. } => {}
             crate::lsp::LspEvent::WorkspaceDiagnosticsDone { .. } => {}

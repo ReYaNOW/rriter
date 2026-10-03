@@ -134,13 +134,14 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
 
 #[cfg(test)]
 pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
-    make_initialize_for_server(LspServerKind::Ruff, id, workspaces)
+    make_initialize_for_server(LspServerKind::Ruff, id, workspaces, None)
 }
 
 pub(super) fn make_initialize_for_server(
     server: LspServerKind,
     id: i32,
     workspaces: &[PathBuf],
+    init_options: Option<&serde_json::Value>,
 ) -> Vec<u8> {
     let root_uri = workspaces.first().map(|workspace| path_to_uri(workspace));
     let workspace_folders = (!workspaces.is_empty()).then(|| {
@@ -193,7 +194,7 @@ pub(super) fn make_initialize_for_server(
                 }
             }
         }),
-        LspServerKind::Ruff | LspServerKind::Ty => serde_json::json!({
+        LspServerKind::Ruff | LspServerKind::Ty | LspServerKind::RustAnalyzer => serde_json::json!({
             "workspace": {
                 "configuration": true,
                 "didChangeConfiguration": { "dynamicRegistration": true },
@@ -236,6 +237,19 @@ pub(super) fn make_initialize_for_server(
             }
         }),
     };
+    let capabilities = if server == LspServerKind::RustAnalyzer {
+        let mut capabilities = capabilities;
+        if let Some(workspace) = capabilities
+            .get_mut("workspace")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            workspace.remove("didChangeWatchedFiles");
+        }
+        capabilities["experimental"] = serde_json::json!({"serverStatusNotification": true});
+        capabilities
+    } else {
+        capabilities
+    };
 
     let mut params = serde_json::json!({
         "processId": std::process::id(),
@@ -246,12 +260,8 @@ pub(super) fn make_initialize_for_server(
     if let Some(folders) = workspace_folders {
         params["workspaceFolders"] = serde_json::Value::Array(folders);
     }
-    if server == LspServerKind::Dart {
-        params["initializationOptions"] = serde_json::json!({
-            "onlyAnalyzeProjectsWithOpenFiles": true,
-            "suggestFromUnimportedLibraries": true,
-            "closingLabels": true
-        });
+    if let Some(init_options) = init_options {
+        params["initializationOptions"] = init_options.clone();
     }
 
     serde_json::to_vec(&serde_json::json!({
@@ -291,6 +301,14 @@ pub(super) fn make_did_change_full(uri: &str, version: i32, text: &str) -> Vec<u
 pub(super) fn make_did_close(uri: &str) -> Vec<u8> {
     let body = format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        json_escape(uri)
+    );
+    body.into_bytes()
+}
+
+pub(super) fn make_did_save(uri: &str) -> Vec<u8> {
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didSave","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
         json_escape(uri)
     );
     body.into_bytes()
@@ -487,6 +505,7 @@ fn dart_configuration() -> serde_json::Value {
 fn configuration_response_for(
     server: LspServerKind,
     item: &serde_json::Value,
+    init_options: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let section = item.get("section").and_then(|value| value.as_str()).unwrap_or("");
     match server {
@@ -509,6 +528,7 @@ fn configuration_response_for(
             _ => serde_json::json!({}),
         },
         LspServerKind::Ruff => serde_json::json!({}),
+        LspServerKind::RustAnalyzer => init_options.cloned().unwrap_or(serde_json::Value::Null),
     }
 }
 
@@ -605,6 +625,26 @@ pub(super) fn dispatch_frame_for_server(
     server_name: &'static str,
     out_tx: &Sender<Vec<u8>>,
     pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+) {
+    dispatch_frame_for_server_with_init_options(
+        body,
+        event_tx,
+        server,
+        server_name,
+        out_tx,
+        pending_requests,
+        None,
+    );
+}
+
+pub(super) fn dispatch_frame_for_server_with_init_options(
+    body: &[u8],
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
+    server: LspServerKind,
+    server_name: &'static str,
+    out_tx: &Sender<Vec<u8>>,
+    pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+    init_options: Option<&serde_json::Value>,
 ) {
     let header = match serde_json::from_slice::<RpcHeader<'_>>(body) {
         Ok(header) => header,
@@ -764,6 +804,33 @@ pub(super) fn dispatch_frame_for_server(
             }
         }
         Some("initialize") => {}
+        Some("experimental/serverStatus") => {
+            if server == LspServerKind::RustAnalyzer {
+                let params = msg.get("params");
+                let health = match params
+                    .and_then(|params| params.get("health"))
+                    .and_then(|value| value.as_str())
+                {
+                    Some("ok") => super::rooted_language::ServerHealth::Ok,
+                    Some("error") => super::rooted_language::ServerHealth::Error,
+                    Some("warning") | None | Some(_) => {
+                        super::rooted_language::ServerHealth::Warning
+                    }
+                };
+                let _ = event_tx.send(LspEvent::ServerStatus {
+                    server,
+                    quiescent: params
+                        .and_then(|params| params.get("quiescent"))
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false),
+                    health,
+                    message: params
+                        .and_then(|params| params.get("message"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned),
+                });
+            }
+        }
         Some("window/logMessage") | Some("window/showMessage") => {
             if let Some(params) = msg.get("params") {
                 if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
@@ -787,16 +854,16 @@ pub(super) fn dispatch_frame_for_server(
                 {
                     let values = items
                         .iter()
-                        .map(|item| configuration_response_for(server, item).to_string())
+                        .map(|item| configuration_response_for(server, item, init_options).to_string())
                         .collect::<Vec<_>>();
                     if values.is_empty() {
-                        configuration_response_for(server, &serde_json::Value::Null)
+                        configuration_response_for(server, &serde_json::Value::Null, init_options)
                             .to_string()
                     } else {
                         values.join(",")
                     }
                 } else {
-                    configuration_response_for(server, &serde_json::Value::Null).to_string()
+                    configuration_response_for(server, &serde_json::Value::Null, init_options).to_string()
                 };
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());

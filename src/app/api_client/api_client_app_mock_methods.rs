@@ -818,7 +818,7 @@ impl crate::app::App {
         let Some(source) = self.active_api_mock_autocomplete_source() else {
             return;
         };
-        self.request_ty_autocomplete_for_source(
+        self.request_ide_autocomplete_for_source(
             source,
             crate::app::AutocompleteMode::TyContext,
             trigger,

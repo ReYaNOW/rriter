@@ -1017,3 +1017,116 @@ fn stale_pdfium_op_cleanup_is_bounded_and_tolerates_a_missing_root() {
     assert_eq!(left, 2);
     let _ = fs::remove_dir_all(data.parent().unwrap());
 }
+
+#[test]
+fn rust_analyzer_gzip_install_verifies_extracts_and_cleans_failed_or_cancelled_attempts() {
+    use std::io::Write;
+
+    let (data, _) = test_roots("rust-analyzer-gzip");
+    let root = data.join("managed");
+    fs::create_dir_all(&root).unwrap();
+    let archive = data.join("rust-analyzer.gz");
+    let executable = b"#!/bin/sh\necho fake\n";
+    let file = fs::File::create(&archive).unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    encoder.write_all(executable).unwrap();
+    encoder.finish().unwrap();
+    let sha256 = sha256_file_hex(&archive).unwrap();
+    let destination = root.join("2026-09-28").join("rust-analyzer");
+
+    let installed = install_rust_analyzer_from_gz(
+        &archive,
+        &sha256,
+        &destination,
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(installed, destination);
+    assert_eq!(fs::read(&destination).unwrap(), executable);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(fs::metadata(&destination).unwrap().permissions().mode() & 0o111, 0);
+    }
+
+    let wrong_hash_destination = root.join("wrong-hash").join("rust-analyzer");
+    assert!(install_rust_analyzer_from_gz(
+        &archive,
+        &"0".repeat(64),
+        &wrong_hash_destination,
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .is_err());
+    assert!(!wrong_hash_destination.exists());
+    assert!(!wrong_hash_destination.parent().unwrap().exists());
+
+    for (name, bytes) in [
+        ("garbage", b"not a gzip stream".to_vec()),
+        ("truncated", fs::read(&archive).unwrap()[..fs::metadata(&archive).unwrap().len() as usize - 4].to_vec()),
+    ] {
+        let bad_archive = data.join(format!("{name}.gz"));
+        fs::write(&bad_archive, bytes).unwrap();
+        let bad_destination = root.join(name).join("rust-analyzer");
+        let bad_hash = sha256_file_hex(&bad_archive).unwrap();
+        assert!(install_rust_analyzer_from_gz(
+            &bad_archive,
+            &bad_hash,
+            &bad_destination,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .is_err());
+        assert!(!bad_destination.exists());
+        assert!(!fs::read_dir(bad_destination.parent().unwrap()).is_ok_and(|mut entries| entries.next().is_some()));
+    }
+
+    let cancelled_destination = root.join("cancelled").join("rust-analyzer");
+    assert_eq!(
+        install_rust_analyzer_from_gz(
+            &archive,
+            &sha256,
+            &cancelled_destination,
+            &AtomicBool::new(true),
+            &mut |_, _| {},
+        )
+        .unwrap_err(),
+        INSTALL_CANCELLED_MESSAGE
+    );
+    assert!(!cancelled_destination.exists());
+    assert!(!cancelled_destination.parent().unwrap().exists());
+
+    let late_cancel_destination = root.join("late-cancel").join("rust-analyzer");
+    let late_cancel = AtomicBool::new(false);
+    assert_eq!(
+        install_rust_analyzer_from_gz(
+            &archive,
+            &sha256,
+            &late_cancel_destination,
+            &late_cancel,
+            &mut |phase, _| {
+                if phase == ToolInstallPhase::Extracting {
+                    late_cancel.store(true, Ordering::Release);
+                }
+            },
+        )
+        .unwrap_err(),
+        INSTALL_CANCELLED_MESSAGE
+    );
+    assert!(!late_cancel_destination.exists());
+    assert_eq!(fs::read_dir(late_cancel_destination.parent().unwrap()).unwrap().count(), 0);
+    let _ = fs::remove_dir_all(data.parent().unwrap());
+}
+
+#[test]
+fn rust_analyzer_archive_constants_match_supported_platform_policy() {
+    for archive in crate::lsp::RUST_ANALYZER_ARCHIVES {
+        assert_eq!(archive.sha256.len(), 64);
+        assert!(archive.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+    #[cfg(not(windows))]
+    assert!(crate::lsp::rust_analyzer_archive_for_platform().is_some());
+    #[cfg(windows)]
+    assert!(crate::lsp::rust_analyzer_archive_for_platform().is_none());
+}

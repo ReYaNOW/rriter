@@ -812,3 +812,48 @@ fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
         "right bracket in return type should be neutral white",
     );
 }
+
+#[test]
+fn rust_fenced_hover_uses_rust_highlighting_despite_python_doc_tags() {
+    let raw = "Example:\n```rust\nfn main() {}\n```\n:param x: docs";
+    let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+    let fn_start = text.find("fn main").unwrap_or(0);
+    assert!(text.contains("\nfn main() {}"));
+    assert!(spans.iter().any(|span| {
+        span.start <= fn_start
+            && span.end >= fn_start + 2
+            && span.color == [1.0, 0.474, 0.776, 1.0]
+    }));
+}
+
+#[test]
+fn rust_fenced_hover_at_end_keeps_spans_after_trimming() {
+    let raw = "```rust\nfn main() {}\n```";
+    let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+    let fn_start = text.find("fn main").unwrap_or(0);
+    assert!(spans.iter().any(|span| {
+        span.start <= fn_start
+            && span.end >= fn_start + 2
+            && span.color == [1.0, 0.474, 0.776, 1.0]
+    }));
+}
+
+#[test]
+fn untagged_param_hover_keeps_python_doc_highlighting() {
+    let raw = ":param x: docs";
+    let (text, _spans, _kinds, _inline) = highlight_hover_text(raw);
+    assert!(text.contains("Parameters"));
+}
+
+#[test]
+fn dart_fenced_hover_uses_dart_tree_sitter_config() {
+    let raw = "```dart\nDio dio\n```";
+    let (text, spans, _kinds, _inline) = highlight_hover_text(raw);
+    assert!(text.contains("Dio dio"));
+    let type_start = text.find("Dio").unwrap_or(0);
+    assert!(spans.iter().any(|span| {
+        span.start <= type_start
+            && span.end >= type_start + "Dio".len()
+            && span.color == crate::highlighter::DRACULA_CYAN
+    }));
+}

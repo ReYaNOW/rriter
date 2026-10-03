@@ -238,6 +238,7 @@ impl App {
             open_folder_rx: None,
             tool_paths: config.tool_paths.clone(),
             dart_settings: config.dart_settings.clone(),
+            rust_settings: config.rust_settings.clone(),
             settings_tool_picker_rx: None,
             tool_installer: crate::app::tool_installer::ToolInstaller::default(),
             dart_tool_state: crate::app::tool_installer::DartToolState::default(),

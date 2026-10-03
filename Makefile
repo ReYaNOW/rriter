@@ -26,7 +26,7 @@ TEST ?=
 TEST_THREADS ?= 8
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max max-nopgo bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
+.PHONY: all fast max max-nopgo bloat-max codex_test lint-baseline test check-tests test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
 
 all: max
 
@@ -122,6 +122,19 @@ test: $(if $(PDFIUM_READY),,pdfium)
 	--nocapture \
 	--test-threads=$(TEST_THREADS)
 	@echo "✅ Тесты завершены"
+
+# Компиляция тестов без линковки и запуска, с теми же флагами, что у test:
+# ошибку компиляции ловит она, а не прогон с перелинковкой тестового бинаря.
+check-tests:
+	@echo "🔎 Проверка компиляции тестов (флаги как у make test)..."
+	$(FAST_PROFILE_OPTS) \
+	CARGO_TERM_COLOR=always \
+	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
+	cargo +nightly check --tests \
+	$(BUILD_STD_TEST) \
+	-Z panic-abort-tests \
+	--target $(TARGET) \
+	--release
 
 pdfium:
 	mkdir -p target

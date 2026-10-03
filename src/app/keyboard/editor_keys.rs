@@ -294,15 +294,15 @@ impl App {
             self.close_autocomplete();
         } else if should_trigger_autocomplete && self.file_extension != "dart" {
             if let Some(trigger) = ty_completion_trigger {
-                self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
+                self.request_ide_autocomplete(AutocompleteMode::TyContext, Some(trigger));
             } else if self.autocomplete_active
                 && self.autocomplete_mode == AutocompleteMode::TyImports
             {
-                self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
+                self.request_ide_autocomplete(AutocompleteMode::TyImports, None);
             } else if cursor_after_python_member_dot(&self.editor)
                 || cursor_inside_python_call_parens(&self.editor)
             {
-                self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
+                self.request_ide_autocomplete(AutocompleteMode::TyContext, None);
             } else {
                 self.update_autocomplete();
             }
@@ -521,6 +521,7 @@ impl App {
                         ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
                         tool_paths: self.tool_paths.clone(),
                         dart_settings: self.dart_settings.clone(),
+                        rust_settings: self.rust_settings.clone(),
                         keymap_overrides: self.keymap_overrides.clone(),
                     });
                     if self.is_ide_mode {

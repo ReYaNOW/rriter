@@ -416,6 +416,7 @@ impl App {
             ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),
+            rust_settings: self.rust_settings.clone(),
             keymap_overrides: self.keymap_overrides.clone(),
         };
         crate::save_config(&config);

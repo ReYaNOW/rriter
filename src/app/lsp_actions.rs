@@ -397,7 +397,7 @@ impl App {
                 }
             }
             crate::app::LspActionItem::CompleteImports => {
-                self.request_ty_autocomplete(crate::app::AutocompleteMode::TyImports, None);
+                self.request_ide_autocomplete(crate::app::AutocompleteMode::TyImports, None);
             }
         }
 

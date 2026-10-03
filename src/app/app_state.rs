@@ -1,4 +1,4 @@
-use super::{DartSettings, MarkdownTabState};
+use super::{DartSettings, MarkdownTabState, RustSettings};
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::platform::WindowHost;
@@ -1248,6 +1248,7 @@ pub struct App {
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: DartSettings,
+    pub rust_settings: RustSettings,
     pub settings_tool_picker_rx:
         Option<std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>>,
     pub(crate) tool_installer: crate::app::tool_installer::ToolInstaller,

@@ -1,4 +1,5 @@
 use super::hover::PendingRequestKind;
+use super::rooted_language::ServerHealth;
 use super::*;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -195,6 +196,12 @@ pub enum LspEvent {
         request_id: i32,
         edits: Vec<TextChange>,
     },
+    ServerStatus {
+        server: LspServerKind,
+        quiescent: bool,
+        health: ServerHealth,
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -202,6 +209,7 @@ pub enum LspServerKind {
     Ruff,
     Ty,
     Dart,
+    RustAnalyzer,
 }
 
 impl LspServerKind {
@@ -210,12 +218,13 @@ impl LspServerKind {
             Self::Ruff => "ruff",
             Self::Ty => "ty",
             Self::Dart => "dart",
+            Self::RustAnalyzer => "rust-analyzer",
         }
     }
 
     pub const fn restart_attempt_limit(self) -> u8 {
         match self {
-            Self::Ruff | Self::Ty | Self::Dart => 4,
+            Self::Ruff | Self::Ty | Self::Dart | Self::RustAnalyzer => 4,
         }
     }
 
@@ -225,6 +234,7 @@ impl LspServerKind {
             "ruff" => Some(Self::Ruff),
             "ty" => Some(Self::Ty),
             "dart" => Some(Self::Dart),
+            "rust-analyzer" => Some(Self::RustAnalyzer),
             _ => None,
         }
     }
@@ -322,6 +332,15 @@ pub(super) const DART_SERVER: LspServerDef = LspServerDef {
     extensions: &["dart"],
 };
 
+pub(super) const RUST_ANALYZER_SERVER: LspServerDef = LspServerDef {
+    kind: LspServerKind::RustAnalyzer,
+    program: "rust-analyzer",
+    override_env: "RRITER_RUST_ANALYZER_PATH",
+    args: &[],
+    language_id: "rust",
+    extensions: &["rs"],
+};
+
 // ── Внутренние команды main → supervisor ─────────────────────────────────────
 
 pub(super) enum Cmd {
@@ -343,6 +362,7 @@ pub(super) enum Cmd {
         #[allow(dead_code)]
         uri: String,
     },
+    Save { uri: String },
     /// Запросить codeActions для позиции
     CodeAction {
         id: i32,

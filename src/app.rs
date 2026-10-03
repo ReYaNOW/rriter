@@ -34,6 +34,7 @@ mod automation_pdf;
 mod automation_terminal_ops;
 pub(crate) mod context_menu;
 mod dart_settings;
+mod rust_settings;
 pub mod database;
 pub mod events;
 pub mod file_icons;
@@ -66,6 +67,7 @@ pub(crate) use autocomplete::{
     apply_completion_plan_to_editor, autocomplete_match_candidate,
 };
 pub use dart_settings::*;
+pub use rust_settings::*;
 use glutin::display::GetGlDisplay;
 use python_completion::*;
 use rustc_hash::{FxHashMap, FxHashSet};

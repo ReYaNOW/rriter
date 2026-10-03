@@ -6,6 +6,10 @@ use tree_sitter::StreamingIterator;
 
 pub const DOCSTRING_TEXT: [f32; 4] = crate::highlighter::DRACULA_COMMENT;
 
+pub fn fence_tag(line: &str) -> Option<&str> {
+    line.trim().strip_prefix("```").map(str::trim)
+}
+
 thread_local! {
     pub static TS_DIAG_PARSER: std::cell::RefCell<tree_sitter::Parser> = {
         let mut parser = tree_sitter::Parser::new();
@@ -541,7 +545,7 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
         let line = lines[i];
         let trimmed = line.trim();
 
-        if trimmed.starts_with("```") {
+        if let Some(lang) = fence_tag(trimmed) {
             if in_fence {
                 while kinds.last() == Some(&HoverLineKind::Code) && out.ends_with("\n\n") {
                     out.pop();
@@ -554,7 +558,6 @@ pub fn normalize_python_hover_doc(msg: &str) -> (String, Vec<HoverLineKind>, Vec
                 in_fence = false;
             } else {
                 in_fence = true;
-                let lang = trimmed.strip_prefix("```").unwrap_or("").trim();
                 in_fence_is_code = lang.is_empty() || lang == "python" || lang == "py";
             }
             i += 1;

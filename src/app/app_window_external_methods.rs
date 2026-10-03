@@ -225,6 +225,12 @@ impl App {
         if kind == crate::platform::ToolKind::Dart {
             self.restart_dart_server();
         }
+        if kind == crate::platform::ToolKind::RustAnalyzer {
+            if let Some(lsp) = &mut self.lsp {
+                lsp.refresh_rust_resolution();
+                self.ide_panel.lsp_servers = lsp.servers_info();
+            }
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
