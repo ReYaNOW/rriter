@@ -239,12 +239,19 @@ impl RootedWorkspaces {
         self.roots.get_mut(&root_key)?.process.as_mut()
     }
 
-    pub fn poll_processes(&mut self, events: &mut Vec<LspEvent>) {
+    pub fn poll_processes(
+        &mut self,
+        events: &mut Vec<LspEvent>,
+        diagnostic_roots: &mut std::collections::HashMap<usize, PathKey>,
+    ) {
         for (key, state) in &self.roots {
             let Some(process) = &state.process else { continue; };
             let event_start = events.len();
             process.poll(events);
-            for event in &events[event_start..] {
+            for (index, event) in events.iter().enumerate().skip(event_start) {
+                if matches!(event, LspEvent::Diagnostics { server, .. } if *server == self.lang.server_def().kind) {
+                    diagnostic_roots.insert(index, key.clone());
+                }
                 if let LspEvent::StatusChanged { server, status } = event
                     && *server == self.lang.server_def().kind
                 {

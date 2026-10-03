@@ -1595,3 +1595,144 @@ fn open_file_diagnostics_do_not_regress_to_older_or_versionless_results() {
     assert_eq!(*version, 5);
     assert_eq!(diagnostics[0].message.as_ref(), "new");
 }
+
+#[test]
+fn rust_diagnostics_follow_document_versions_and_empty_items_remove_the_entry() {
+    let path = PathBuf::from("/tmp/ws/src/lib.rs");
+    let root = PathBuf::from("/tmp/ws");
+    let (proc, _cmd_rx, event_tx) = test_process_with_events(&RUST_ANALYZER_SERVER);
+    let mut manager = LspManager::new(vec![root.clone()]);
+    manager.rust.open_document(
+        path.clone(),
+        Arc::from("fn main() {}"),
+        4,
+        root.clone(),
+        None,
+        &crate::ui_waker::UiWaker::counting(),
+    );
+    manager
+        .rust
+        .insert_root_for_test(root.clone(), Some(proc));
+    manager.rust.clear_missing();
+    manager.instant_diagnostics.insert(
+        path.clone(),
+        (1, diag_arc(vec![test_diag("ruff", DiagSeverity::Error, None)])),
+    );
+    manager.ty_instant_diagnostics.insert(
+        path.clone(),
+        (2, diag_arc(vec![test_diag("ty", DiagSeverity::Warning, None)])),
+    );
+    manager.dart.insert_live_diagnostics(
+        path.clone(),
+        rooted_language::LiveDiagnostics {
+            version: 3,
+            root: crate::platform::PathKey::new(&root),
+            items: diag_arc(vec![test_diag("dart", DiagSeverity::Info, None)]),
+        },
+    );
+    manager
+        .diagnostics
+        .insert(path.clone(), diag_arc(vec![test_diag("legacy", DiagSeverity::Info, None)]));
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server: LspServerKind::RustAnalyzer,
+            path: path.clone(),
+            version: None,
+            items: vec![test_diag("current", DiagSeverity::Error, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+    assert_eq!(manager.rust.live_diagnostics()[&path].version, 4);
+    let displayed = manager.diagnostic_refs_for_path(&path);
+    assert_eq!(displayed.len(), 4);
+    assert_eq!(displayed[3].message.as_ref(), "current");
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server: LspServerKind::RustAnalyzer,
+            path: path.clone(),
+            version: Some(3),
+            items: vec![test_diag("stale", DiagSeverity::Warning, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+    assert_eq!(
+        manager.rust.live_diagnostics()[&path].items[0].message.as_ref(),
+        "current"
+    );
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server: LspServerKind::RustAnalyzer,
+            path: path.clone(),
+            version: Some(4),
+            items: Vec::new(),
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+    assert!(!manager.rust.live_diagnostics().contains_key(&path));
+    manager.instant_diagnostics.remove(&path);
+    manager.ty_instant_diagnostics.remove(&path);
+    manager.dart.remove_live_diagnostics(&path);
+    manager.diagnostics.remove(&path);
+    assert!(!manager.diagnostic_paths().contains(&&path));
+}
+
+#[test]
+fn unopened_rust_diagnostics_keep_the_poll_root_and_stop_clears_registry_paths() {
+    let path = PathBuf::from("/home/x/.cargo/registry/src/foo-1.0/lib.rs");
+    let root = PathBuf::from("/home/x/project");
+    let (proc, _cmd_rx, event_tx) = test_process_with_events(&RUST_ANALYZER_SERVER);
+    let mut manager = LspManager::new(vec![root.clone()]);
+    manager
+        .rust
+        .insert_root_for_test(root.clone(), Some(proc));
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server: LspServerKind::RustAnalyzer,
+            path: path.clone(),
+            version: None,
+            items: vec![test_diag("dependency", DiagSeverity::Warning, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+    assert_eq!(manager.rust.live_diagnostics()[&path].version, 0);
+    assert_eq!(manager.rust.live_diagnostics()[&path].root, crate::platform::PathKey::new(&root));
+
+    manager.stop_rooted_root(
+        rooted_language::RootedLanguage::Rust,
+        &crate::platform::PathKey::new(&root),
+    );
+    assert!(!manager.rust.live_diagnostics().contains_key(&path));
+    assert!(!manager.diagnostic_paths().contains(&&path));
+}
+
+#[test]
+fn unopened_dart_diagnostics_are_dropped_with_or_without_a_version() {
+    let path = PathBuf::from("/tmp/dart/lib.dart");
+    let root = PathBuf::from("/tmp/dart");
+    let (proc, _cmd_rx, event_tx) = test_process_with_events(&DART_SERVER);
+    let mut manager = LspManager::new(vec![root.clone()]);
+    manager.dart.insert_root_for_test(root, Some(proc));
+
+    for version in [None, Some(1)] {
+        event_tx
+            .send(LspEvent::Diagnostics {
+                server: LspServerKind::Dart,
+                path: path.clone(),
+                version,
+                items: vec![test_diag("closed", DiagSeverity::Warning, None)],
+                result_id: None,
+            })
+            .unwrap();
+        manager.poll();
+    }
+    assert!(!manager.dart.live_diagnostics().contains_key(&path));
+    assert!(!manager.diagnostic_paths().contains(&&path));
+}
