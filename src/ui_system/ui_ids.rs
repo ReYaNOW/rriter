@@ -38,6 +38,14 @@ pub enum UiId {
     SettingsTab(usize),
     SettingsEditorCtrlWheelAdjust(i8),
     SettingsDatabaseAdjust(usize, i8),
+    SettingsKeymapFilter,
+    SettingsKeymapAdd(usize),
+    SettingsKeymapRemove(usize, usize),
+    SettingsKeymapReset(usize),
+    SettingsKeymapResetAll,
+    SettingsKeymapConflictAccept,
+    SettingsKeymapConflictCancel,
+    SettingsKeymapScrollY,
 
     // Settings IDE
     SettingsIdeAddWorkspace,

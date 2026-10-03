@@ -140,7 +140,7 @@ pub(crate) fn render_frame(app: &mut App) -> FrameOutcome {
         && let (Some(window), Some(renderer)) = (app.window.as_ref(), app.renderer.as_mut())
     {
         let size = window.inner_size();
-        super::dump::draw_dialog(renderer, &app.base_title, size.width, size.height);
+        super::dump::draw_dialog(renderer, &app.base_title, app.confirm_dialog.action(), size.width, size.height);
     }
     outcome
 }

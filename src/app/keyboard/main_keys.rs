@@ -242,6 +242,8 @@ impl App {
             return;
         }
 
+        if self.handle_keymap_settings_key(&key_event, chord) { return; }
+
         let terminal_owns_chord = chord.is_some_and(|chord| {
             super::input_owner::terminal_intercepts(chord, crate::platform::CURRENT_PLATFORM)
         }) && super::input_owner::terminal_keyboard_owner(

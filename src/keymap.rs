@@ -311,6 +311,7 @@ impl Keymap {
     pub fn skipped(&self) -> &[SkippedEntry] { &self.skipped }
     pub fn conflicted(&self, command: Command) -> bool { let Some(info) = COMMANDS.get(command as usize) else { return false; }; self.chords(command).iter().any(|ch| COMMANDS.iter().any(|other| other.command != command && !KeyContext::exclusive(info.context, other.context) && self.chords(other.command).contains(ch) && !(has_default_chord(self.platform, command, *ch) && has_default_chord(self.platform, other.command, *ch)))) }
     pub fn owners_of(&self, chord: Chord, context: KeyContext) -> Vec<Command> { COMMANDS.iter().filter(|info| !KeyContext::exclusive(context, info.context) && self.chords(info.command).contains(&chord) && COMMANDS.iter().any(|other| other.command != info.command && !KeyContext::exclusive(context, other.context) && self.chords(other.command).contains(&chord) && !(has_default_chord(self.platform, info.command, chord) && has_default_chord(self.platform, other.command, chord)))).map(|info| info.command).collect() }
+    pub fn conflicting_commands(&self, chord: Chord, command: Command) -> Vec<Command> { let context = command_info(command).context; COMMANDS.iter().filter(|other| other.command != command && !KeyContext::exclusive(context, other.context) && self.chords(other.command).contains(&chord) && !(has_default_chord(self.platform, command, chord) && has_default_chord(self.platform, other.command, chord))).map(|other| other.command).collect() }
 }
 
 fn command_info(command: Command) -> &'static CommandInfo { &COMMANDS[command as usize] }

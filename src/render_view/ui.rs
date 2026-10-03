@@ -954,7 +954,7 @@ impl Renderer {
         (x, y, max_w, current_h)
     }
 
-    pub fn draw_dialog_window(&mut self, base_title: &str) -> bool {
+    pub fn draw_dialog_window(&mut self, base_title: &str, action: crate::app::PendingAction) -> bool {
         let s = self.scale_factor;
         let box_w = 660.0 * s;
         let box_h = 260.0 * s;
@@ -992,8 +992,9 @@ impl Renderer {
             [0.15, 0.16, 0.20, 1.0],
         );
 
-        let msg1 = format!("Документ «{}» был изменен.", base_title);
-        let msg2 = "Сохранить или отклонить изменения?";
+        let keymap_reset = action == crate::app::PendingAction::ResetKeymap;
+        let msg1 = if keymap_reset { "Сбросить все сочетания?".to_string() } else { format!("Документ «{}» был изменен.", base_title) };
+        let msg2 = if keymap_reset { "Пользовательские сочетания известных команд будут удалены." } else { "Сохранить или отклонить изменения?" };
 
         let icon_sz = 120.0 * s;
         let gap = 45.0 * s;
@@ -1026,8 +1027,12 @@ impl Renderer {
             text_scale,
         );
 
-        let (btn_save, btn_discard, btn_cancel) =
+        let (mut btn_save, mut btn_discard, btn_cancel) =
             crate::widgets::get_dialog_buttons(box_x, box_y, box_w, box_h, s, self);
+        if keymap_reset {
+            btn_save.text = "Сбросить".to_string();
+            btn_discard.text = "Отмена".to_string();
+        }
 
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
@@ -1043,24 +1048,36 @@ impl Renderer {
             s,
             false,
         );
-        ui_reg.register_button(
-            crate::ui_system::UiId::DialogDiscard,
-            &btn_discard,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
-        ui_reg.register_button(
-            crate::ui_system::UiId::DialogCancel,
-            &btn_cancel,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
+        if keymap_reset {
+            ui_reg.register_button(
+                crate::ui_system::UiId::DialogCancel,
+                &btn_discard,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        } else {
+            ui_reg.register_button(
+                crate::ui_system::UiId::DialogDiscard,
+                &btn_discard,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            ui_reg.register_button(
+                crate::ui_system::UiId::DialogCancel,
+                &btn_cancel,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
 
         self.flush();
         ui_reg.wants_pointer()

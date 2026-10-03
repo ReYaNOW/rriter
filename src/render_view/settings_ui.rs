@@ -449,6 +449,7 @@ impl Renderer {
         dart_lsp_status: Option<crate::lsp::LspServerStatus>,
         database_settings: &crate::app::database::DatabaseSettings,
         ctrl_wheel_multiplier: f32,
+        keymap_settings: &mut crate::app::keymap_settings::KeymapSettingsState,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
@@ -516,7 +517,7 @@ impl Renderer {
         let sidebar_w = layout.sidebar_w;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
-        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
+        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных", "Горячие клавиши"];
         let active_tab = clamped_settings_tab(active_tab, tabs.len());
         let tab_metrics = settings_sidebar_tab_metrics(ih, tabs.len(), s);
         let tab_step = tab_metrics.row_h + tab_metrics.gap;
@@ -582,7 +583,7 @@ impl Renderer {
         let content_x = ix + sidebar_w + 30.0 * s;
         let content_available_w = (ix + iw - content_x - 18.0 * s).max(1.0);
         let content_title_x = content_x - 14.0 * s;
-        let mut content_y = iy + 40.0 * s;
+        let mut content_y = (iy + 40.0 * s).round();
 
         let tab_title = tabs[active_tab];
         let pill_w = self.measure_ui_width(tab_title, 1.1) + 28.0 * s;
@@ -611,7 +612,7 @@ impl Renderer {
             [1.0, 1.0, 1.0, 1.0],
             1.1,
         );
-        content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
+        content_y = (content_y + if active_tab == 4 { 30.0 * s } else { 46.0 * s }).round();
         // Content column below the tab title pill, shared by the clipped tabs.
         let settings_content_clip = crate::ui_system::UiClipRect::new(
             ix + sidebar_w, iy + 52.0 * s, (iw - sidebar_w).max(0.0), (ih - 52.0 * s).max(0.0),
@@ -1177,6 +1178,8 @@ impl Renderer {
                 }));
             }
             self.end_settings_content_clip(ui_registry);
+        } else if active_tab == 6 {
+            super::settings_keymap_ui::draw(self, content_x, content_available_w, content_y, settings_content_clip, keymap_settings, ui_registry);
         }
 
         if tool_installer.is_log_open() {
@@ -1435,7 +1438,7 @@ mod settings_ui_tests {
     #[test]
     fn invalid_settings_tab_is_clamped_before_rendering() {
         assert_eq!(clamped_settings_tab(0, 6), 0);
-        assert_eq!(clamped_settings_tab(99, 6), 5);
+        assert_eq!(clamped_settings_tab(99, 7), 6);
         assert_eq!(clamped_settings_tab(4, 0), 0);
     }
 

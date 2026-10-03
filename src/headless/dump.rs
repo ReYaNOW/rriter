@@ -37,18 +37,23 @@ pub(crate) fn dialog_layout(w: u32, h: u32, scale: f32) -> DialogLayout {
 }
 
 /// Save/discard/cancel buttons in buffer coordinates, from the same layout the dialog draws.
-pub(crate) fn dialog_buttons(layout: DialogLayout, renderer: &mut Renderer) -> [(&'static str, [f32; 4]); 3] {
+pub(crate) fn dialog_buttons(layout: DialogLayout, action: PendingAction, renderer: &mut Renderer) -> Vec<(&'static str, [f32; 4])> {
     let s = renderer.scale_factor;
-    let (save, discard, cancel) =
+    let (save, mut discard, cancel) =
         crate::widgets::get_dialog_buttons(0.0, 0.0, layout.dw as f32, layout.dh as f32, s, renderer);
     let (ox, oy) = (layout.ox as f32, layout.oy_top as f32);
     let rect = |button: &Button| [button.x + ox, button.y + oy, button.w, button.h];
-    [("save", rect(&save)), ("discard", rect(&discard)), ("cancel", rect(&cancel))]
+    if action == PendingAction::ResetKeymap {
+        discard.text = "Отмена".to_string();
+        vec![("save", rect(&save)), ("cancel", rect(&discard))]
+    } else {
+        vec![("save", rect(&save)), ("discard", rect(&discard)), ("cancel", rect(&cancel))]
+    }
 }
 
 /// Draws the dialog over the finished main frame of a `w`x`h` buffer: what the window
 /// branch does on its dialog surface, inside a viewport over the centered rectangle.
-pub(crate) fn draw_dialog(renderer: &mut Renderer, base_title: &str, w: u32, h: u32) {
+pub(crate) fn draw_dialog(renderer: &mut Renderer, base_title: &str, action: PendingAction, w: u32, h: u32) {
     let layout = dialog_layout(w, h, renderer.scale_factor);
     if layout.dw == 0 || layout.dh == 0 {
         return;
@@ -74,7 +79,7 @@ pub(crate) fn draw_dialog(renderer: &mut Renderer, base_title: &str, w: u32, h: 
             gl.disable(glow::SCISSOR_TEST);
         }
     }
-    renderer.draw_dialog_window(base_title);
+    renderer.draw_dialog_window(base_title, action);
     renderer.resize(w, h);
 }
 
@@ -236,15 +241,17 @@ fn dialog_json(app: &mut App, w: u32, h: u32) -> Value {
         PendingAction::CloseFile => "CloseFile",
         PendingAction::CloseTab(_) => "CloseTab",
         PendingAction::CloseAllTabs => "CloseAllTabs",
+        PendingAction::ResetKeymap => "ResetKeymap",
     };
     let buttons: Vec<Value> = app.renderer.as_mut().map_or_else(Vec::new, |renderer| {
         let layout = dialog_layout(w, h, renderer.scale_factor);
-        dialog_buttons(layout, renderer)
+        dialog_buttons(layout, app.confirm_dialog.action(), renderer)
             .iter()
             .map(|(name, rect)| json!({"name": name, "rect": rect}))
             .collect()
     });
-    json!({"action": action, "title": app.base_title, "buttons": buttons})
+    let title = if action == "ResetKeymap" { "Сброс сочетаний" } else { &app.base_title };
+    json!({"action": action, "title": title, "buttons": buttons})
 }
 
 fn tabs_json(app: &App) -> Value {

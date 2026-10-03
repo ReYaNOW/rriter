@@ -547,6 +547,7 @@ impl App {
                             .map(|server| server.status),
                         self.ide_panel.database.settings(),
                         self.ctrl_wheel_multiplier,
+                        &mut self.keymap_settings,
                         &mut self.ui_registry,
                     );
                     // Window resizes shrink the max; keep the scroll target inside it.

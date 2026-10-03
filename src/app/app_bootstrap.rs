@@ -130,6 +130,8 @@ impl App {
         let ext = options.ext.unwrap_or_default();
 
         let keymap = crate::keymap::Keymap::build(&config.keymap_overrides);
+        let mut keymap_settings = crate::app::keymap_settings::KeymapSettingsState::default();
+        keymap_settings.refresh(&keymap, &config.keymap_overrides);
         let faq_text = faq_text(&keymap);
         let mut faq_editor = Editor::new(faq_text.len() + 100);
         let _ = faq_editor.insert_str(&faq_text);
@@ -300,6 +302,7 @@ impl App {
             settings_anim_progress: 0.0,
             settings_y: 10000.0,
             settings_tab: 0,
+            keymap_settings,
             settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
             settings_general_scroll: crate::scroll::ScrollState::new(7.0),
             settings_database_scroll: crate::scroll::ScrollState::new(7.0),

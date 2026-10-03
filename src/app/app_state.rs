@@ -1120,6 +1120,7 @@ impl App {
     pub(crate) fn set_keymap_overrides(&mut self, overrides: crate::keymap::KeymapOverrides) {
         self.keymap_overrides = overrides;
         self.keymap = crate::keymap::Keymap::build(&self.keymap_overrides);
+        self.keymap_settings.refresh(&self.keymap, &self.keymap_overrides);
         self.empty_ide_open_label = format!("{}  — открыть файл", self.keymap.label(crate::keymap::Command::FileOpen));
         self.project_search_run_label = format!("Literal-only. {} или кнопка запуска.", self.keymap.label(crate::keymap::Command::SearchProjectRun));
         self.ide_panel.project_search.help_run_label = self.project_search_run_label.clone();
@@ -1313,6 +1314,7 @@ pub struct App {
     pub settings_y: f32,
     pub settings_tab: usize,
     pub settings_ide_scroll: crate::scroll::ScrollState,
+    pub(crate) keymap_settings: crate::app::keymap_settings::KeymapSettingsState,
 
     pub ide_panel: IdePanelState,
     pub database_runtime: Option<crate::app::database::DatabaseRuntime>,

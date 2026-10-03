@@ -1506,6 +1506,7 @@ Root:
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
 * `src/render_view/settings_tool_rows.rs` -> shared external-tool settings rows and Dart SDK controls; keeps tool UI behavior out of the main settings renderer.
+* `src/render_view/settings_keymap_ui.rs` -> Settings hotkey command groups, chord chips, filtering, conflict prompts and reset controls.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -1545,6 +1546,7 @@ Entrypoints/state:
 * `scripts/pgo_coverage.py` -> PGO pipeline coverage helpers: profdata parsing, per-module summary, group marker checks, PGO warning counts.
 * `scripts/pgo_fixtures.py` -> PGO pipeline fixture servers/data started by `pgo_pipeline.py`.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
+* `src/app/keymap_settings.rs` -> hotkey Settings filtering, recording, validation and conflict state for editable key bindings.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
 * `src/app/database/database_postgres.rs` -> PostgreSQL TCP/TLS connection backend plus bounded autocommit discovery of databases and `public` tables.

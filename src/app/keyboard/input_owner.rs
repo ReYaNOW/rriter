@@ -49,7 +49,7 @@ pub(crate) fn is_default_chord(command: crate::keymap::Command, chord: crate::ke
         .is_some_and(|info| info.defaults.iter().filter_map(|text| crate::keymap::Chord::parse(platform, text).ok()).any(|default| default == chord))
 }
 
-pub(super) fn terminal_intercepts(chord: Chord, platform: PlatformKind) -> bool {
+pub(crate) fn terminal_intercepts(chord: Chord, platform: PlatformKind) -> bool {
     let ctrl_letter = chord.mods.contains(Mods::CTRL)
         && matches!(
             chord.key,

@@ -88,6 +88,7 @@ pub(crate) fn test_app() -> Option<App> {
         settings_database_scroll: crate::scroll::ScrollState::new(7.0),
         settings_general_max_scroll: 0.0,
         settings_database_max_scroll: 0.0,
+        keymap_settings: crate::app::keymap_settings::KeymapSettingsState::default(),
         tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor: Editor::new(128),
