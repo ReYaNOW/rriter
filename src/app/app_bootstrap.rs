@@ -178,6 +178,8 @@ impl App {
             modifiers: ModifiersState::empty(),
             left_shift_down: false,
             ctrl_wheel_multiplier: config.ctrl_wheel_multiplier,
+            keymap: crate::keymap::Keymap::build(&config.keymap_overrides),
+            keymap_overrides: config.keymap_overrides,
             is_dragging: false,
             is_editor_drag_pending: false,
             is_focused: true,

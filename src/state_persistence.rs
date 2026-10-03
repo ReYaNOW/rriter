@@ -27,6 +27,7 @@ pub struct Config {
     pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
+    pub keymap_overrides: crate::keymap::KeymapOverrides,
 }
 
 impl Default for Config {
@@ -42,6 +43,7 @@ impl Default for Config {
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
+            keymap_overrides: crate::keymap::KeymapOverrides::default(),
         }
     }
 }
@@ -622,6 +624,7 @@ fn format_config_content(config: &Config) -> String {
             "minimum_nesting_depth": config.dart_settings.minimum_nesting_depth,
             "minimum_block_lines": config.dart_settings.minimum_block_lines,
         },
+        "keymap": config.keymap_overrides.to_value(),
     });
     format!(
         "{}\n",
@@ -655,6 +658,13 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         return config;
     };
+    if let Some(keymap) = value.get("keymap") {
+        if keymap.is_object() {
+            config.keymap_overrides = crate::keymap::KeymapOverrides::from_value(keymap.clone());
+        } else {
+            eprintln!("RRiter: config keymap must be an object");
+        }
+    }
     if let Some(value) = value
         .get("window_width")
         .and_then(serde_json::Value::as_f64)
@@ -1174,6 +1184,26 @@ mod tests {
 
         let invalid_json = parse_config_content("not json", Config::default());
         assert_eq!(invalid_json.window_width, Config::default().window_width);
+    }
+
+    #[test]
+    fn config_keymap_roundtrip_preserves_skipped_and_unknown_entries() {
+        let config = parse_config_content(
+            r#"{"keymap":{"file.save":["mod+s",7],"future.command":["bad chord"]}}"#,
+            Config::default(),
+        );
+        let reparsed = parse_config_content(&format_config_content(&config), Config::default());
+        assert_eq!(
+            reparsed.keymap_overrides.to_value(),
+            config.keymap_overrides.to_value()
+        );
+        assert!(reparsed.keymap_overrides.has(crate::keymap::Command::FileSave));
+    }
+
+    #[test]
+    fn config_keymap_non_object_is_ignored() {
+        let config = parse_config_content(r#"{"keymap":[]}"#, Config::default());
+        assert_eq!(config.keymap_overrides, crate::keymap::KeymapOverrides::default());
     }
 
     #[test]

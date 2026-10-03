@@ -1117,6 +1117,12 @@ pub(crate) fn shift_python_inlay_hints_for_edits(
 }
 
 impl App {
+    pub(crate) fn set_keymap_overrides(&mut self, overrides: crate::keymap::KeymapOverrides) {
+        self.keymap_overrides = overrides;
+        self.keymap = crate::keymap::Keymap::build(&self.keymap_overrides);
+        self.save_current_config();
+    }
+
     pub(crate) fn editor_top_inset(&self, scale: f32) -> f32 {
         crate::render_view::editor_content_top_inset(
             self.show_welcome,
@@ -1185,6 +1191,8 @@ pub struct App {
     pub modifiers: ModifiersState,
     pub left_shift_down: bool,
     pub ctrl_wheel_multiplier: f32,
+    pub keymap: crate::keymap::Keymap,
+    pub keymap_overrides: crate::keymap::KeymapOverrides,
     pub is_dragging: bool,
     pub is_editor_drag_pending: bool,
     pub is_focused: bool,

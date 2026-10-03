@@ -68,6 +68,8 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
 pub(crate) fn test_app() -> Option<App> {
     let now = Instant::now();
     Some(App {
+        keymap: crate::keymap::Keymap::build(&crate::keymap::KeymapOverrides::default()),
+        keymap_overrides: crate::keymap::KeymapOverrides::default(),
         automation: None,
         database_runtime: None,
         scroll_render_bench: None,

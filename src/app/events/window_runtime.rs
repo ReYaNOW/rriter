@@ -380,6 +380,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         ctrl_wheel_multiplier: app.ctrl_wheel_multiplier,
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),
+        keymap_overrides: app.keymap_overrides.clone(),
     });
     // Single exit commit point (native: `ApplicationHandler::exiting`, headless: `save_state_and_exit`): stores the PDF read position.
     app.save_tabs_state();
