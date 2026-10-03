@@ -606,7 +606,7 @@ impl Renderer {
         } else {
             47
         };
-        let status = tool_status_text(
+        let mut status = tool_status_text(
             kind,
             &resolution,
             dart_tool_state,
@@ -614,6 +614,12 @@ impl Renderer {
             rust_row,
             compact_path_chars,
         );
+        if kind == crate::platform::ToolKind::RustAnalyzer
+            && crate::lsp::rust_analyzer_archive_for_platform().is_none()
+            && cfg!(windows)
+        {
+            status.push_str(" · установите через rustup: rustup component add rust-analyzer");
+        }
         let status_color = tool_status_color(kind, &resolution, dart_tool_state);
 
         self.push_rounded_rect(
@@ -624,7 +630,9 @@ impl Renderer {
             5.0 * scale,
             [0.12, 0.13, 0.17, 1.0],
         );
-        let managed = kind.supports_managed_install();
+        let rust_archive_supported = kind != crate::platform::ToolKind::RustAnalyzer
+            || crate::lsp::rust_analyzer_archive_for_platform().is_some();
+        let managed = kind.supports_managed_install() && rust_archive_supported;
         let install_text = if tool_installer.is_running_for(kind) {
             "Отмена"
         } else if resolution.is_ready() {

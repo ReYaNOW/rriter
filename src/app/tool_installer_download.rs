@@ -127,9 +127,6 @@ fn install_tool(
     cancel: &AtomicBool,
     reporter: &ToolInstallReporter,
 ) -> Result<ToolInstallOutcome, String> {
-    if kind == ToolKind::RustAnalyzer {
-        return Err("установка rust-analyzer появится в следующем шаге".to_string());
-    }
     let target_layout = ToolInstallLayout::current(kind);
     target_layout
         .create()
@@ -643,6 +640,160 @@ fn installer_script_extension(platform: PlatformKind) -> &'static str {
 const MAX_PDFIUM_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PDFIUM_LIB_BYTES: u64 = 256 * 1024 * 1024;
 const PDFIUM_VERSION_DIR_PREFIX: &str = "chromium-";
+const MAX_RUST_ANALYZER_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
+
+struct RustAnalyzerInstallPlan {
+    url: String,
+    asset: &'static str,
+    sha256: &'static str,
+    tag: &'static str,
+}
+
+fn install_rust_analyzer(
+    plan: &RustAnalyzerInstallPlan,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+) -> Result<ToolInstallOutcome, String> {
+    if cfg!(test) {
+        return Err("загрузка отключена в тестах".to_string());
+    }
+    if Path::new(plan.asset).file_name() != Some(OsStr::new(plan.asset)) {
+        return Err("недопустимое имя архива rust-analyzer".to_string());
+    }
+    let archive_dir = crate::platform::cache_dir().join("tool-installer");
+    fs::create_dir_all(&archive_dir)
+        .map_err(|error| format!("Не удалось создать каталог загрузки: {error}"))?;
+    let archive_path = archive_dir.join(format!(
+        "rust-analyzer-{}-{}",
+        crate::platform::next_operation_id(),
+        plan.asset
+    ));
+    let result = (|| {
+        check_cancelled(cancel)?;
+        reporter.phase(ToolInstallPhase::Downloading, "Загрузка rust-analyzer");
+        download_archive(
+            &plan.url,
+            &archive_path,
+            cancel,
+            reporter,
+            MAX_RUST_ANALYZER_ARCHIVE_BYTES,
+            "rust-analyzer",
+        )?;
+        let destination = crate::platform::data_dir()
+            .join("tools")
+            .join("managed")
+            .join(crate::platform::MANAGED_RUST_ANALYZER_DIR)
+            .join(plan.tag)
+            .join("rust-analyzer");
+        let installed = install_rust_analyzer_from_gz(
+            &archive_path,
+            plan.sha256,
+            &destination,
+            cancel,
+            &mut |phase, detail| reporter.phase(phase, detail),
+        )?;
+        Ok(ToolInstallOutcome {
+            paths: vec![(ToolKind::RustAnalyzer, installed)],
+        })
+    })();
+    if let Err(error) = fs::remove_file(&archive_path)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        reporter.line(
+            ToolInstallLogKind::Info,
+            format!("Не удалось удалить архив rust-analyzer: {error}"),
+        );
+    }
+    result
+}
+
+fn install_rust_analyzer_from_gz(
+    archive: &Path,
+    expected_sha256: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    on_phase: &mut dyn FnMut(ToolInstallPhase, &str),
+) -> Result<PathBuf, String> {
+    check_cancelled(cancel)?;
+    on_phase(ToolInstallPhase::Verifying, "Проверка контрольной суммы архива");
+    let actual = sha256_file_hex(archive)
+        .map_err(|error| format!("Не удалось прочитать архив rust-analyzer: {error}"))?;
+    if !actual.eq_ignore_ascii_case(expected_sha256.trim()) {
+        return Err("архив rust-analyzer повреждён или версия не совпадает".to_string());
+    }
+    check_cancelled(cancel)?;
+    on_phase(ToolInstallPhase::Extracting, "Распаковка rust-analyzer");
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "недопустимый путь установки rust-analyzer".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Не удалось создать каталог установки: {error}"))?;
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| "недопустимое имя rust-analyzer".to_string())?;
+    let temp = parent.join(format!(
+        ".{}.tmp-{}",
+        file_name.to_string_lossy(),
+        crate::platform::next_operation_id()
+    ));
+    let result = (|| {
+        let input = fs::File::open(archive)
+            .map_err(|error| format!("Не удалось открыть архив rust-analyzer: {error}"))?;
+        let mut decoder = flate2::read::GzDecoder::new(io::BufReader::new(input));
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| format!("Не удалось создать временный файл rust-analyzer: {error}"))?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            check_cancelled(cancel)?;
+            let read = decoder
+                .read(&mut buffer)
+                .map_err(|error| format!("Не удалось распаковать rust-analyzer: {error}"))?;
+            if read == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..read])
+                .map_err(|error| format!("Не удалось записать rust-analyzer: {error}"))?;
+        }
+        output
+            .flush()
+            .map_err(|error| format!("Не удалось сохранить rust-analyzer: {error}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            output
+                .set_permissions(fs::Permissions::from_mode(0o755))
+                .map_err(|error| format!("Не удалось задать права rust-analyzer: {error}"))?;
+        }
+        drop(output);
+        check_cancelled(cancel)?;
+        fs::rename(&temp, destination)
+            .map_err(|error| format!("Не удалось установить rust-analyzer: {error}"))?;
+        Ok(destination.to_path_buf())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+fn download_archive(
+    url: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+    max_bytes: u64,
+    label: &str,
+) -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("Не удалось запустить сетевой runtime: {error}"))?;
+    runtime.block_on(download_archive_async(url, destination, cancel, reporter, max_bytes, label))
+}
 
 /// Everything the worker needs from the manifest; the worker never touches the manifest itself.
 struct PdfiumInstallPlan {
@@ -736,6 +887,25 @@ async fn download_pdfium_archive_async(
     cancel: &AtomicBool,
     reporter: &ToolInstallReporter,
 ) -> Result<(), String> {
+    download_archive_async(
+        url,
+        destination,
+        cancel,
+        reporter,
+        MAX_PDFIUM_ARCHIVE_BYTES,
+        "PDF-движка",
+    )
+    .await
+}
+
+async fn download_archive_async(
+    url: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+    max_bytes: u64,
+    label: &str,
+) -> Result<(), String> {
     check_cancelled(cancel)?;
     let client = crate::platform::async_http_client_builder()
         .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
@@ -750,10 +920,10 @@ async fn download_pdfium_archive_async(
         response = watchdog.step(client.get(url).send()) => response,
     }?
     .and_then(reqwest::Response::error_for_status)
-    .map_err(|error| format!("Не удалось загрузить PDF-движок: {error}"))?;
+    .map_err(|error| format!("Не удалось загрузить {label}: {error}"))?;
     let content_length = response.content_length();
-    if content_length.is_some_and(|length| length > MAX_PDFIUM_ARCHIVE_BYTES) {
-        return Err("Архив PDF-движка превышает допустимый размер".to_string());
+    if content_length.is_some_and(|length| length > max_bytes) {
+        return Err(format!("Архив {label} превышает допустимый размер"));
     }
     let mut output = OpenOptions::new()
         .write(true)
@@ -770,47 +940,47 @@ async fn download_pdfium_archive_async(
             }
             chunk = watchdog.step(response.chunk()) => chunk,
         }?
-        .map_err(|error| format!("Ошибка чтения архива PDF-движка: {error}"))?;
+        .map_err(|error| format!("Ошибка чтения архива {label}: {error}"))?;
         let Some(chunk) = chunk else {
             break;
         };
         downloaded = downloaded.saturating_add(chunk.len() as u64);
-        if downloaded > MAX_PDFIUM_ARCHIVE_BYTES {
-            return Err("Архив PDF-движка превышает допустимый размер".to_string());
+        if downloaded > max_bytes {
+            return Err(format!("Архив {label} превышает допустимый размер"));
         }
         output
             .write_all(&chunk)
-            .map_err(|error| format!("Не удалось сохранить архив PDF-движка: {error}"))?;
+            .map_err(|error| format!("Не удалось сохранить архив {label}: {error}"))?;
         if last_progress == 0
             || downloaded.saturating_sub(last_progress) >= 64 * 1024
             || content_length == Some(downloaded)
         {
             reporter.line(
                 ToolInstallLogKind::Info,
-                pdfium_progress_line(downloaded, content_length),
+                archive_progress_line(label, downloaded, content_length),
             );
             last_progress = downloaded;
         }
     }
     output
         .flush()
-        .map_err(|error| format!("Не удалось сохранить архив PDF-движка: {error}"))?;
+        .map_err(|error| format!("Не удалось сохранить архив {label}: {error}"))?;
     if downloaded == 0 {
-        return Err("Получен пустой архив PDF-движка".to_string());
+        return Err(format!("Получен пустой архив {label}"));
     }
     Ok(())
 }
 
-fn pdfium_progress_line(downloaded: u64, total: Option<u64>) -> String {
+fn archive_progress_line(label: &str, downloaded: u64, total: Option<u64>) -> String {
     let downloaded_kib = downloaded.div_ceil(1024);
     if let Some(total) = total.filter(|total| *total > 0) {
         let percent = (u128::from(downloaded) * 100 / u128::from(total)).min(100);
         format!(
-            "Загрузка PDF-движка: {downloaded_kib}/{} КиБ ({percent}%)",
+            "Загрузка {label}: {downloaded_kib}/{} КиБ ({percent}%)",
             total.div_ceil(1024)
         )
     } else {
-        format!("Загрузка PDF-движка: {downloaded_kib} КиБ")
+        format!("Загрузка {label}: {downloaded_kib} КиБ")
     }
 }
 

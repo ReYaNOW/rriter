@@ -4,6 +4,49 @@ use std::time::Duration;
 
 use crate::platform::{ToolKind, ToolResolution};
 
+pub const RUST_ANALYZER_RELEASE_TAG: &str = "2026-09-28";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RustAnalyzerArchive {
+    pub triple: &'static str,
+    pub asset: &'static str,
+    pub sha256: &'static str,
+}
+
+pub const RUST_ANALYZER_ARCHIVES: &[RustAnalyzerArchive] = &[
+    RustAnalyzerArchive {
+        triple: "x86_64-unknown-linux-gnu",
+        asset: "rust-analyzer-x86_64-unknown-linux-gnu.gz",
+        sha256: "23f711d86b5f826e22886f01d7355dc01e0f4c1357dafa29710a95b903b48c85",
+    },
+    RustAnalyzerArchive {
+        triple: "aarch64-unknown-linux-gnu",
+        asset: "rust-analyzer-aarch64-unknown-linux-gnu.gz",
+        sha256: "03bad9c3dabb0f07a2678d5f9f8f1575a3742ea141506e14b3a26b42a1f896f3",
+    },
+    RustAnalyzerArchive {
+        triple: "x86_64-apple-darwin",
+        asset: "rust-analyzer-x86_64-apple-darwin.gz",
+        sha256: "d032c0eb75e4597cc8ffc35ea4cdbd9eecc8341936b6edac6749e679fc3f0682",
+    },
+    RustAnalyzerArchive {
+        triple: "aarch64-apple-darwin",
+        asset: "rust-analyzer-aarch64-apple-darwin.gz",
+        sha256: "54ec873d8996e2c127d758bf45d4eacb6d3371dae4f6f6d5d3f05cedbae5fd59",
+    },
+];
+
+pub fn rust_analyzer_archive_for_platform() -> Option<&'static RustAnalyzerArchive> {
+    let triple = match (std::env::consts::ARCH, std::env::consts::OS) {
+        ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
+        ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
+        ("x86_64", "macos") => "x86_64-apple-darwin",
+        ("aarch64", "macos") => "aarch64-apple-darwin",
+        _ => return None,
+    };
+    RUST_ANALYZER_ARCHIVES.iter().find(|archive| archive.triple == triple)
+}
+
 pub fn cargo_root_for_path(
     path: &Path,
     workspaces: &[PathBuf],

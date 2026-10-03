@@ -569,6 +569,18 @@ fn discovered_flutter_roots() -> Vec<PathBuf> {
 }
 
 fn managed_dart_executable_in(root: &Path, platform: PlatformKind) -> Option<PathBuf> {
+    managed_executable_in(root, |generation| {
+        generation
+            .join("dart-sdk")
+            .join("bin")
+            .join(dart_executable_name(platform))
+    })
+}
+
+fn managed_executable_in(
+    root: &Path,
+    executable_for_generation: impl Fn(&Path) -> PathBuf,
+) -> Option<PathBuf> {
     let mut generations = std::fs::read_dir(root)
         .ok()?
         .flatten()
@@ -576,11 +588,7 @@ fn managed_dart_executable_in(root: &Path, platform: PlatformKind) -> Option<Pat
         .collect::<Vec<_>>();
     generations.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
     for entry in generations {
-        let executable = entry
-            .path()
-            .join("dart-sdk")
-            .join("bin")
-            .join(dart_executable_name(platform));
+        let executable = executable_for_generation(&entry.path());
         if is_usable_executable(&executable) {
             return Some(executable);
         }
@@ -599,16 +607,7 @@ pub fn managed_rust_analyzer_executable_in(
     } else {
         "rust-analyzer"
     };
-    let mut generations = std::fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .collect::<Vec<_>>();
-    generations.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
-    generations.into_iter().find_map(|entry| {
-        let executable = entry.path().join(executable_name);
-        is_usable_executable(&executable).then_some(executable)
-    })
+    managed_executable_in(root, |generation| generation.join(executable_name))
 }
 
 fn resolve_rust_analyzer_in(
