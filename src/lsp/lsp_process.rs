@@ -849,6 +849,14 @@ fn run_supervisor_with_init_options(
                             }
                         }
                     }
+                    Ok(Cmd::Save { uri }) => {
+                        if open_files.contains_key(&uri) {
+                            let msg = make_did_save(&uri);
+                            if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                                break 'inner;
+                            }
+                        }
+                    }
                     Ok(Cmd::Hover { id, uri, line, col }) => {
                         let msg = make_hover(id, &uri, line, col);
                         if send_tracked_request(
@@ -1420,21 +1428,6 @@ impl LspProcess {
             "workspace diagnostics",
         )
         .then_some(id)
-    }
-
-    /// textDocument/didClose
-    pub fn notify_close(&mut self, path: &PathBuf) {
-        let uri = path_to_uri(path);
-        if self.open_uris.remove(&uri) {
-            if self.send_command(Cmd::Close { uri: uri.clone() }, "didClose") {
-                if self.current_uri.as_deref() == Some(uri.as_str()) {
-                    self.current_uri = self.open_uris.iter().next().cloned();
-                }
-                if self.open_uris.is_empty() {
-                    self.open_file_data = None;
-                }
-            }
-        }
     }
 
     /// Запрашивает code actions (быстрые исправления от ruff) для позиции.

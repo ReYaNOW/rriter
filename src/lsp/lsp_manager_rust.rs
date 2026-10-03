@@ -26,14 +26,41 @@ impl LspManager {
             RustRootEntry::Ready(result) => result.version.clone(),
             RustRootEntry::Pending(_) => None,
         });
+        let (missing_roots, status_roots) = self.rust.root_status_counts();
+        let roots = status_roots.max(self.rust_roots.len());
+        let mut health_message = self.rust_last_health_message.clone();
+        if missing_roots > 0 && missing_roots < roots {
+            let missing_root = self.rust.first_missing_root_key()
+                .and_then(|key| self.rust_roots.get(key))
+                .and_then(|entry| match entry {
+                    RustRootEntry::Ready(result) => Some((&result.root, result.executable.as_ref().err())),
+                    RustRootEntry::Pending(_) => None,
+                });
+            let reason = missing_root
+                .and_then(|(_, error)| error)
+                .map(|error| match error {
+                    RustToolError::ComponentMissing => "rust-analyzer отсутствует в toolchain",
+                    RustToolError::Timeout => "таймаут разрешения rust-analyzer",
+                    RustToolError::NotFound => "rust-analyzer не найден для корня",
+                })
+                .unwrap_or("причина неизвестна");
+            let availability = match missing_root {
+                Some((root, _)) => format!("недоступен {missing_roots} из {roots} корней · {reason}: {}", root.display()),
+                None => format!("недоступен {missing_roots} из {roots} корней · {reason}"),
+            };
+            health_message = Some(match health_message {
+                Some(message) => format!("{availability} · {message}"),
+                None => availability,
+            });
+        }
         RustRowInfo {
             status: self.rust.status(),
             busy: self.rust.busy(),
-            health_message: self.rust_last_health_message.clone(),
+            health_message,
             cargo_missing: self.rust_tools.as_ref().is_some_and(|tools| tools.cargo.is_none()),
             component_missing,
             version,
-            roots: self.rust.roots().len(),
+            roots,
         }
     }
 
@@ -106,7 +133,7 @@ impl LspManager {
                             &self.ui_waker,
                         );
                     } else {
-                        self.rust.mark_missing();
+                        self.rust.mark_root_missing(&root_key);
                     }
                     return;
                 }
@@ -145,7 +172,7 @@ impl LspManager {
             }
             Err(error) => {
                 self.log_rust_error(format!("Rust root worker failed to start: {error}"));
-                self.rust.mark_missing();
+                self.rust.mark_root_missing(&root_key);
             }
         }
     }
@@ -169,23 +196,27 @@ impl LspManager {
         }
         if self.rust.open_files().contains_key(&key) {
             self.rust.change_document(&path, text, version);
-            self.mark_diagnostics_changed();
         }
     }
 
     pub(super) fn close_rust_document(&mut self, path: &Path) {
         let key = PathKey::new(path);
-        self.rust_documents.remove(&key);
-        if self.rust_pending_docs.remove(&key).is_some() {
+        let root = self.rust_documents.remove(&key).map(|file| file.root);
+        let was_pending = self.rust_pending_docs.remove(&key).is_some();
+        if was_pending {
             self.rust.set_pending_status(!self.rust_pending_docs.is_empty());
-            return;
-        }
-        if let Some(root) = self.rust.close_document(path)
-            && self.rooted_root_may_stop(RootedLanguage::Rust, &root)
+        } else if let Some(root_key) = self.rust.close_document(path)
+            && self.rooted_root_may_stop(RootedLanguage::Rust, &root_key)
         {
-            self.stop_rooted_root(RootedLanguage::Rust, &root);
+            self.stop_rooted_root(RootedLanguage::Rust, &root_key);
         }
-        self.mark_diagnostics_changed();
+        if let Some(root) = root {
+            let root_key = PathKey::new(&root);
+            if !self.rust_documents.values().any(|file| PathKey::new(&file.root) == root_key) {
+                self.rust.clear_root_status_if_no_open_files(&root_key);
+                self.rust_roots.remove(&root_key);
+            }
+        }
     }
 
     pub(super) fn poll_rust_root_jobs(&mut self) {
@@ -201,7 +232,8 @@ impl LspManager {
                 }
                 crate::ui_waker::OneShotState::Pending => {}
                 crate::ui_waker::OneShotState::Closed => {
-                    completed.push((key, job.generation, Err(RustToolError::NotFound)));
+                    // A dropped worker is a failure of this root only, never "no rust-analyzer at all".
+                    completed.push((key, job.generation, Err(RustToolError::Timeout)));
                 }
             }
         }
@@ -256,7 +288,20 @@ impl LspManager {
                 for path_key in pending_keys {
                     self.rust_pending_docs.remove(&path_key);
                 }
-                self.rust.mark_missing();
+                match resolution.executable {
+                    Err(RustToolError::ComponentMissing | RustToolError::Timeout) => {
+                        self.rust.mark_root_missing(&key);
+                    }
+                    Err(RustToolError::NotFound) => {
+                        let globally_missing = self.current_rust_tools().resolution.path.is_none();
+                        if globally_missing {
+                            self.rust.mark_missing();
+                        } else {
+                            self.rust.mark_root_missing(&key);
+                        }
+                    }
+                    Ok(_) => {}
+                }
             }
         }
         self.rust.set_pending_status(!self.rust_pending_docs.is_empty());
@@ -276,7 +321,7 @@ impl LspManager {
     pub fn set_rust_enabled(&mut self, enabled: bool) {
         let was_enabled = self.rust.enabled();
         let was_missing = self.rust.missing();
-        let changed = self.rust.set_enabled(enabled);
+        self.rust.set_enabled(enabled);
         if was_enabled != enabled && !enabled {
             self.rust_roots_generation = self.rust_roots_generation.wrapping_add(1);
             self.rust_pending_docs.clear();
@@ -288,10 +333,6 @@ impl LspManager {
                 self.refresh_rust_resolution();
             }
         }
-        if changed {
-            self.mark_diagnostics_changed();
-        }
-        self.rebuild_diagnostic_summary();
     }
 
     pub fn set_rust_init_options(&mut self, value: serde_json::Value) {
@@ -310,7 +351,7 @@ impl LspManager {
         let documents = self.rust_documents.values()
             .map(|file| (file.path.clone(), file.text.clone(), file.version))
             .collect::<Vec<_>>();
-        let diagnostics_changed = was_enabled && self.rust.set_enabled(false);
+        if was_enabled { self.rust.set_enabled(false); }
         if was_enabled {
             for (path, _, _) in &documents {
                 self.rust.close_document(path);
@@ -327,10 +368,6 @@ impl LspManager {
             for (path, text, version) in documents {
                 self.open_rust_document(path, text, version);
             }
-        }
-        if diagnostics_changed {
-            self.mark_diagnostics_changed();
-            self.rebuild_diagnostic_summary();
         }
     }
 

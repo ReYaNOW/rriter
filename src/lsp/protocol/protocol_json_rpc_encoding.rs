@@ -306,6 +306,14 @@ pub(super) fn make_did_close(uri: &str) -> Vec<u8> {
     body.into_bytes()
 }
 
+pub(super) fn make_did_save(uri: &str) -> Vec<u8> {
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didSave","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        json_escape(uri)
+    );
+    body.into_bytes()
+}
+
 pub(super) fn make_code_action(
     id: i32,
     uri: &str,

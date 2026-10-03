@@ -162,6 +162,7 @@ impl LspManager {
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
+        self.diagnostics_committed_this_poll = false;
         let mut all = Vec::new();
         let mut diagnostic_roots = std::collections::HashMap::new();
 
@@ -305,7 +306,9 @@ impl LspManager {
                                     .insert(path.clone(), (stored_version, items));
                             }
 
-                            self.mark_diagnostics_changed();
+                            if language.is_none() || is_ty {
+                                self.mark_diagnostics_changed();
+                            }
                             self.last_change = None;
                             diagnostics_replaced = true;
                         } else {
@@ -321,9 +324,6 @@ impl LspManager {
                         continue;
                     }
                     if *server == LspServerKind::RustAnalyzer {
-                        if *status == LspServerStatus::Missing {
-                            self.rust.mark_missing();
-                        }
                         continue;
                     }
                     if *server == LspServerKind::Ty {
@@ -422,7 +422,17 @@ impl LspManager {
             workspace_diagnostics_done = true;
         }
 
-        self.finish_diagnostics_poll(diagnostics_replaced);
+        let rooted_diagnostics_changed = self.dart.take_diagnostics_changed()
+            | self.rust.take_diagnostics_changed();
+        if rooted_diagnostics_changed {
+            self.mark_diagnostics_changed();
+            self.prune_diag_text_pool();
+            self.rebuild_diagnostic_summary();
+            self.dirty_diagnostics = false;
+            self.diagnostics_committed_this_poll = true;
+        } else {
+            self.finish_diagnostics_poll(diagnostics_replaced);
+        }
         self.request_workspace_diagnostics_if_ready();
         self.request_ruff_workspace_diagnostics_if_ready();
         trim_allocator_after_large_diagnostics(received_diagnostics, workspace_diagnostics_done);

@@ -1791,6 +1791,7 @@ LSP:
 
 * `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
 * `src/lsp/lsp_process.rs` -> managed server spawn, protocol shutdown, bounded restart supervisor, and missing-tool state.
+* `src/lsp/lsp_process_notifications.rs` -> open-document didClose and didSave notifications for managed LSP processes.
 * `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, server control, document notifications, and explicit retry.
 * `src/lsp/lsp_diagnostics_store.rs` -> `LspManager` diagnostics polling, storage/compaction, merged indexes and queries.
 * `src/lsp/lsp_manager_support.rs` -> source actions, shutdown/Drop, LSP text/JSON helpers.
@@ -1800,6 +1801,7 @@ LSP:
 * `src/lsp/dart_workspace.rs` -> Dart-specific package-root discovery, analyzer jobs, closing labels, `dart analyze` workspace diagnostics, and manager tests; shared per-root LSP lifecycle is in `rooted_language.rs`.
 * `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
+* `src/lsp/rooted_language_tests.rs` -> shared rooted-language diagnostics, per-root missing-state, and Rust/Dart LSP regressions.
 * `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.
 * `src/lsp/protocol/*` -> protocol wire encoding/dispatch and value parser chunks.
 * `src/lsp/protocol_tests.rs` -> protocol parse/encode tests.

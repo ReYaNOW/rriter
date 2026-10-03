@@ -102,6 +102,7 @@ pub struct RootedWorkspaces {
     enabled: bool,
     missing: bool,
     root_statuses: HashMap<PathKey, LspServerStatus>,
+    diagnostics_changed: bool,
 }
 
 impl RootedWorkspaces {
@@ -123,6 +124,7 @@ impl RootedWorkspaces {
             enabled,
             missing: false,
             root_statuses: HashMap::new(),
+            diagnostics_changed: false,
         }
     }
 
@@ -131,7 +133,9 @@ impl RootedWorkspaces {
     pub fn health(&self) -> Option<ServerHealth> { self.health }
     pub fn busy(&self) -> bool { self.busy }
     pub fn enabled(&self) -> bool { self.enabled }
-    pub fn missing(&self) -> bool { self.missing }
+    pub fn missing(&self) -> bool {
+        self.missing || self.root_statuses.values().any(|status| *status == LspServerStatus::Missing)
+    }
     pub fn init_options(&self) -> Option<&serde_json::Value> { self.init_options.as_ref() }
     pub fn open_files(&self) -> &HashMap<PathKey, OpenRootedFile> { &self.open_files }
     pub fn roots(&self) -> &HashMap<PathKey, RootedWorkspaceState> { &self.roots }
@@ -142,7 +146,32 @@ impl RootedWorkspaces {
 
     pub fn clear_missing(&mut self) {
         self.missing = false;
+        self.root_statuses.clear();
         self.recompute_status(false);
+    }
+
+    pub fn root_status_counts(&self) -> (usize, usize) {
+        let missing = self.root_statuses.values()
+            .filter(|status| **status == LspServerStatus::Missing)
+            .count();
+        (missing, self.root_statuses.len())
+    }
+
+    pub fn root_status(&self, root: &PathKey) -> Option<LspServerStatus> {
+        self.root_statuses.get(root).copied()
+    }
+
+    pub fn first_missing_root_key(&self) -> Option<&PathKey> {
+        self.root_statuses.iter()
+            .find(|(_, status)| **status == LspServerStatus::Missing)
+            .map(|(root, _)| root)
+    }
+
+    pub fn clear_root_status_if_no_open_files(&mut self, root: &PathKey) {
+        if !self.root_has_open_files(root) {
+            self.root_statuses.remove(root);
+            self.recompute_status(false);
+        }
     }
 
     pub(super) fn set_pending_status(&mut self, pending: bool) {
@@ -169,6 +198,9 @@ impl RootedWorkspaces {
     ) -> PathKey {
         let path_key = PathKey::new(&path);
         let root_key = PathKey::new(&root);
+        if self.root_statuses.get(&root_key) == Some(&LspServerStatus::Missing) {
+            self.root_statuses.remove(&root_key);
+        }
         self.open_files.insert(path_key.clone(), OpenRootedFile {
             path: path.clone(), root: root.clone(), text: text.clone(), version,
         });
@@ -206,6 +238,9 @@ impl RootedWorkspaces {
             self.closed_documents.push(open.path);
         }
         let still_open = self.open_files.values().any(|file| crate::platform::paths_equal(&file.root, &open.root));
+        if !still_open && self.lang == RootedLanguage::Rust {
+            self.root_statuses.remove(&root_key);
+        }
         (!still_open).then_some(root_key)
     }
 
@@ -218,8 +253,9 @@ impl RootedWorkspaces {
         self.root_statuses.remove(root);
         let before = self.live_diagnostics.len();
         self.live_diagnostics.retain(|_, diagnostics| &diagnostics.root != root);
+        self.diagnostics_changed |= before != self.live_diagnostics.len();
         self.recompute_status(false);
-        before != self.live_diagnostics.len()
+        self.diagnostics_changed
     }
 
     pub fn root_has_open_files(&self, root: &PathKey) -> bool {
@@ -237,6 +273,13 @@ impl RootedWorkspaces {
         let path = root.clone();
         self.ensure_process(&root_key, executable(&path), ui_waker);
         self.roots.get_mut(&root_key)?.process.as_mut()
+    }
+
+    pub fn notify_saved(&mut self, path: &Path) {
+        let Some(root) = self.open_files.get(&PathKey::new(path)).map(|file| PathKey::new(&file.root)) else { return; };
+        if let Some(process) = self.roots.get_mut(&root).and_then(|state| state.process.as_mut()) {
+            process.notify_saved(&path.to_path_buf());
+        }
     }
 
     pub fn poll_processes(
@@ -265,10 +308,15 @@ impl RootedWorkspaces {
     pub fn mark_missing(&mut self) -> bool {
         self.missing = true;
         let keys = self.roots.keys().cloned().collect::<Vec<_>>();
-        let mut diagnostics_changed = false;
-        for key in keys { diagnostics_changed |= self.stop_root(&key); }
+        for key in keys { self.stop_root(&key); }
         self.recompute_status(false);
-        diagnostics_changed
+        self.diagnostics_changed
+    }
+
+    pub fn mark_root_missing(&mut self, root: &PathKey) {
+        self.stop_root(root);
+        self.root_statuses.insert(root.clone(), LspServerStatus::Missing);
+        self.recompute_status(false);
     }
 
     pub fn reconfigure(&mut self, workspaces: &[PathBuf]) {
@@ -281,7 +329,11 @@ impl RootedWorkspaces {
         }
         self.open_files.clear();
         for (path, text, version) in files {
-            let Some(root) = self.lang.root_for_path(&path, workspaces, &locate_dart_root) else { continue; };
+            let root = match self.lang {
+                RootedLanguage::Dart => Some(super::dart_workspace::dart_root_for_path(&path, workspaces).path),
+                RootedLanguage::Rust => self.lang.root_for_path(&path, workspaces, &locate_dart_root),
+            };
+            let Some(root) = root else { continue; };
             let root_key = PathKey::new(&root);
             let path_key = PathKey::new(&path);
             self.roots.entry(root_key).or_insert_with(|| RootedWorkspaceState { root: root.clone(), process: None });
@@ -300,20 +352,19 @@ impl RootedWorkspaces {
 
     pub fn set_enabled(&mut self, enabled: bool) -> bool {
         self.enabled = enabled;
-        let mut diagnostics_changed = false;
         if !enabled {
             let keys = self.roots.keys().cloned().collect::<Vec<_>>();
-            for key in keys { diagnostics_changed |= self.stop_root(&key); }
+            for key in keys { self.stop_root(&key); }
+            self.root_statuses.clear();
         }
         self.recompute_status(false);
-        diagnostics_changed
+        self.diagnostics_changed
     }
 
     pub fn restart_all(&mut self, executable: impl Fn(&Path) -> Option<PathBuf>, ui_waker: &UiWaker) -> bool {
         let keys = self.roots.keys().cloned().collect::<Vec<_>>();
-        let mut diagnostics_changed = false;
         for key in keys {
-            diagnostics_changed |= self.stop_root(&key);
+            self.stop_root(&key);
         }
         let files = self.open_files.values().map(|file| (file.path.clone(), file.root.clone(), file.text.clone(), file.version)).collect::<Vec<_>>();
         let mut missing = false;
@@ -325,7 +376,7 @@ impl RootedWorkspaces {
         }
         if missing { self.mark_missing(); }
         self.recompute_status(false);
-        diagnostics_changed
+        self.diagnostics_changed
     }
 
     pub fn set_init_options(&mut self, value: Option<serde_json::Value>) -> bool {
@@ -354,26 +405,53 @@ impl RootedWorkspaces {
         else if self.missing { LspServerStatus::Missing }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Crashed) { LspServerStatus::Crashed }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Starting) || has_pending { LspServerStatus::Starting }
+        else if self.root_statuses.values().any(|status| *status == LspServerStatus::Running)
+            && self.root_statuses.values().any(|status| *status == LspServerStatus::Missing) { LspServerStatus::Running }
+        else if self.root_statuses.values().any(|status| *status == LspServerStatus::Missing) { LspServerStatus::Missing }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Running) { LspServerStatus::Running }
         else { LspServerStatus::Disabled };
     }
 
-    pub fn insert_live_diagnostics(&mut self, path: PathBuf, diagnostics: LiveDiagnostics) {
+    pub fn insert_live_diagnostics(&mut self, path: PathBuf, diagnostics: LiveDiagnostics) -> bool {
+        if !self.roots.contains_key(&diagnostics.root)
+            || self.root_statuses.get(&diagnostics.root) == Some(&LspServerStatus::Missing)
+        {
+            return false;
+        }
         self.live_diagnostics.insert(path, diagnostics);
+        self.diagnostics_changed = true;
+        true
     }
 
     pub fn remove_live_diagnostics(&mut self, path: &Path) -> bool {
-        self.live_diagnostics.remove(path).is_some()
+        let removed = self.live_diagnostics.remove(path).is_some();
+        self.diagnostics_changed |= removed;
+        removed
+    }
+
+    pub fn take_diagnostics_changed(&mut self) -> bool {
+        std::mem::take(&mut self.diagnostics_changed)
     }
 
     pub fn retain_live_diagnostics(&mut self, mut keep: impl FnMut(&Path, &LiveDiagnostics) -> bool) {
+        let before = self.live_diagnostics.len();
         self.live_diagnostics.retain(|path, diagnostics| keep(path, diagnostics));
+        self.diagnostics_changed |= before != self.live_diagnostics.len();
     }
 
     #[cfg(test)]
     pub(super) fn insert_root_for_test(&mut self, root: PathBuf, process: Option<LspProcess>) {
         self.roots.insert(PathKey::new(&root), RootedWorkspaceState { root, process });
     }
+
+    #[cfg(test)]
+    pub(super) fn insert_open_file_for_test(&mut self, path: PathBuf, root: PathBuf) {
+        let key = PathKey::new(&path);
+        self.open_files.insert(key, OpenRootedFile {
+            path, root, text: Arc::from(""), version: 1,
+        });
+    }
+
 }
 
 fn locate_dart_root(path: &Path) -> Option<PathBuf> {
@@ -461,6 +539,28 @@ mod tests {
         assert!(!state.set_init_options(original.clone()));
         assert!(state.set_init_options(None));
         assert!(!state.set_init_options(None));
+    }
+
+    #[test]
+    fn dart_reconfigure_uses_pubspec_precedence_over_nearer_analysis_options() {
+        let root = std::env::temp_dir().join(format!("rriter-dart-root-precedence-{}", std::process::id()));
+        let package = root.join("pkg");
+        let nested = package.join("test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(nested.join("analysis_options.yaml"), "analyzer:\n").unwrap();
+        let path = nested.join("main.dart");
+        let mut state = workspaces();
+        state.open_files.insert(PathKey::new(&path), OpenRootedFile {
+            path: path.clone(), root: nested, text: Arc::from(""), version: 1,
+        });
+        state.reconfigure(std::slice::from_ref(&root));
+        let open_root = state.root_for_open_path(&path).unwrap();
+        let open_choice = super::super::dart_workspace::dart_root_for_path(&path, std::slice::from_ref(&root)).path;
+        assert!(crate::platform::paths_equal(open_root, &open_choice));
+        assert!(crate::platform::paths_equal(open_root, &package));
+        let _ = std::fs::remove_dir_all(root);
     }
 
 }

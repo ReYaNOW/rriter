@@ -128,6 +128,24 @@ fn headless_rust_diagnostics_reach_problems_including_unopened_file() {
 }
 
 #[test]
+fn headless_rust_save_notifies_server_and_refreshes_diagnostics() {
+    let (dir, file, mut session) = rust_crate_session("rust-did-save");
+    install_rust_fake(&mut session, "rust-did-save", "rust_analyzer_did_save");
+
+    open_file(&mut session, &file);
+    open_all_problems(&mut session);
+    run_script(&mut session, b"key ctrl+s\n");
+    wait_until(&mut session, 8000, "Rust didSave diagnostics", |session| {
+        session.app.lsp.as_ref().is_some_and(|lsp| {
+            lsp.rust.live_diagnostics().values().any(|set| {
+                set.items.iter().any(|diagnostic| diagnostic.message.as_ref() == "fake: saved")
+            })
+        })
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn headless_rust_outside_cargo_root_has_no_lsp() {
     let dir = scratch_dir("rust-no-cargo");
     let file = dir.join("main.rs");

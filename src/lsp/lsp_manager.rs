@@ -88,6 +88,7 @@ pub struct LspManager {
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     dart_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     diagnostic_generation: u64,
+    diagnostics_committed_this_poll: bool,
     diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
     diagnostic_total_counts: (usize, usize),
     ty_diag_result_ids: HashMap<PathBuf, String>,
@@ -129,6 +130,10 @@ impl LspManager {
 
     pub fn diagnostic_generation(&self) -> u64 {
         self.diagnostic_generation
+    }
+
+    pub fn take_diagnostics_commit(&mut self) -> bool {
+        std::mem::take(&mut self.diagnostics_committed_this_poll)
     }
 
     pub(super) fn mark_diagnostics_changed(&mut self) {
@@ -203,6 +208,7 @@ impl LspManager {
             ty_instant_diagnostics: HashMap::new(),
             dart_workspace_diagnostics: HashMap::new(),
             diagnostic_generation: 0,
+            diagnostics_committed_this_poll: false,
             diagnostic_ancestor_severities: HashMap::new(),
             diagnostic_total_counts: (0, 0),
             ty_diag_result_ids: HashMap::new(),

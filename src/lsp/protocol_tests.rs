@@ -541,6 +541,10 @@ fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
     assert_eq!(closed["method"], "textDocument/didClose");
     assert_eq!(closed["params"]["textDocument"]["uri"], uri);
 
+    let saved: serde_json::Value = serde_json::from_slice(&make_did_save(uri)).unwrap();
+    assert_eq!(saved["method"], "textDocument/didSave");
+    assert_eq!(saved["params"]["textDocument"]["uri"], uri);
+
     let only = vec!["quickfix".to_string(), "source.fixAll".to_string()];
     let action: serde_json::Value =
         serde_json::from_slice(&make_code_action(99, uri, 1, 2, 3, 4, "[]", Some(&only))).unwrap();

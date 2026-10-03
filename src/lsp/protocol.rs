@@ -362,6 +362,7 @@ pub(super) enum Cmd {
         #[allow(dead_code)]
         uri: String,
     },
+    Save { uri: String },
     /// Запросить codeActions для позиции
     CodeAction {
         id: i32,

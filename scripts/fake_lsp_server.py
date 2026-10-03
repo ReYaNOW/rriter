@@ -106,6 +106,7 @@ def main() -> None:
     crash_after_initialize = "_crash" in mode
     long_hover = "_long" in mode
     publish_diagnostics = "_diagnostics" in mode
+    publish_saved_diagnostics = "_did_save" in mode
     # A server that never answers textDocument/definition (overloaded ty).
     definition_never_answers = "_nodefinition" in mode
     # A server that answers textDocument/definition with a JSON-RPC error.
@@ -202,6 +203,9 @@ def main() -> None:
                 sibling = sibling_uri(opened_uri)
                 if sibling is not None:
                     write_message(diagnostics_message(sibling, None, "fake: unopened sibling"))
+        elif method == "textDocument/didSave" and publish_saved_diagnostics:
+            document = message.get("params", {}).get("textDocument", {})
+            write_message(diagnostics_message(document.get("uri", ""), None, "fake: saved"))
 
 
 if __name__ == "__main__":

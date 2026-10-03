@@ -148,7 +148,6 @@ impl LspManager {
         let Some(root_key) = self.dart.close_document(path) else {
             return;
         };
-        self.mark_diagnostics_changed();
         if self.rooted_root_may_stop(super::rooted_language::RootedLanguage::Dart, &root_key) {
             self.stop_rooted_root(super::rooted_language::RootedLanguage::Dart, &root_key);
         }
@@ -159,12 +158,7 @@ impl LspManager {
         lang: super::rooted_language::RootedLanguage,
         root: &crate::platform::PathKey,
     ) {
-        let changed = self.rooted_mut(lang).stop_root(root);
-        if changed {
-            self.mark_diagnostics_changed();
-            self.rebuild_diagnostic_summary();
-            self.prune_diag_text_pool();
-        }
+        self.rooted_mut(lang).stop_root(root);
     }
 
     pub fn rooted_root_may_stop(
@@ -251,11 +245,7 @@ impl LspManager {
 
     pub(super) fn mark_dart_missing(&mut self) {
         for state in self.dart_jobs.values_mut() { state.cancel_job(); }
-        if self.dart.mark_missing() {
-            self.mark_diagnostics_changed();
-            self.rebuild_diagnostic_summary();
-            self.prune_diag_text_pool();
-        }
+        self.dart.mark_missing();
     }
 
     pub(super) fn reconfigure_dart_workspaces(&mut self) {
@@ -302,11 +292,15 @@ impl LspManager {
             return;
         };
         if let super::LangRoute::Rooted(lang) = route {
-            if lang != super::rooted_language::RootedLanguage::Dart {
-                return;
-            }
-            if let Some(root) = self.rooted(lang).root_for_open_path(path).map(Path::to_path_buf) {
-                self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+            match lang {
+                super::rooted_language::RootedLanguage::Dart => {
+                    if let Some(root) = self.rooted(lang).root_for_open_path(path).map(Path::to_path_buf) {
+                        self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+                    }
+                }
+                super::rooted_language::RootedLanguage::Rust => {
+                    self.rooted_mut(lang).notify_saved(path);
+                }
             }
         }
     }
