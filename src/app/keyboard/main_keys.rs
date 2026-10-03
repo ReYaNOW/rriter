@@ -296,7 +296,7 @@ impl App {
         }
 
         if key_event.state == ElementState::Pressed {
-            if self.active_tab_is_database_query() {
+            if self.active_tab_is_database_query() && !self.show_settings {
                 let history_open = self
                     .active_database_query_meta_state()
                     .is_some_and(|(_, state)| state.history_open);
