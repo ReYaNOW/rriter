@@ -157,14 +157,19 @@ impl App {
         event_loop: &HostLoop,
         key_event: KeyInput,
     ) {
+        let chord = crate::keymap::Chord::from_event(
+            crate::platform::CURRENT_PLATFORM,
+            &key_event,
+            self.modifiers,
+        );
         if key_event.physical_key == PhysicalKey::Code(KeyCode::ShiftLeft) {
             self.left_shift_down = key_event.state == ElementState::Pressed;
         }
-        if self.startup_blocks_key_input(&key_event) {
+        if self.startup_blocks_key_input_with_chord(&key_event, chord) {
             return;
         }
         let editor_was_focused = self.editor_has_input_focus();
-        self.handle_main_keyboard_input_inner(event_loop, key_event);
+        self.handle_main_keyboard_input_inner(event_loop, key_event, chord);
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
 
@@ -173,6 +178,7 @@ impl App {
         &mut self,
         event_loop: &HostLoop,
         key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
@@ -204,7 +210,7 @@ impl App {
                             window.request_redraw();
                         }
                     }
-                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                    _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SettingsCopyInstallerLog, chord)) => {
                         let log = self.tool_installer.full_log();
                         if !log.is_empty() {
                             self.set_clipboard_text(log);
@@ -220,6 +226,7 @@ impl App {
         }
 
         let markdown_toggle = if key_event.state == ElementState::Pressed {
+            let toggle_bound = chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::MarkdownToggleMode, chord));
             markdown_global_toggle_action(
                 self.active_document_is_markdown(),
                 self.is_ide_mode,
@@ -227,9 +234,9 @@ impl App {
                 self.show_search,
                 self.search_focused,
                 &self.ide_panel,
-                key_event.physical_key,
-                ctrl,
-                self.modifiers.shift_key(),
+                if toggle_bound { PhysicalKey::Code(KeyCode::KeyV) } else { key_event.physical_key },
+                toggle_bound,
+                toggle_bound,
                 key_event.repeat,
             )
         } else {
@@ -262,15 +269,14 @@ impl App {
             return;
         }
 
-        if key_event.state == ElementState::Pressed
-            && alt
-            && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)
-        {
+        let terminal_close = chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalClose, chord));
+        let terminal_toggle = chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalToggleFocus, chord));
+        if key_event.state == ElementState::Pressed && (terminal_close || terminal_toggle) {
             if self.is_ide_mode {
                 let has_terminal = !self.ide_panel.terminals.is_empty();
                 let needs_terminal = apply_terminal_alt_q_shortcut(
                     &mut self.ide_panel,
-                    self.modifiers.shift_key(),
+                    terminal_close,
                     has_terminal,
                 );
                 if needs_terminal {
@@ -380,8 +386,7 @@ impl App {
                             return;
                         }
                     }
-                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
-                        if ctrl =>
+                    _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryRun, chord)) =>
                     {
                         self.run_active_database_query(
                             crate::app::database::DatabaseQueryMode::Run,
@@ -391,7 +396,7 @@ impl App {
                         }
                         return;
                     }
-                    PhysicalKey::Code(KeyCode::Space) if ctrl => {
+                    _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryComplete, chord)) => {
                         self.show_active_database_query_completion();
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -660,7 +665,7 @@ impl App {
             }
 
             if self.show_settings {
-                if let PhysicalKey::Code(KeyCode::F1) = key_event.physical_key {
+                if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SettingsToggle, chord)) {
                     self.set_settings_visible(false);
                     self.window.as_ref().unwrap().request_redraw();
                 }
@@ -670,13 +675,13 @@ impl App {
             let term_focused = self.is_ide_mode
                 && self.ide_panel.terminal_focused
                 && self.ide_panel.is_open(crate::app::PanelId::Terminal);
-            if key_event.physical_key == PhysicalKey::Code(KeyCode::F1) && !term_focused {
+            if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SettingsToggle, chord)) && !term_focused {
                 self.set_settings_visible(!self.show_settings);
                 self.is_dragging = false;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
-            if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
+            if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::ViewToggleFps, chord)) {
                 if !term_focused {
                     self.show_fps = !self.show_fps;
                     self.window.as_ref().unwrap().request_redraw();
@@ -684,7 +689,7 @@ impl App {
                 }
             }
 
-            if self.is_ide_mode && alt && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyW)
+            if self.is_ide_mode && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::ViewToggleProblems, chord))
             {
                 apply_problems_alt_w_shortcut(&mut self.ide_panel);
                 crate::save_panel_state(&self.ide_panel);
@@ -696,9 +701,7 @@ impl App {
             }
 
             if self.is_ide_mode
-                && ctrl
-                && self.modifiers.shift_key()
-                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyF)
+                && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchProjectOpen, chord))
             {
                 self.open_project_search_panel();
                 self.last_action = std::time::Instant::now();
@@ -718,7 +721,7 @@ impl App {
 
             // File-tree focus is exclusive. Handle F2/Delete/clipboard shortcuts
             // before stale editor/API focus can consume the key on another OS.
-            if self.handle_file_tree_shortcut(key_event.physical_key, ctrl) {
+            if self.handle_file_tree_shortcut_with_chord(key_event.physical_key, ctrl, chord) {
                 return;
             }
 
@@ -729,7 +732,7 @@ impl App {
                 return;
             }
 
-            if ctrl && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
+            if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::GitCopySelection, chord)) {
                 let graph_copy = self
                     .renderer
                     .as_ref()
@@ -763,6 +766,20 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
+            }
+
+            if chord.is_some_and(|chord| {
+                super::input_owner::terminal_intercepts(chord, crate::platform::CURRENT_PLATFORM)
+            }) && terminal_owns_keyboard_context(
+                self.is_ide_mode,
+                self.show_settings,
+                self.show_search,
+                self.search_focused,
+                &self.ide_panel,
+            ) && !(self.ide_panel.term_show_search && self.ide_panel.term_search_focused)
+            {
+                self.handle_terminal_keyboard_input(key_event);
+                return;
             }
 
             if self.ide_panel.git.message_focused
@@ -823,13 +840,19 @@ impl App {
                 }
             }
 
-            if ctrl && key_event.state == ElementState::Pressed
-                && self.switch_tab_from_keyboard(key_event.physical_key)
+            if key_event.state == ElementState::Pressed && chord.is_some_and(|chord|
+                self.keymap.hit(crate::keymap::Command::TabsSwitchNext, chord)
+                    || self.keymap.hit(crate::keymap::Command::TabsSwitchPrevious, chord))
             {
+                let physical_key = if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsSwitchNext, chord)) {
+                    PhysicalKey::Code(KeyCode::PageDown)
+                } else { PhysicalKey::Code(KeyCode::PageUp) };
+                self.switch_tab_from_keyboard(physical_key);
                 return;
             }
 
-            if is_terminal_tab_close_shortcut(&self.ide_panel, key_event.physical_key, ctrl) {
+            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TerminalCloseTab, chord)) {
                 self.close_terminal_tab_at(self.ide_panel.active_terminal);
                 self.last_action = std::time::Instant::now();
                 if let Some(window) = self.window.as_ref() {
@@ -845,9 +868,13 @@ impl App {
                 self.handle_terminal_search_keyboard_input(key_event);
             } else if self.show_search && self.search_focused {
                 self.handle_search_keyboard_input(key_event);
-            } else if self.is_ide_mode
-                && self.ide_panel.terminal_focused
-                && self.ide_panel.is_open(crate::app::PanelId::Terminal)
+            } else if terminal_owns_keyboard_context(
+                self.is_ide_mode,
+                self.show_settings,
+                self.show_search,
+                self.search_focused,
+                &self.ide_panel,
+            ) && !(self.ide_panel.term_show_search && self.ide_panel.term_search_focused)
             {
                 self.handle_terminal_keyboard_input(key_event);
             } else {

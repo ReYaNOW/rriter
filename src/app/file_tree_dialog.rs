@@ -442,12 +442,30 @@ impl App {
         physical_key: winit::keyboard::PhysicalKey,
         ctrl: bool,
     ) -> bool {
+        let chord = crate::keymap::Chord::from_event(
+            crate::platform::CURRENT_PLATFORM,
+            &crate::app::keyboard::KeyInput {
+                physical_key,
+                logical_text: None,
+                text: None,
+                state: winit::event::ElementState::Pressed,
+                repeat: false,
+            },
+            self.modifiers,
+        );
+        self.handle_file_tree_shortcut_with_chord(physical_key, ctrl, chord)
+    }
+
+    pub(crate) fn handle_file_tree_shortcut_with_chord(
+        &mut self,
+        physical_key: winit::keyboard::PhysicalKey,
+        _ctrl: bool,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         if !self.ide_panel.file_tree_focused || self.show_settings {
             return false;
         }
-        if ctrl
-            && physical_key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
-        {
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::FileTreeUndo, chord)) {
             let _ = self.undo_file_tree_operation();
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -479,21 +497,24 @@ impl App {
             }
             return false;
         }
-        if !ctrl {
-            return false;
-        }
+        let command = chord.and_then(|chord| [
+            crate::keymap::Command::FileTreeCopy,
+            crate::keymap::Command::FileTreeCut,
+            crate::keymap::Command::FileTreePaste,
+        ].into_iter().find(|command| self.keymap.hit(*command, chord)));
+        let Some(command) = command else { return false; };
         let fallback = match self.ide_panel.file_tree_selection.iter().next() {
             Some(path) => path.clone(),
             None => return false,
         };
-        match physical_key {
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC) => {
+        match command {
+            crate::keymap::Command::FileTreeCopy => {
                 self.copy_file_tree_paths(fallback, FileTreeClipboardMode::Copy);
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) => {
+            crate::keymap::Command::FileTreeCut => {
                 self.copy_file_tree_paths(fallback, FileTreeClipboardMode::Cut);
             }
-            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) => {
+            crate::keymap::Command::FileTreePaste => {
                 if let Some(target_dir) = self.file_tree_default_paste_dir() {
                     let _ = self.paste_file_tree_clipboard(target_dir);
                 }

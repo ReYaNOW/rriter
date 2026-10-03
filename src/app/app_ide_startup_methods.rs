@@ -703,6 +703,19 @@ impl App {
     /// document unless the terminal has the focus (save, undo/redo, close tab, tab switching).
     /// App-global chords pass: F1 (settings) and Alt+Q / Alt+W (panel toggles). Releases pass.
     pub(crate) fn startup_blocks_key_input(&self, key_event: &crate::app::keyboard::KeyInput) -> bool {
+        let chord = crate::keymap::Chord::from_event(
+            crate::platform::CURRENT_PLATFORM,
+            key_event,
+            self.modifiers,
+        );
+        self.startup_blocks_key_input_with_chord(key_event, chord)
+    }
+
+    pub(crate) fn startup_blocks_key_input_with_chord(
+        &self,
+        key_event: &crate::app::keyboard::KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         use winit::keyboard::{KeyCode, PhysicalKey};
 
         if self.startup_editor_pending.is_none()
@@ -725,22 +738,15 @@ impl App {
         {
             return false;
         }
+        let assigned_startup_command = chord.is_some_and(|chord| {
+            [crate::keymap::Command::FileSave, crate::keymap::Command::EditorUndo,
+                crate::keymap::Command::EditorRedo, crate::keymap::Command::TabsCloseAll,
+                crate::keymap::Command::FileOpen, crate::keymap::Command::TabsSwitchNext,
+                crate::keymap::Command::TabsSwitchPrevious]
+                .into_iter().any(|command| self.keymap.hit(command, chord))
+        });
         self.editor_has_input_focus()
-            || (primary
-                && matches!(
-                    key,
-                    PhysicalKey::Code(
-                        KeyCode::KeyS
-                            | KeyCode::KeyZ
-                            | KeyCode::KeyY
-                            | KeyCode::KeyQ
-                            | KeyCode::KeyO
-                            | KeyCode::Digit4
-                            | KeyCode::Tab
-                            | KeyCode::PageUp
-                            | KeyCode::PageDown
-                    )
-                ))
+            || assigned_startup_command
     }
 
     /// Input gate of the startup wait for the mouse: a press over the tab bar and the editor
