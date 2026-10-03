@@ -30,11 +30,12 @@ mod windows;
 pub use integration::ManagedToolInstallPlan;
 pub(crate) use integration::user_home_dir;
 pub use integration::{
-    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths,
+    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, MANAGED_RUST_ANALYZER_DIR, app_paths,
     async_http_client_builder, blocking_http_client_builder, configure_dart_workspace_root,
     configure_tool_paths, configured_tool_path, current_process_memory_kb,
     proxy_routing_is_configured, refresh_tool_resolutions, resolve_dart_for_workspace,
-    resolve_tool_kind, set_app_root_override, system_proxy_config, user_cache_root,
+    managed_rust_analyzer_executable_in, resolve_tool_kind, set_app_root_override,
+    system_proxy_config, user_cache_root,
 };
 pub(crate) use integration::app_paths_for_root;
 pub(crate) type AppPaths = integration::AppPaths;

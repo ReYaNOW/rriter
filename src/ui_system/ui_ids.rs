@@ -71,6 +71,9 @@ pub enum UiId {
     SettingsDartAdjustBlockLines(i8),
     SettingsDartRestart,
     SettingsDartOpenLog,
+    SettingsRustToggleEnabled,
+    SettingsRustToggleCheckCommand,
+    SettingsRustRestart,
 
     // LSP panel
     LspServerRestart(usize),

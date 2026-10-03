@@ -65,18 +65,13 @@ impl LspManager {
 
     fn stop_processes(&mut self) {
         self.python_disabled = true;
-        self.dart_disabled = true;
+        self.dart.set_enabled(false);
+        for state in self.dart_jobs.values_mut() { state.cancel_job(); }
         if let Some(p) = self.python.take() {
             p.shutdown();
         }
         if let Some(p) = self.ty_process.take() {
             p.shutdown();
-        }
-        for state in self.dart_workspaces.values_mut() {
-            state.cancel_job();
-            if let Some(process) = state.process.take() {
-                process.shutdown();
-            }
         }
     }
     #[allow(dead_code)]

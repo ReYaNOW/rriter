@@ -27,6 +27,7 @@ pub struct Config {
     pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
+    pub rust_settings: crate::app::RustSettings,
 }
 
 impl Default for Config {
@@ -42,6 +43,7 @@ impl Default for Config {
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
+            rust_settings: crate::app::RustSettings::default(),
         }
     }
 }
@@ -622,6 +624,7 @@ fn format_config_content(config: &Config) -> String {
             "minimum_nesting_depth": config.dart_settings.minimum_nesting_depth,
             "minimum_block_lines": config.dart_settings.minimum_block_lines,
         },
+        "rust": config.rust_settings.config_value(),
     });
     format!(
         "{}\n",
@@ -756,6 +759,10 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         }
         config.dart_settings.normalize();
     }
+    config.rust_settings = value
+        .get("rust")
+        .map(crate::app::RustSettings::from_config_value)
+        .unwrap_or_default();
     config
 }
 
@@ -1286,11 +1293,17 @@ mod tests {
             crate::platform::ToolKind::Dart,
             Some(PathBuf::from(r"C:\Program Files\Dart\dart-sdk")),
         );
+        config.tool_paths.set(
+            crate::platform::ToolKind::RustAnalyzer,
+            Some(PathBuf::from("/opt/rust-analyzer")),
+        );
         config.dart_settings.enabled = false;
         config.dart_settings.workspace_analysis = false;
         config.dart_settings.closing_labels = crate::app::DartClosingLabelsMode::DartServer;
         config.dart_settings.minimum_nesting_depth = 5;
         config.dart_settings.minimum_block_lines = 9;
+        config.rust_settings.enabled = false;
+        config.rust_settings.check_command = crate::app::RustCheckCommand::Check;
 
         let formatted = format_config_content(&config);
         assert!(formatted.contains("\"window_width\": 1280.5"));
@@ -1312,7 +1325,12 @@ mod tests {
             reparsed.tool_paths.get(crate::platform::ToolKind::Dart),
             config.tool_paths.get(crate::platform::ToolKind::Dart)
         );
+        assert_eq!(
+            reparsed.tool_paths.get(crate::platform::ToolKind::RustAnalyzer),
+            config.tool_paths.get(crate::platform::ToolKind::RustAnalyzer)
+        );
         assert_eq!(reparsed.dart_settings, config.dart_settings);
+        assert_eq!(reparsed.rust_settings, config.rust_settings);
 
         let color = parse_kde_color(
             "[Colors:Window]\nBackgroundNormal=1,2,3\n[Colors:Selection]\nBackgroundNormal=128,64,255\n",
@@ -1324,12 +1342,26 @@ mod tests {
     }
 
     #[test]
-    fn old_config_keeps_dart_defaults_and_unknown_mode_is_safe() {
+    fn old_config_keeps_language_defaults_and_invalid_rust_settings_are_safe() {
         let old = parse_config_content(
             r#"{"window_width": 900, "tool_paths": {}}"#,
             Config::default(),
         );
         assert_eq!(old.dart_settings, crate::app::DartSettings::default());
+        assert_eq!(old.rust_settings, crate::app::RustSettings::default());
+
+        for invalid in [
+            "{\"rust\": null}",
+            "{\"rust\": \"invalid\"}",
+            "{\"rust\": []}",
+            "{\"rust\": {\"enabled\": \"yes\", \"check_command\": 1}}",
+        ] {
+            let parsed = parse_config_content(
+                invalid,
+                Config::default(),
+            );
+            assert_eq!(parsed.rust_settings, crate::app::RustSettings::default());
+        }
 
         let parsed = parse_config_content(
             r#"{

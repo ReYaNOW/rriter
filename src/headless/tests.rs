@@ -18,6 +18,17 @@ pub(crate) mod tests_support {
         dir: &Path,
         basename: &str,
     ) -> PathBuf {
+        install_fake_lsp(session, ToolKind::Ty, dir, basename)
+    }
+
+    /// Copy `scripts/fake_lsp_server.py` to `dir/basename` (the basename suffixes pick the
+    /// fake's modes) and register it as the resolved path of `kind`.
+    pub(crate) fn install_fake_lsp(
+        session: &mut HeadlessSession,
+        kind: ToolKind,
+        dir: &Path,
+        basename: &str,
+    ) -> PathBuf {
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("scripts")
             .join("fake_lsp_server.py");
@@ -28,9 +39,9 @@ pub(crate) mod tests_support {
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
             .unwrap_or_else(|err| panic!("make fake LSP server executable: {err}"));
 
-        session.app.tool_paths.set(ToolKind::Ty, Some(executable.clone()));
+        session.app.tool_paths.set(kind, Some(executable.clone()));
         platform::configure_tool_paths(session.app.tool_paths.clone());
-        assert_eq!(platform::resolve_tool_kind(ToolKind::Ty).path, Some(executable.clone()));
+        assert_eq!(platform::resolve_tool_kind(kind).path, Some(executable.clone()));
         executable
     }
 

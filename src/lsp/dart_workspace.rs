@@ -7,15 +7,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub(super) const DART_SERVER_NAME: &str = DART_SERVER.program;
-
-#[derive(Clone, Debug)]
-pub(super) struct OpenDartFile {
-    pub(super) path: PathBuf,
-    pub(super) root: PathBuf,
-    pub(super) text: Arc<str>,
-    pub(super) version: i32,
+pub(super) fn dart_init_options() -> serde_json::Value {
+    serde_json::json!({
+        "onlyAnalyzeProjectsWithOpenFiles": true,
+        "suggestFromUnimportedLibraries": true,
+        "closingLabels": true
+    })
 }
+
+pub(super) const DART_SERVER_NAME: &str = DART_SERVER.program;
 
 pub(super) struct DartAnalyzerJob {
     generation: u64,
@@ -23,19 +23,15 @@ pub(super) struct DartAnalyzerJob {
     rx: crate::ui_waker::OneShot<DartWorkspaceResult>,
 }
 
-pub(super) struct DartWorkspaceState {
-    pub(super) root: PathBuf,
-    pub(super) process: Option<LspProcess>,
-    generation: u64,
-    due_at: Option<Instant>,
-    job: Option<DartAnalyzerJob>,
+pub(super) struct DartAnalyzerState {
+    pub(super) generation: u64,
+    pub(super) due_at: Option<Instant>,
+    pub(super) job: Option<DartAnalyzerJob>,
 }
 
-impl DartWorkspaceState {
-    pub(super) fn new(root: PathBuf) -> Self {
+impl DartAnalyzerState {
+    pub(super) fn new() -> Self {
         Self {
-            root,
-            process: None,
             generation: 0,
             due_at: None,
             job: None,
@@ -47,6 +43,12 @@ impl DartWorkspaceState {
             job.cancel.store(true, Ordering::Release);
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) struct DartRootStateForTest {
+    pub(crate) process: bool,
+    pub(crate) job: bool,
 }
 
 pub(super) struct DartWorkspaceResult {
@@ -82,8 +84,8 @@ pub(super) fn dart_root_for_path(path: &Path, workspaces: &[PathBuf]) -> DartRoo
     }
 }
 
-fn nearest_marker(start: &Path, stop: Option<&Path>, marker: &str) -> Option<PathBuf> {
-    for ancestor in start.ancestors() {
+pub(super) fn nearest_marker(start: &Path, stop: Option<&Path>, marker: &str) -> Option<PathBuf> {
+    for ancestor in start.ancestors().take(32) {
         if ancestor.join(marker).is_file() {
             return Some(ancestor.to_path_buf());
         }
@@ -115,7 +117,7 @@ impl LspManager {
     pub(super) fn open_dart_document(&mut self, path: PathBuf, text: Arc<str>, version: i32) {
         let path_key = crate::platform::PathKey::new(&path);
         if let Some(existing_version) = self
-            .open_dart_files
+            .dart.open_files()
             .get(&path_key)
             .map(|document| document.version)
         {
@@ -125,80 +127,157 @@ impl LspManager {
             return;
         }
         let root = dart_root_for_path(&path, &self.workspaces).path;
-        let root_key = crate::platform::PathKey::new(&root);
-        self.open_dart_files.insert(
-            path_key,
-            OpenDartFile {
-                path: path.clone(),
-                root: root.clone(),
-                text: text.clone(),
-                version,
-            },
-        );
-        self.dart_workspaces
-            .entry(root_key.clone())
-            .or_insert_with(|| DartWorkspaceState::new(root.clone()));
-        self.ensure_dart_process(&root_key);
-        if let Some(state) = self.dart_workspaces.get_mut(&root_key)
-            && let Some(process) = &mut state.process
-        {
-            process.notify_open(&path, text, version, Some(&root));
-        }
+        let executable = dart_executable_for_root(&root);
+        self.dart.open_document(path, text, version, root.clone(), Some(executable), &self.ui_waker);
         self.schedule_dart_workspace_analysis(&root, Duration::from_secs(1));
         self.mark_diagnostics_changed();
     }
 
     pub(super) fn change_dart_document(&mut self, path: PathBuf, text: Arc<str>, version: i32) {
         let path_key = crate::platform::PathKey::new(&path);
-        let Some(existing) = self.open_dart_files.get(&path_key) else {
+        let Some(existing) = self.dart.open_files().get(&path_key) else {
             return;
         };
         if version <= existing.version {
             return;
         }
-        let root = existing.root.clone();
-        if let Some(open) = self.open_dart_files.get_mut(&path_key) {
-            open.text = text.clone();
-            open.version = version;
-        }
-        let root_key = crate::platform::PathKey::new(&root);
-        self.ensure_dart_process(&root_key);
-        if let Some(state) = self.dart_workspaces.get_mut(&root_key)
-            && let Some(process) = &mut state.process
-        {
-            process.notify_change(&path, text, version);
-        }
+        self.dart.change_document(&path, text, version);
         self.mark_diagnostics_changed();
     }
 
     pub(super) fn close_dart_document(&mut self, path: &Path) {
-        let path_key = crate::platform::PathKey::new(path);
-        let Some(open) = self.open_dart_files.remove(&path_key) else {
+        let Some(root_key) = self.dart.close_document(path) else {
             return;
         };
-        let root_key = crate::platform::PathKey::new(&open.root);
-        if let Some(state) = self.dart_workspaces.get_mut(&root_key)
-            && let Some(process) = &mut state.process
-        {
-            process.notify_close(&open.path);
+        if self.rooted_root_may_stop(super::rooted_language::RootedLanguage::Dart, &root_key) {
+            self.stop_rooted_root(super::rooted_language::RootedLanguage::Dart, &root_key);
         }
-        self.dart_live_diagnostics.remove(&open.path);
-        self.closed_dart_documents.push(open.path.clone());
-        self.mark_diagnostics_changed();
+    }
 
-        let root_still_open = self
-            .open_dart_files
-            .values()
-            .any(|document| crate::platform::paths_equal(&document.root, &open.root));
-        if !root_still_open
-            && let Some(state) = self.dart_workspaces.get_mut(&root_key)
-            && state.job.is_none()
-        {
-            if let Some(process) = state.process.take() {
-                process.shutdown();
-            }
-            self.dart_status = super::LspServerStatus::Disabled;
+    pub fn stop_rooted_root(
+        &mut self,
+        lang: super::rooted_language::RootedLanguage,
+        root: &crate::platform::PathKey,
+    ) {
+        self.rooted_mut(lang).stop_root(root);
+    }
+
+    pub fn rooted_root_may_stop(
+        &self,
+        lang: super::rooted_language::RootedLanguage,
+        root: &crate::platform::PathKey,
+    ) -> bool {
+        match lang {
+            super::rooted_language::RootedLanguage::Dart => self
+                .dart_jobs
+                .get(root)
+                .is_none_or(|state| state.job.is_none()),
+            super::rooted_language::RootedLanguage::Rust => true,
         }
+    }
+
+    pub fn drain_closed_dart_documents(&mut self) -> Vec<PathBuf> {
+        self.dart.drain_closed_documents()
+    }
+
+    /// Lifecycle fields of one Dart root for headless characterization tests.
+    #[cfg(test)]
+    pub(crate) fn dart_root_state_for_test(&self, root: &Path) -> Option<DartRootStateForTest> {
+        let key = crate::platform::PathKey::new(root);
+        Some(DartRootStateForTest {
+            process: self.dart.roots().get(&key).is_some_and(|state| state.process.is_some()),
+            job: self.dart_jobs.get(&key).is_some_and(|state| state.job.is_some()),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dart_workspace_count_for_test(&self) -> usize {
+        self.dart.roots().len()
+    }
+
+    /// Stands in for a slow `dart analyze`: installs a job on `root` that sleeps for `hold`
+    /// and then reports an empty result. False when the root has no state or already has a job.
+    #[cfg(test)]
+    pub(crate) fn dart_hold_job_for_test(&mut self, root: &Path, hold: Duration) -> bool {
+        let key = crate::platform::PathKey::new(root);
+        if !self.dart.roots().contains_key(&key) { return false; }
+        let state = self.dart_jobs.entry(key).or_insert_with(DartAnalyzerState::new);
+        if state.job.is_some() { return false; }
+        let result_root = root.to_path_buf();
+        let generation = state.generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let Ok(rx) = self.ui_waker.spawn_one_shot("rriter-dart-test-job", move || {
+            std::thread::sleep(hold);
+            DartWorkspaceResult { root: result_root, generation, diagnostics: Ok(HashMap::new()) }
+        }) else { return false; };
+        state.job = Some(DartAnalyzerJob { generation, cancel, rx });
+        true
+    }
+
+    pub(super) fn dart_document_version(&self, path: &Path) -> Option<i32> {
+        self.dart.document_version(path)
+    }
+
+    pub(super) fn poll_dart_workspace_diagnostics(&mut self) -> usize {
+        let keys = self.dart_jobs.keys().cloned().collect::<Vec<_>>();
+        let mut completed = Vec::new();
+        for key in &keys {
+            let Some(state) = self.dart_jobs.get_mut(key) else { continue; };
+            let Some(mut job) = state.job.take() else { continue; };
+            match job.rx.poll() {
+                crate::ui_waker::OneShotState::Ready(result) => completed.push((key.clone(), result)),
+                crate::ui_waker::OneShotState::Pending => state.job = Some(job),
+                crate::ui_waker::OneShotState::Closed => self.log_dart_workspace_error(
+                    "Dart workspace diagnostics worker disconnected".to_string(),
+                ),
+            }
+        }
+
+        let mut received = 0usize;
+        for (key, result) in completed {
+            received = received.saturating_add(self.apply_dart_workspace_result(result));
+            if !self.dart.root_has_open_files(&key) {
+                self.stop_rooted_root(super::rooted_language::RootedLanguage::Dart, &key);
+            }
+        }
+        self.start_due_dart_workspace_jobs();
+        received
+    }
+
+    pub(super) fn mark_dart_missing(&mut self) {
+        for state in self.dart_jobs.values_mut() { state.cancel_job(); }
+        self.dart.mark_missing();
+    }
+
+    pub(super) fn reconfigure_dart_workspaces(&mut self) {
+        let roots = self.dart.roots().keys().cloned().collect::<Vec<_>>();
+        for root in roots {
+            self.stop_rooted_root(super::rooted_language::RootedLanguage::Dart, &root);
+        }
+        self.dart.reconfigure(&self.workspaces);
+        for state in self.dart_jobs.values_mut() {
+            state.cancel_job();
+            state.generation = state.generation.wrapping_add(1).max(1);
+            state.due_at = None;
+        }
+        self.dart.restart_all(|root| Some(dart_executable_for_root(root)), &self.ui_waker);
+        if self.dart_workspace_analysis_enabled {
+            let roots = self
+                .dart
+                .open_files()
+                .values()
+                .map(|document| document.root.clone())
+                .collect::<Vec<_>>();
+            for root in crate::platform::dedup_paths(roots) {
+                self.schedule_dart_workspace_analysis(&root, Duration::from_secs(1));
+            }
+        }
+        let mut valid_roots = self.workspaces.iter().map(|workspace| crate::platform::PathKey::new(workspace)).collect::<std::collections::HashSet<_>>();
+        valid_roots.extend(self.dart.open_files().values().map(|file| crate::platform::PathKey::new(&file.root)));
+        self.dart_jobs.retain(|key, _| valid_roots.contains(key));
+        self.dart_job_roots.retain(|key, _| valid_roots.contains(key));
+        self.dart_workspace_diagnostics.clear();
+        self.mark_diagnostics_changed();
     }
 
     pub fn notify_saved(&mut self, path: &Path, ext: &str) {
@@ -210,143 +289,50 @@ impl LspManager {
             self.notify_analysis_configuration_changed(path);
             return;
         }
-        if ext != "dart" {
+        let Some(route) = Self::language_for_ext(ext) else {
             return;
-        }
-        let path_key = crate::platform::PathKey::new(path);
-        if let Some(open) = self.open_dart_files.get(&path_key) {
-            let root = open.root.clone();
-            self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+        };
+        if let super::LangRoute::Rooted(lang) = route {
+            match lang {
+                super::rooted_language::RootedLanguage::Dart => {
+                    if let Some(root) = self.rooted(lang).root_for_open_path(path).map(Path::to_path_buf) {
+                        self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+                    }
+                }
+                super::rooted_language::RootedLanguage::Rust => {
+                    self.rooted_mut(lang).notify_saved(path);
+                }
+            }
         }
     }
 
     pub fn refresh_workspace_diagnostics(&mut self, path: &Path, ext: &str) {
-        if ext != "dart" {
+        let Some(route) = Self::language_for_ext(ext) else {
             return;
+        };
+        if let super::LangRoute::Rooted(lang) = route {
+            let root = self
+                .rooted(lang)
+                .root_for_open_path(path)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| match lang {
+                    super::rooted_language::RootedLanguage::Dart => {
+                        dart_root_for_path(path, &self.workspaces).path
+                    }
+                    super::rooted_language::RootedLanguage::Rust => {
+                        super::rust_workspace::nearest_cargo_toml_dir(path, &self.workspaces)
+                            .unwrap_or_else(|| path.parent().unwrap_or(path).to_path_buf())
+                    }
+                });
+            if lang == super::rooted_language::RootedLanguage::Dart {
+                self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
+            }
         }
-        let root = self
-            .open_dart_files
-            .get(&crate::platform::PathKey::new(path))
-            .map(|open| open.root.clone())
-            .unwrap_or_else(|| dart_root_for_path(path, &self.workspaces).path);
-        self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
     }
 
     pub fn notify_analysis_configuration_changed(&mut self, path: &Path) {
         let root = dart_root_for_path(path, &self.workspaces).path;
         self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
-    }
-
-    pub fn drain_closed_dart_documents(&mut self) -> Vec<PathBuf> {
-        std::mem::take(&mut self.closed_dart_documents)
-    }
-
-    pub(super) fn dart_document_version(&self, path: &Path) -> Option<i32> {
-        self.open_dart_files
-            .get(&crate::platform::PathKey::new(path))
-            .map(|open| open.version)
-    }
-
-    pub(super) fn dart_process_for_path_mut(&mut self, path: &Path) -> Option<&mut LspProcess> {
-        let root = self
-            .open_dart_files
-            .get(&crate::platform::PathKey::new(path))?
-            .root
-            .clone();
-        let root_key = crate::platform::PathKey::new(&root);
-        self.ensure_dart_process(&root_key);
-        self.dart_workspaces
-            .get_mut(&root_key)
-            .and_then(|state| state.process.as_mut())
-    }
-
-    pub(super) fn poll_dart_processes(&self, events: &mut Vec<super::LspEvent>) {
-        for state in self.dart_workspaces.values() {
-            if let Some(process) = &state.process {
-                process.poll(events);
-            }
-        }
-    }
-
-    pub(super) fn poll_dart_workspace_diagnostics(&mut self) -> usize {
-        let keys = self.dart_workspaces.keys().cloned().collect::<Vec<_>>();
-        let mut completed = Vec::new();
-        for key in &keys {
-            let Some(state) = self.dart_workspaces.get_mut(key) else {
-                continue;
-            };
-            let Some(mut job) = state.job.take() else {
-                continue;
-            };
-            match job.rx.poll() {
-                crate::ui_waker::OneShotState::Ready(result) => completed.push((key.clone(), result)),
-                crate::ui_waker::OneShotState::Pending => state.job = Some(job),
-                crate::ui_waker::OneShotState::Closed => {
-                    self.log_dart_workspace_error(
-                        "Dart workspace diagnostics worker disconnected".to_string(),
-                    );
-                }
-            }
-        }
-
-        let mut received = 0usize;
-        for (key, result) in completed {
-            received = received.saturating_add(self.apply_dart_workspace_result(result));
-            let root_still_open = self.open_dart_files.values().any(|document| {
-                self.dart_workspaces
-                    .get(&key)
-                    .is_some_and(|state| crate::platform::paths_equal(&document.root, &state.root))
-            });
-            if !root_still_open
-                && let Some(state) = self.dart_workspaces.get_mut(&key)
-                && let Some(process) = state.process.take()
-            {
-                process.shutdown();
-            }
-        }
-        self.start_due_dart_workspace_jobs();
-        received
-    }
-
-    pub(super) fn mark_dart_missing(&mut self) {
-        self.dart_unavailable = true;
-        for state in self.dart_workspaces.values_mut() {
-            state.cancel_job();
-            if let Some(process) = state.process.take() {
-                process.shutdown();
-            }
-        }
-    }
-
-    pub(super) fn reconfigure_dart_workspaces(&mut self) {
-        if self.open_dart_files.is_empty() {
-            for state in self.dart_workspaces.values_mut() {
-                state.cancel_job();
-                if let Some(process) = state.process.take() {
-                    process.shutdown();
-                }
-            }
-            self.dart_workspaces.clear();
-            self.dart_live_diagnostics.clear();
-            self.dart_workspace_diagnostics.clear();
-            self.mark_diagnostics_changed();
-            return;
-        }
-        let documents = self.open_dart_files.values().cloned().collect::<Vec<_>>();
-        for state in self.dart_workspaces.values_mut() {
-            state.cancel_job();
-            if let Some(process) = state.process.take() {
-                process.shutdown();
-            }
-        }
-        self.dart_workspaces.clear();
-        self.open_dart_files.clear();
-        self.dart_live_diagnostics.clear();
-        self.dart_workspace_diagnostics.clear();
-        for document in documents {
-            self.open_dart_document(document.path, document.text, document.version);
-        }
-        self.mark_diagnostics_changed();
     }
 
     pub fn set_dart_workspace_analysis_enabled(&mut self, enabled: bool) {
@@ -355,7 +341,7 @@ impl LspManager {
         }
         self.dart_workspace_analysis_enabled = enabled;
         if !enabled {
-            for state in self.dart_workspaces.values_mut() {
+            for state in self.dart_jobs.values_mut() {
                 state.cancel_job();
                 state.generation = state.generation.wrapping_add(1).max(1);
                 state.due_at = None;
@@ -364,11 +350,11 @@ impl LspManager {
             self.mark_diagnostics_changed();
             return;
         }
-        if self.open_dart_files.is_empty() {
+        if self.dart.open_files().is_empty() {
             self.schedule_configured_dart_projects();
         } else {
             let roots = self
-                .open_dart_files
+                .dart.open_files()
                 .values()
                 .map(|document| document.root.clone())
                 .collect::<Vec<_>>();
@@ -396,41 +382,13 @@ impl LspManager {
         }
     }
 
-    fn ensure_dart_process(&mut self, root_key: &crate::platform::PathKey) {
-        if self.dart_disabled || self.dart_unavailable {
-            return;
-        }
-        let Some(root) = self
-            .dart_workspaces
-            .get(root_key)
-            .map(|state| state.root.clone())
-        else {
-            return;
-        };
-        let executable = dart_executable_for_root(&root);
-        let Some(state) = self.dart_workspaces.get_mut(root_key) else {
-            return;
-        };
-        if state.process.is_none() {
-            self.dart_status = super::LspServerStatus::Starting;
-            state.process = Some(LspProcess::start_with_executable(
-                &DART_SERVER,
-                vec![root],
-                Some(executable),
-                self.ui_waker.clone(),
-            ));
-        }
-    }
-
     fn schedule_dart_workspace_analysis(&mut self, root: &Path, debounce: Duration) {
         if !self.dart_workspace_analysis_enabled {
             return;
         }
         let root_key = crate::platform::PathKey::new(root);
-        let state = self
-            .dart_workspaces
-            .entry(root_key)
-            .or_insert_with(|| DartWorkspaceState::new(root.to_path_buf()));
+        self.dart_job_roots.insert(root_key.clone(), root.to_path_buf());
+        let state = self.dart_jobs.entry(root_key).or_insert_with(DartAnalyzerState::new);
         state.generation = state.generation.wrapping_add(1).max(1);
         state.cancel_job();
         state.due_at = Some(Instant::now() + debounce);
@@ -438,24 +396,28 @@ impl LspManager {
 
     fn start_due_dart_workspace_jobs(&mut self) {
         if !self.dart_workspace_analysis_enabled
-            || self.dart_disabled
-            || self.dart_unavailable
+            || !self.dart.enabled()
+            || self.dart.missing()
             || self.suppress_diagnostics
         {
             return;
         }
         let now = Instant::now();
-        let keys = self.dart_workspaces.keys().cloned().collect::<Vec<_>>();
+        let keys = self.dart_jobs.keys().cloned().collect::<Vec<_>>();
         for key in keys {
-            let Some(state) = self.dart_workspaces.get_mut(&key) else {
-                continue;
+            let root = self.dart_job_roots.get(&key).cloned()
+                .or_else(|| self.dart.roots().get(&key).map(|state| state.root.clone()))
+                .or_else(|| self.dart.open_files().values().find(|file| crate::platform::PathKey::new(&file.root) == key).map(|file| file.root.clone()))
+                .or_else(|| self.workspaces.iter().find(|workspace| crate::platform::PathKey::new(workspace) == key).cloned());
+            let Some(root) = root else { continue; };
+            let generation = {
+                let Some(state) = self.dart_jobs.get_mut(&key) else { continue; };
+                if state.job.is_some() || state.due_at.is_none_or(|due| due > now) {
+                    continue;
+                }
+                state.due_at = None;
+                state.generation
             };
-            if state.job.is_some() || state.due_at.is_none_or(|due| due > now) {
-                continue;
-            }
-            state.due_at = None;
-            let root = state.root.clone();
-            let generation = state.generation;
             let cancel = Arc::new(AtomicBool::new(false));
             let worker_cancel = cancel.clone();
             let spawn = self.ui_waker.spawn_one_shot("rriter-dart-analyze", move || {
@@ -468,11 +430,9 @@ impl LspManager {
             });
             match spawn {
                 Ok(rx) => {
-                    state.job = Some(DartAnalyzerJob {
-                        generation,
-                        cancel,
-                        rx,
-                    });
+                    if let Some(state) = self.dart_jobs.get_mut(&key) {
+                        state.job = Some(DartAnalyzerJob { generation, cancel, rx });
+                    }
                 }
                 Err(error) => self.log_dart_workspace_error(format!(
                     "Dart workspace diagnostics worker failed to start: {error}"
@@ -486,7 +446,7 @@ impl LspManager {
             return 0;
         }
         let root_key = crate::platform::PathKey::new(&result.root);
-        let Some(state) = self.dart_workspaces.get(&root_key) else {
+        let Some(state) = self.dart_jobs.get(&root_key) else {
             return 0;
         };
         if result.generation != state.generation {
@@ -544,7 +504,7 @@ impl LspManager {
     }
 }
 
-fn dart_executable_for_root(root: &Path) -> PathBuf {
+pub(super) fn dart_executable_for_root(root: &Path) -> PathBuf {
     crate::platform::resolve_dart_for_workspace(Some(root))
         .path
         .unwrap_or_else(|| PathBuf::from(DART_SERVER.program))
@@ -894,17 +854,14 @@ mod tests {
         let second = package.join("lib/b.dart");
         std::fs::create_dir_all(first.parent().unwrap()).unwrap();
         let (process, commands) = test_dart_process();
-        let root_key = crate::platform::PathKey::new(&package);
-        let mut state = DartWorkspaceState::new(package.clone());
-        state.process = Some(process);
         let mut manager = LspManager::new(vec![package.clone()]);
-        manager.dart_workspaces.insert(root_key, state);
+        manager.dart.insert_root_for_test(package.clone(), Some(process));
 
         manager.notify_open(&first, "dart", "void a() {}\n", 1);
         manager.notify_open(&second, "dart", "void b() {}\n", 1);
 
-        assert_eq!(manager.dart_workspaces.len(), 1);
-        assert_eq!(manager.open_dart_files.len(), 2);
+        assert_eq!(manager.dart.roots().len(), 1);
+        assert_eq!(manager.dart.open_files().len(), 2);
         for expected in [&first, &second] {
             match commands.try_recv().unwrap() {
                 Cmd::Open {
@@ -928,11 +885,9 @@ mod tests {
         let second = package.join("lib/b.dart");
         std::fs::create_dir_all(first.parent().unwrap()).unwrap();
         let (process, commands) = test_dart_process();
-        let root_key = crate::platform::PathKey::new(&package);
-        let mut state = DartWorkspaceState::new(package.clone());
-        state.process = Some(process);
         let mut manager = LspManager::new(vec![package.clone()]);
-        manager.dart_workspaces.insert(root_key.clone(), state);
+        let root_key = crate::platform::PathKey::new(&package);
+        manager.dart.insert_root_for_test(package.clone(), Some(process));
         manager.notify_open(&first, "dart", "void a() {}\n", 1);
         manager.notify_open(&second, "dart", "void b() {}\n", 1);
         let _ = commands.try_recv().unwrap();
@@ -947,7 +902,7 @@ mod tests {
         assert!(commands.try_recv().is_err());
         assert_eq!(
             manager
-                .open_dart_files
+                .dart.open_files()
                 .get(&crate::platform::PathKey::new(&first))
                 .map(|open| open.version),
             Some(3)
@@ -957,7 +912,7 @@ mod tests {
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
         assert!(
             manager
-                .dart_workspaces
+                .dart.roots()
                 .get(&root_key)
                 .and_then(|state| state.process.as_ref())
                 .is_some()
@@ -965,7 +920,7 @@ mod tests {
         manager.notify_close(&second, "dart");
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Shutdown));
-        assert!(manager.open_dart_files.is_empty());
+        assert!(manager.dart.open_files().is_empty());
         assert_eq!(manager.drain_closed_dart_documents().len(), 2);
         let _ = std::fs::remove_dir_all(package);
     }
@@ -976,20 +931,69 @@ mod tests {
         std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
         let mut manager = LspManager::new(vec![package.clone()]);
         let root_key = crate::platform::PathKey::new(&package);
-        let initial_generation = manager.dart_workspaces[&root_key].generation;
-        assert!(manager.dart_workspaces[&root_key].due_at.is_some());
+        let initial_generation = manager.dart_jobs[&root_key].generation;
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
 
         manager.notify_saved(&package.join("analysis_options.yaml"), "yaml");
-        assert!(manager.dart_workspaces[&root_key].generation > initial_generation);
+        assert!(manager.dart_jobs[&root_key].generation > initial_generation);
         manager.set_dart_workspace_analysis_enabled(false);
-        assert!(manager.dart_workspaces[&root_key].due_at.is_none());
+        assert!(manager.dart_jobs[&root_key].due_at.is_none());
         assert!(manager.dart_workspace_diagnostics.is_empty());
-        let disabled_generation = manager.dart_workspaces[&root_key].generation;
+        let disabled_generation = manager.dart_jobs[&root_key].generation;
         manager.notify_saved(&package.join("pubspec.yaml"), "yaml");
         assert_eq!(
-            manager.dart_workspaces[&root_key].generation,
+            manager.dart_jobs[&root_key].generation,
             disabled_generation
         );
+        let _ = std::fs::remove_dir_all(package);
+    }
+
+    #[test]
+    fn dart_reconfiguration_reschedules_open_workspace_analysis() {
+        let package = temp_dir("analyzer-reconfigure-open");
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        let path = package.join("lib/main.dart");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut manager = LspManager::new(vec![package.clone()]);
+        manager.dart.mark_missing();
+        manager.notify_open(&path, "dart", "void main() {}\n", 1);
+        let root_key = crate::platform::PathKey::new(&package);
+
+        manager.dart_jobs.get_mut(&root_key).unwrap().due_at = None;
+        manager.restart_server(DART_SERVER_NAME);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+
+        manager.set_server_enabled(DART_SERVER_NAME, false);
+        assert!(manager.dart_jobs[&root_key].due_at.is_none());
+        manager.set_server_enabled(DART_SERVER_NAME, true);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+
+        manager.dart_jobs.get_mut(&root_key).unwrap().due_at = None;
+        manager.set_workspaces(vec![package.clone()]);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+        let _ = std::fs::remove_dir_all(package);
+    }
+
+    #[test]
+    fn closing_python_keeps_diagnostics_for_configured_dart_job_root() {
+        let package = temp_dir("analyzer-configured-root-prune");
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        let python = package.join("main.py");
+        let dart_path = package.join("lib/main.dart");
+        std::fs::create_dir_all(dart_path.parent().unwrap()).unwrap();
+        let mut manager = LspManager::new(vec![package.clone()]);
+        manager.disable_python();
+        manager.dart_workspace_diagnostics.insert(
+            dart_path.clone(),
+            Arc::from(vec![test_diagnostic("workspace")].into_boxed_slice()),
+        );
+        assert!(manager.dart.open_files().is_empty());
+        assert!(manager.dart_job_roots.contains_key(&crate::platform::PathKey::new(&package)));
+
+        manager.notify_open(&python, "py", "print('hello')\n", 1);
+        manager.notify_close(&python, "py");
+
+        assert!(manager.dart_workspace_diagnostics.contains_key(&dart_path));
         let _ = std::fs::remove_dir_all(package);
     }
 
@@ -1000,22 +1004,22 @@ mod tests {
         let path = package.join("lib/main.dart");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut manager = LspManager::new(vec![package.clone()]);
-        manager.dart_unavailable = true;
+        manager.dart.mark_missing();
         manager.notify_open(&path, "dart", "void main() {}\n", 1);
         let root_key = crate::platform::PathKey::new(&package);
-        let initial_generation = manager.dart_workspaces[&root_key].generation;
-        manager.dart_workspaces.get_mut(&root_key).unwrap().due_at = None;
+        let initial_generation = manager.dart_jobs[&root_key].generation;
+        manager.dart_jobs.get_mut(&root_key).unwrap().due_at = None;
 
         manager.notify_change(&path, "dart", "void main() { print(1); }\n", 2);
         assert_eq!(
-            manager.dart_workspaces[&root_key].generation,
+            manager.dart_jobs[&root_key].generation,
             initial_generation
         );
-        assert!(manager.dart_workspaces[&root_key].due_at.is_none());
+        assert!(manager.dart_jobs[&root_key].due_at.is_none());
 
         manager.notify_saved(&path, "dart");
-        assert!(manager.dart_workspaces[&root_key].due_at.is_some());
-        assert!(manager.dart_workspaces[&root_key].generation > initial_generation);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+        assert!(manager.dart_jobs[&root_key].generation > initial_generation);
         let _ = std::fs::remove_dir_all(package);
     }
 
@@ -1027,19 +1031,17 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "void main() {}\n").unwrap();
         let mut manager = LspManager::new(vec![package.clone()]);
-        manager.dart_unavailable = true;
+        manager.dart.mark_missing();
         manager.notify_open(&path, "dart", "void main() {}\n", 4);
         manager.dart_workspace_diagnostics.insert(
             path.clone(),
             Arc::from(vec![test_diagnostic("workspace")].into_boxed_slice()),
         );
-        manager.dart_live_diagnostics.insert(
-            path.clone(),
-            (
-                4,
-                Arc::from(vec![test_diagnostic("live")].into_boxed_slice()),
-            ),
-        );
+        manager.dart.insert_live_diagnostics(path.clone(), super::super::rooted_language::LiveDiagnostics {
+            version: 4,
+            root: crate::platform::PathKey::new(&package),
+            items: Arc::from(vec![test_diagnostic("live")].into_boxed_slice()),
+        });
         manager.rebuild_diagnostic_summary();
         manager.dirty_diagnostics = false;
 
@@ -1068,11 +1070,8 @@ mod tests {
         let second = package.join("lib/second.dart");
         std::fs::create_dir_all(first.parent().unwrap()).unwrap();
         let (process, commands, events) = test_dart_process_with_events();
-        let root_key = crate::platform::PathKey::new(&package);
-        let mut state = DartWorkspaceState::new(package.clone());
-        state.process = Some(process);
         let mut manager = LspManager::new(vec![package.clone()]);
-        manager.dart_workspaces.insert(root_key, state);
+        manager.dart.insert_root_for_test(package.clone(), Some(process));
         manager.notify_open(&first, "dart", "void first() {}\n", 3);
         manager.notify_open(&second, "dart", "void second() {}\n", 1);
         let _ = commands.try_recv().unwrap();
@@ -1119,7 +1118,7 @@ mod tests {
             manager.diagnostic_at(&first, 0).unwrap().message.as_ref(),
             "versionless current"
         );
-        assert_eq!(manager.dart_live_diagnostics[&first].0, 4);
+        assert_eq!(manager.dart.live_diagnostics()[&first].version, 4);
 
         manager.notify_close(&first, "dart");
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
@@ -1127,7 +1126,7 @@ mod tests {
         assert!(commands.try_recv().is_err());
         assert!(
             !manager
-                .open_dart_files
+                .dart.open_files()
                 .contains_key(&crate::platform::PathKey::new(&first))
         );
         events
@@ -1154,9 +1153,9 @@ mod tests {
         std::fs::write(&path, "void main() {}\n").unwrap();
         let root_key = crate::platform::PathKey::new(&package);
         let mut manager = LspManager::new(vec![package.clone()]);
-        let mut state = DartWorkspaceState::new(package.clone());
+        let mut state = DartAnalyzerState::new();
         state.generation = 2;
-        manager.dart_workspaces.insert(root_key, state);
+        manager.dart_jobs.insert(root_key, state);
         let mut diagnostics = HashMap::new();
         diagnostics.insert(path.clone(), vec![test_diagnostic("stale")]);
 
@@ -1177,9 +1176,9 @@ mod tests {
         let removed = package.join("lib/removed.dart");
         let root_key = crate::platform::PathKey::new(&package);
         let mut manager = LspManager::new(vec![package.clone()]);
-        let mut state = DartWorkspaceState::new(package.clone());
+        let mut state = DartAnalyzerState::new();
         state.generation = 1;
-        manager.dart_workspaces.insert(root_key, state);
+        manager.dart_jobs.insert(root_key, state);
         manager.dart_workspace_diagnostics.insert(
             removed.clone(),
             Arc::from(vec![test_diagnostic("old")].into_boxed_slice()),
@@ -1198,12 +1197,9 @@ mod tests {
     #[test]
     fn expected_dart_shutdown_does_not_mark_sdk_missing() {
         let root = temp_dir("expected-shutdown-status");
-        let root_key = crate::platform::PathKey::new(&root);
         let (process, _commands, events) = test_dart_process_with_events();
-        let mut state = DartWorkspaceState::new(root.clone());
-        state.process = Some(process);
         let mut manager = LspManager::new(vec![root.clone()]);
-        manager.dart_workspaces.insert(root_key, state);
+        manager.dart.insert_root_for_test(root.clone(), Some(process));
 
         events
             .send(LspEvent::StatusChanged {
@@ -1213,8 +1209,8 @@ mod tests {
             .unwrap();
         let _ = manager.poll();
 
-        assert_eq!(manager.dart_status, crate::lsp::LspServerStatus::Disabled);
-        assert!(!manager.dart_unavailable);
+        assert_eq!(manager.dart_status(), crate::lsp::LspServerStatus::Disabled);
+        assert!(!manager.dart.missing());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1239,13 +1235,13 @@ mod tests {
 
         let root_key = crate::platform::PathKey::new(&root);
         let file_key = crate::platform::PathKey::new(&file);
-        let state = manager.dart_workspaces.get(&root_key).unwrap();
-        assert!(manager.dart_disabled);
+        let state = manager.dart.roots().get(&root_key).unwrap();
+        assert!(!manager.dart.enabled());
         assert!(!manager.dart_workspace_analysis_enabled);
         assert!(state.process.is_none());
-        assert!(state.job.is_none());
-        assert!(state.due_at.is_none());
-        assert!(manager.open_dart_files.contains_key(&file_key));
+        assert!(manager.dart_jobs.get(&root_key).is_none_or(|state| state.job.is_none()));
+        assert!(manager.dart_jobs.get(&root_key).is_none_or(|state| state.due_at.is_none()));
+        assert!(manager.dart.open_files().contains_key(&file_key));
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1256,18 +1252,18 @@ mod tests {
         manager.python_disabled = true;
 
         manager.set_server_enabled(DART_SERVER_NAME, false);
-        assert!(manager.dart_disabled);
+        assert!(!manager.dart.enabled());
         assert!(manager.python_disabled);
 
         manager.set_server_enabled(DART_SERVER_NAME, true);
-        assert!(!manager.dart_disabled);
+        assert!(manager.dart.enabled());
         assert!(manager.python_disabled);
 
-        manager.dart_disabled = true;
-        manager.dart_unavailable = true;
+        manager.dart.set_enabled(false);
+        manager.dart.mark_missing();
         manager.restart_server(DART_SERVER_NAME);
-        assert!(!manager.dart_disabled);
-        assert!(!manager.dart_unavailable);
+        assert!(manager.dart.enabled());
+        assert!(!manager.dart.missing());
         assert!(manager.python_disabled);
     }
 

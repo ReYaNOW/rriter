@@ -6,7 +6,7 @@ use crate::scroll::ScrollState;
 use crate::ui_waker::{UiWaker, WakeSyncSender};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -629,6 +629,9 @@ impl ToolInstaller {
             return Err("Другая установка уже выполняется".to_string());
         }
         self.join_finished_worker();
+        if kind == ToolKind::RustAnalyzer {
+            return self.start_rust_analyzer_install(ui_waker);
+        }
         let initial_detail = format!("Подготовка установки {}", kind.label());
         let existing_uv = resolve_tool_kind(ToolKind::Uv).path;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -648,6 +651,45 @@ impl ToolInstaller {
         .map_err(|err| format!("Не удалось запустить установщик {}: {err}", kind.label()))?;
 
         self.begin_run(kind, initial_detail, true, cancel, rx, worker);
+        Ok(())
+    }
+
+    fn start_rust_analyzer_install(&mut self, ui_waker: &UiWaker) -> Result<(), String> {
+        let archive = crate::lsp::rust_analyzer_archive_for_platform()
+            .ok_or_else(|| "платформа не поддерживается; установите через rustup".to_string())?;
+        let plan = RustAnalyzerInstallPlan {
+            url: format!(
+                "https://github.com/rust-lang/rust-analyzer/releases/download/{}/{}",
+                crate::lsp::RUST_ANALYZER_RELEASE_TAG,
+                archive.asset
+            ),
+            asset: archive.asset,
+            sha256: archive.sha256,
+            tag: crate::lsp::RUST_ANALYZER_RELEASE_TAG,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&cancel);
+        let (tx, rx) = ui_waker.sync_channel(INSTALL_EVENT_CAPACITY);
+        let reporter = ToolInstallReporter {
+            tx,
+            dropped_lines: Arc::new(AtomicUsize::new(0)),
+        };
+        let worker = crate::platform::spawn_named("rriter-rust-analyzer-installer", move || {
+            let result = install_rust_analyzer(&plan, &cancel_for_worker, &reporter);
+            reporter.send_control(terminal_install_event(
+                result,
+                cancel_for_worker.load(Ordering::Acquire),
+            ));
+        })
+        .map_err(|err| format!("Не удалось запустить установку rust-analyzer: {err}"))?;
+        self.begin_run(
+            ToolKind::RustAnalyzer,
+            "Подготовка загрузки rust-analyzer".to_string(),
+            true,
+            cancel,
+            rx,
+            worker,
+        );
         Ok(())
     }
 
@@ -1046,6 +1088,7 @@ impl crate::app::App {
             changed |= self.sync_pdf_engine_install(finish);
         } else if let Some(ToolInstallFinish::Installed(outcome)) = finish {
             let mut restart_lsp = false;
+            let mut refresh_rust = false;
             let mut persist_api_runtime = false;
             for (kind, path) in outcome.paths {
                 if std::env::var_os(kind.override_env()).is_some() {
@@ -1065,11 +1108,16 @@ impl crate::app::App {
                 }
                 self.tool_paths.set(kind, Some(path));
                 restart_lsp |= matches!(kind, ToolKind::Ruff | ToolKind::Ty);
+                refresh_rust |= kind == ToolKind::RustAnalyzer;
             }
             crate::platform::configure_tool_paths(self.tool_paths.clone());
             self.save_current_config();
             if restart_lsp && let Some(lsp) = &mut self.lsp {
                 lsp.restart_python();
+                self.ide_panel.lsp_servers = lsp.servers_info();
+            }
+            if refresh_rust && let Some(lsp) = &mut self.lsp {
+                lsp.refresh_rust_resolution();
                 self.ide_panel.lsp_servers = lsp.servers_info();
             }
             if persist_api_runtime {

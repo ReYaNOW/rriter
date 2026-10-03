@@ -39,6 +39,8 @@ fn ctrl_wheel_multiplier_label(value: f32) -> String {
 fn tool_row_units(kind: crate::platform::ToolKind, stacked_actions: bool) -> f32 {
     if kind == crate::platform::ToolKind::Dart {
         if stacked_actions { 183.0 } else { 148.0 }
+    } else if kind == crate::platform::ToolKind::RustAnalyzer {
+        if stacked_actions { 142.0 } else { 102.0 }
     } else if stacked_actions {
         82.0
     } else {
@@ -92,15 +94,19 @@ fn dart_status_text(
         .version()
         .or_else(|| state.error())
         .unwrap_or("SDK не найден");
-    let lsp = match lsp_status {
+    let lsp = lsp_status_label(lsp_status);
+    format!("{} · {source}: {detail} · LSP: {lsp}", state.status().label())
+}
+
+fn lsp_status_label(status: Option<crate::lsp::LspServerStatus>) -> &'static str {
+    match status {
         Some(crate::lsp::LspServerStatus::Starting) => "запуск",
         Some(crate::lsp::LspServerStatus::Running) => "работает",
         Some(crate::lsp::LspServerStatus::Crashed) => "ошибка",
         Some(crate::lsp::LspServerStatus::Missing) => "не найден",
         Some(crate::lsp::LspServerStatus::Disabled) => "выключен",
         None => "не зарегистрирован",
-    };
-    format!("{} · {source}: {detail} · LSP: {lsp}", state.status().label())
+    }
 }
 
 fn tool_status_text(
@@ -108,10 +114,23 @@ fn tool_status_text(
     resolution: &crate::platform::ToolResolution,
     dart_state: &crate::app::tool_installer::DartToolState,
     dart_lsp_status: Option<crate::lsp::LspServerStatus>,
+    rust_row: Option<&crate::lsp::RustRowInfo>,
     compact_path_chars: usize,
 ) -> String {
     if kind == crate::platform::ToolKind::Dart {
         return dart_status_text(dart_state, dart_lsp_status);
+    }
+    if kind == crate::platform::ToolKind::RustAnalyzer {
+        let source = resolution.source_label(kind).unwrap_or("авто");
+        let detail = rust_row.and_then(|info| info.version.as_deref()).unwrap_or("не найден");
+        let lsp = lsp_status_label(rust_row.map(|info| info.status));
+        let mut status = format!("rust-analyzer · {source}: {detail} · LSP: {lsp}");
+        let Some(info) = rust_row else { return status };
+        if info.busy { status.push_str(" · занят"); }
+        if let Some(message) = info.health_message.as_deref() { status.push_str(&format!(" · {message}")); }
+        if info.cargo_missing { status.push_str(" · cargo не найден: установите rustup"); }
+        if info.component_missing { status.push_str(" · rustup component add rust-analyzer"); }
+        return status;
     }
     if resolution.is_ready() {
         let path = resolution
@@ -177,8 +196,10 @@ impl Renderer {
         tool_paths: &crate::platform::ToolPaths,
         tool_installer: &crate::app::tool_installer::ToolInstaller,
         dart_settings: &crate::app::DartSettings,
+        rust_settings: &crate::app::RustSettings,
         dart_tool_state: &crate::app::tool_installer::DartToolState,
         dart_lsp_status: Option<crate::lsp::LspServerStatus>,
+        rust_row: Option<&crate::lsp::RustRowInfo>,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
         let s = self.scale_factor;
@@ -243,8 +264,10 @@ impl Renderer {
                 tool_paths,
                 tool_installer,
                 dart_settings,
+                rust_settings,
                 dart_tool_state,
                 dart_lsp_status,
+                rust_row,
                 ui_registry,
             );
             content_y = (row_y + row_h).round();
@@ -566,8 +589,10 @@ impl Renderer {
         tool_paths: &crate::platform::ToolPaths,
         tool_installer: &crate::app::tool_installer::ToolInstaller,
         dart_settings: &crate::app::DartSettings,
+        rust_settings: &crate::app::RustSettings,
         dart_tool_state: &crate::app::tool_installer::DartToolState,
         dart_lsp_status: Option<crate::lsp::LspServerStatus>,
+        rust_row: Option<&crate::lsp::RustRowInfo>,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> f32 {
         let stacked_actions = content_available_w < 430.0 * scale;
@@ -581,13 +606,20 @@ impl Renderer {
         } else {
             47
         };
-        let status = tool_status_text(
+        let mut status = tool_status_text(
             kind,
             &resolution,
             dart_tool_state,
             dart_lsp_status,
+            rust_row,
             compact_path_chars,
         );
+        if kind == crate::platform::ToolKind::RustAnalyzer
+            && crate::lsp::rust_analyzer_archive_for_platform().is_none()
+            && cfg!(windows)
+        {
+            status.push_str(" · установите через rustup: rustup component add rust-analyzer");
+        }
         let status_color = tool_status_color(kind, &resolution, dart_tool_state);
 
         self.push_rounded_rect(
@@ -598,7 +630,9 @@ impl Renderer {
             5.0 * scale,
             [0.12, 0.13, 0.17, 1.0],
         );
-        let managed = kind.supports_managed_install();
+        let rust_archive_supported = kind != crate::platform::ToolKind::RustAnalyzer
+            || crate::lsp::rust_analyzer_archive_for_platform().is_some();
+        let managed = kind.supports_managed_install() && rust_archive_supported;
         let install_text = if tool_installer.is_running_for(kind) {
             "Отмена"
         } else if resolution.is_ready() {
@@ -684,6 +718,17 @@ impl Renderer {
                 [0.50, 0.52, 0.60, 1.0],
                 0.64,
                 &mut clip_scratch,
+            );
+        }
+        if kind == crate::platform::ToolKind::RustAnalyzer {
+            self.draw_rust_settings_controls(
+                content_x,
+                row_y,
+                content_available_w,
+                scale,
+                stacked_actions,
+                rust_settings,
+                ui_registry,
             );
         }
 
@@ -919,6 +964,60 @@ impl Renderer {
                 w: second_w,
                 h: 29.0 * scale,
                 text: &text,
+                icon: None,
+                text_scale: 0.58,
+                icon_size: 0.0,
+            }
+            .render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
+        }
+    }
+
+    fn draw_rust_settings_controls(
+        &mut self,
+        content_x: f32,
+        row_y: f32,
+        content_available_w: f32,
+        scale: f32,
+        stacked_actions: bool,
+        settings: &crate::app::RustSettings,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let controls_y = (row_y + if stacked_actions { 108.0 * scale } else { 68.0 * scale }).round();
+        let controls_x = (content_x + 8.0 * scale).round();
+        let controls_w = (content_available_w - 16.0 * scale).max(0.0);
+        let gap = (6.0 * scale).round();
+        let button_w = ((controls_w - gap * 2.0) / 3.0).max(0.0);
+        let buttons = [
+            (
+                crate::ui_system::UiId::SettingsRustToggleEnabled,
+                if settings.enabled { "Rust: вкл" } else { "Rust: выкл" },
+            ),
+            (
+                crate::ui_system::UiId::SettingsRustToggleCheckCommand,
+                match settings.check_command {
+                    crate::app::RustCheckCommand::Check => "Проверка: cargo check",
+                    crate::app::RustCheckCommand::Clippy => "Проверка: clippy",
+                },
+            ),
+            (crate::ui_system::UiId::SettingsRustRestart, "Restart"),
+        ];
+        for (index, (id, text)) in buttons.into_iter().enumerate() {
+            let x = (controls_x + index as f32 * (button_w + gap)).round();
+            ui_registry.register_rect(
+                id,
+                x,
+                controls_y,
+                button_w,
+                29.0 * scale,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+            crate::widgets::ButtonView {
+                x,
+                y: controls_y,
+                w: button_w,
+                h: 29.0 * scale,
+                text,
                 icon: None,
                 text_scale: 0.58,
                 icon_size: 0.0,

@@ -303,6 +303,7 @@ fn spawn_server(
     workspace: Option<&Path>,
     event_tx: WakeSender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+    init_options: Option<serde_json::Value>,
 ) -> io::Result<SpawnedProcess> {
     let mut cmd = command_for_server(def, executable, workspace)?;
     cmd.stdin(Stdio::piped())
@@ -382,13 +383,14 @@ fn spawn_server(
                     continue;
                 }
 
-                dispatch_frame_for_server(
+                dispatch_frame_for_server_with_init_options(
                     &body,
                     &event_tx,
                     def.kind,
                     def.kind.name(),
                     &reader_out_tx,
                     &pending_requests,
+                    init_options.as_ref(),
                 );
             }
         })
@@ -625,6 +627,19 @@ fn run_supervisor(
     event_tx: WakeSender<LspEvent>,
     stop: Arc<AtomicBool>,
 ) {
+    run_supervisor_with_init_options(def, executable, workspaces, None, cmd_rx, event_tx, stop);
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_supervisor_with_init_options(
+    def: &'static LspServerDef,
+    executable: Option<PathBuf>,
+    workspaces: Vec<PathBuf>,
+    init_options: Option<serde_json::Value>,
+    cmd_rx: Receiver<Cmd>,
+    event_tx: WakeSender<LspEvent>,
+    stop: Arc<AtomicBool>,
+) {
     let mut open_files: HashMap<String, OpenFile> = HashMap::new();
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
@@ -666,6 +681,7 @@ fn run_supervisor(
             workspaces.first().map(|p| p.as_path()),
             event_tx.clone(),
             pending_requests.clone(),
+            init_options.clone(),
         ) {
             Ok(p) => p,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -706,7 +722,7 @@ fn run_supervisor(
             return;
         };
         init_id = next_init_id;
-        let init_msg = make_initialize_for_server(def.kind, init_id, &workspaces);
+        let init_msg = make_initialize_for_server(def.kind, init_id, &workspaces, init_options.as_ref());
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
         }
@@ -828,6 +844,14 @@ fn run_supervisor(
                     Ok(Cmd::Close { uri }) => {
                         if open_files.remove(&uri).is_some() {
                             let msg = make_did_close(&uri);
+                            if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                                break 'inner;
+                            }
+                        }
+                    }
+                    Ok(Cmd::Save { uri }) => {
+                        if open_files.contains_key(&uri) {
+                            let msg = make_did_save(&uri);
                             if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                                 break 'inner;
                             }
@@ -1109,18 +1133,20 @@ pub struct LspProcess {
 impl LspProcess {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>, ui_waker: UiWaker) -> Self {
-        Self::start_with_executable(def, workspaces, None, ui_waker)
+        Self::start_with_executable(def, workspaces, None, None, ui_waker)
     }
 
     fn start_with_executable(
         def: &'static LspServerDef,
         workspaces: Vec<PathBuf>,
         executable: Option<PathBuf>,
+        init_options: Option<&serde_json::Value>,
         ui_waker: UiWaker,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = ui_waker.channel();
         let ws = workspaces.clone();
+        let init_options = init_options.cloned();
         let stop = Arc::new(AtomicBool::new(false));
         let supervisor_stop = stop.clone();
 
@@ -1128,10 +1154,11 @@ impl LspProcess {
         let supervisor = match thread::Builder::new()
             .name(format!("lsp-supervisor-{}", def.program))
             .spawn(move || {
-                run_supervisor(
+                run_supervisor_with_init_options(
                     def,
                     executable,
                     ws,
+                    init_options,
                     cmd_rx,
                     supervisor_event_tx,
                     supervisor_stop,
@@ -1401,21 +1428,6 @@ impl LspProcess {
             "workspace diagnostics",
         )
         .then_some(id)
-    }
-
-    /// textDocument/didClose
-    pub fn notify_close(&mut self, path: &PathBuf) {
-        let uri = path_to_uri(path);
-        if self.open_uris.remove(&uri) {
-            if self.send_command(Cmd::Close { uri: uri.clone() }, "didClose") {
-                if self.current_uri.as_deref() == Some(uri.as_str()) {
-                    self.current_uri = self.open_uris.iter().next().cloned();
-                }
-                if self.open_uris.is_empty() {
-                    self.open_file_data = None;
-                }
-            }
-        }
     }
 
     /// Запрашивает code actions (быстрые исправления от ruff) для позиции.

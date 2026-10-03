@@ -613,7 +613,7 @@ impl App {
         let (line, col) =
             crate::lsp::offset_to_lsp_pos(&source.text, source.cursor, &source.line_offsets);
         if let Some(id) =
-            lsp.request_ty_completion(&source.path, &source.file_extension, line, col, None)
+            lsp.request_ide_completion(&source.path, &source.file_extension, line, col, None)
         {
             self.autocomplete_detail_request_id = Some(id);
             self.autocomplete_detail_word = Some(target_word);

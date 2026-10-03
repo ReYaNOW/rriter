@@ -541,6 +541,10 @@ fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
     assert_eq!(closed["method"], "textDocument/didClose");
     assert_eq!(closed["params"]["textDocument"]["uri"], uri);
 
+    let saved: serde_json::Value = serde_json::from_slice(&make_did_save(uri)).unwrap();
+    assert_eq!(saved["method"], "textDocument/didSave");
+    assert_eq!(saved["params"]["textDocument"]["uri"], uri);
+
     let only = vec!["quickfix".to_string(), "source.fixAll".to_string()];
     let action: serde_json::Value =
         serde_json::from_slice(&make_code_action(99, uri, 1, 2, 3, 4, "[]", Some(&only))).unwrap();
@@ -1087,6 +1091,7 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
         LspServerKind::Dart,
         201,
         &workspace,
+        Some(&dart_workspace::dart_init_options()),
     ))
     .unwrap();
 
@@ -1124,7 +1129,7 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
 
     for server in [LspServerKind::Ruff, LspServerKind::Ty] {
         let python: serde_json::Value =
-            serde_json::from_slice(&make_initialize_for_server(server, 202, &workspace)).unwrap();
+            serde_json::from_slice(&make_initialize_for_server(server, 202, &workspace, None)).unwrap();
         assert!(python["params"].get("initializationOptions").is_none());
         assert_eq!(
             python["params"]["capabilities"]["workspace"]["didChangeConfiguration"]["dynamicRegistration"],
@@ -1141,28 +1146,49 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
             "edit"
         );
     }
+
+    let init_options = serde_json::json!({"checkOnSave": true});
+    let rust_analyzer: serde_json::Value = serde_json::from_slice(&make_initialize_for_server(
+        LspServerKind::RustAnalyzer,
+        203,
+        &workspace,
+        Some(&init_options),
+    ))
+    .unwrap();
+    let capabilities = &rust_analyzer["params"]["capabilities"];
+    assert_eq!(
+        capabilities["experimental"]["serverStatusNotification"],
+        true
+    );
+    assert!(capabilities.get("window").is_none());
+    assert!(capabilities["workspace"].get("didChangeWatchedFiles").is_none());
+    assert_eq!(
+        rust_analyzer["params"]["initializationOptions"]["checkOnSave"],
+        true
+    );
 }
 
 #[test]
 fn workspace_configuration_is_isolated_for_ruff_ty_and_dart() {
     assert_eq!(
-        configuration_response_for(LspServerKind::Ruff, &serde_json::json!({"section": "dart"}),),
+        configuration_response_for(LspServerKind::Ruff, &serde_json::json!({"section": "dart"}), None),
         serde_json::json!({})
     );
     assert_eq!(
         configuration_response_for(
             LspServerKind::Ty,
             &serde_json::json!({"section": "ty.diagnosticMode"}),
+            None,
         ),
         serde_json::json!("workspace")
     );
     assert_eq!(
-        configuration_response_for(LspServerKind::Ty, &serde_json::json!({"section": "dart"}),),
+        configuration_response_for(LspServerKind::Ty, &serde_json::json!({"section": "dart"}), None),
         serde_json::json!({})
     );
 
     let dart =
-        configuration_response_for(LspServerKind::Dart, &serde_json::json!({"section": "dart"}));
+        configuration_response_for(LspServerKind::Dart, &serde_json::json!({"section": "dart"}), None);
     assert_eq!(dart["enableSdkFormatter"], true);
     assert_eq!(dart["completeFunctionCalls"], true);
     assert_eq!(dart["enableSnippets"], false);
@@ -1172,9 +1198,91 @@ fn workspace_configuration_is_isolated_for_ruff_ty_and_dart() {
         configuration_response_for(
             LspServerKind::Dart,
             &serde_json::json!({"section": "dart.lineLength"}),
+            None,
         ),
         serde_json::Value::Null
     );
+}
+
+#[test]
+fn rust_analyzer_configuration_and_server_status_are_parsed() {
+    let options = serde_json::json!({"checkOnSave": true});
+    assert_eq!(
+        configuration_response_for(
+            LspServerKind::RustAnalyzer,
+            &serde_json::json!({"section": "rust-analyzer"}),
+            Some(&options),
+        ),
+        options
+    );
+    assert_eq!(
+        configuration_response_for(
+            LspServerKind::RustAnalyzer,
+            &serde_json::json!({"section": "rust-analyzer"}),
+            None,
+        ),
+        serde_json::Value::Null
+    );
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let (out_tx, _out_rx) = mpsc::channel();
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let status_frames = [
+        (
+            br#"{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{"health":"ok","quiescent":true}}"#.as_slice(),
+            ServerHealth::Ok,
+            true,
+            None,
+        ),
+        (
+            br#"{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{"health":"error","message":"failed"}}"#.as_slice(),
+            ServerHealth::Error,
+            false,
+            Some("failed"),
+        ),
+        (
+            br#"{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{"health":"unexpected"}}"#.as_slice(),
+            ServerHealth::Warning,
+            false,
+            None,
+        ),
+        (
+            br#"{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{}}"#.as_slice(),
+            ServerHealth::Warning,
+            false,
+            None,
+        ),
+        (
+            br#"{"jsonrpc":"2.0","method":"experimental/serverStatus","params":{"health":7,"quiescent":"yes","message":false}}"#.as_slice(),
+            ServerHealth::Warning,
+            false,
+            None,
+        ),
+    ];
+    for (frame, expected_health, expected_quiescent, expected_message) in status_frames {
+        dispatch_frame_for_server(
+            frame,
+            &event_tx,
+            LspServerKind::RustAnalyzer,
+            "rust-analyzer",
+            &out_tx,
+            &pending,
+        );
+        match recv_non_log(&event_rx) {
+            LspEvent::ServerStatus {
+                server,
+                health,
+                quiescent,
+                message,
+            } => {
+                assert_eq!(server, LspServerKind::RustAnalyzer);
+                assert_eq!(health, expected_health);
+                assert_eq!(quiescent, expected_quiescent);
+                assert_eq!(message.as_deref(), expected_message);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
 }
 
 #[test]

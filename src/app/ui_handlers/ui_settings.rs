@@ -318,6 +318,30 @@ impl App {
                 }
                 self.save_current_config();
             }
+            UiId::SettingsRustToggleEnabled => {
+                self.rust_settings.enabled = !self.rust_settings.enabled;
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.set_rust_enabled(self.rust_settings.enabled);
+                }
+                self.save_current_config();
+            }
+            UiId::SettingsRustToggleCheckCommand => {
+                self.rust_settings.check_command = match self.rust_settings.check_command {
+                    crate::app::RustCheckCommand::Check => crate::app::RustCheckCommand::Clippy,
+                    crate::app::RustCheckCommand::Clippy => crate::app::RustCheckCommand::Check,
+                };
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.set_rust_init_options(crate::lsp::rust_initialization_options(
+                        self.rust_settings.check_command.config_value(),
+                    ));
+                }
+                self.save_current_config();
+            }
+            UiId::SettingsRustRestart => {
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.refresh_rust_resolution();
+                }
+            }
             UiId::SettingsDartCycleClosingLabels => {
                 self.dart_settings.closing_labels = self.dart_settings.closing_labels.next();
                 self.sync_dart_closing_hint_settings();

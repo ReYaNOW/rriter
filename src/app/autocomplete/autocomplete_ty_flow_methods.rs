@@ -705,14 +705,14 @@ impl App {
         crate::app::events::reset_autocomplete_frame_stats();
     }
 
-    pub fn request_ty_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
+    pub fn request_ide_autocomplete(&mut self, mode: AutocompleteMode, trigger: Option<&str>) {
         let Some(source) = self.active_autocomplete_source() else {
             return;
         };
-        self.request_ty_autocomplete_for_source(source, mode, trigger);
+        self.request_ide_autocomplete_for_source(source, mode, trigger);
     }
 
-    pub(crate) fn request_ty_autocomplete_for_source(
+    pub(crate) fn request_ide_autocomplete_for_source(
         &mut self,
         source: ActiveAutocompleteSource,
         mode: AutocompleteMode,
@@ -847,9 +847,9 @@ impl App {
             return;
         };
         let completion_id =
-            lsp.request_ty_completion(&path, &snapshot.file_extension, line, col, trigger);
+            lsp.request_ide_completion(&path, &snapshot.file_extension, line, col, trigger);
         let signature_id = if request_signature_help {
-            lsp.request_ty_signature_help(&path, &snapshot.file_extension, line, col, None)
+            lsp.request_ide_signature_help(&path, &snapshot.file_extension, line, col, None)
         } else {
             None
         };
@@ -862,7 +862,7 @@ impl App {
         if let Some(id) = completion_id {
             if autocomplete_trace_enabled() {
                 println!(
-                    "Autocomplete request_ty_sent: id={} cached={} hide_exact={} context_key_len={} line={} col={}",
+                    "Autocomplete request_ide_sent: id={} cached={} hide_exact={} context_key_len={} line={} col={}",
                     id,
                     0,
                     hide_exact_match,
@@ -911,7 +911,7 @@ impl App {
 
     pub fn request_lsp_autocomplete(&mut self, trigger: Option<&str>) {
         if matches!(self.file_extension.as_str(), "py" | "pyi") {
-            self.request_ty_autocomplete(AutocompleteMode::TyContext, trigger);
+            self.request_ide_autocomplete(AutocompleteMode::TyContext, trigger);
             return;
         }
         if self.file_extension != "dart" || !self.is_ide_mode || self.show_welcome {
