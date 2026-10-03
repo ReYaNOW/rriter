@@ -1,6 +1,7 @@
 use crate::keymap::{Chord, Command, KeyContext, KeymapOverrides};
 use crate::app::App;
 use crate::app::keyboard::KeyInput;
+use crate::editor::Editor;
 use winit::event::ElementState;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -20,6 +21,7 @@ pub(crate) struct Conflict {
 pub(crate) struct KeymapSettingsState {
     pub filter: String,
     pub(crate) filter_lower: String,
+    pub(crate) filter_input: Editor,
     pub filter_focused: bool,
     pub recording: Option<Recording>,
     pub pending_conflict: Option<Conflict>,
@@ -48,6 +50,7 @@ impl Default for KeymapSettingsState {
         Self {
             filter: String::new(),
             filter_lower: String::new(),
+            filter_input: Editor::new(256),
             filter_focused: false,
             recording: None,
             pending_conflict: None,
@@ -67,6 +70,10 @@ impl KeymapSettingsState {
         for info in crate::keymap::COMMANDS {
             let chords = keymap.chords(info.command).iter().map(|chord| chord.display(crate::platform::CURRENT_PLATFORM)).collect::<Vec<_>>();
             let mut search = format!("{} {}", info.label, info.id).to_lowercase();
+            for chord in keymap.chords(info.command) {
+                search.push(' ');
+                search.push_str(&chord.serialize(crate::platform::CURRENT_PLATFORM).to_lowercase());
+            }
             for chord in &chords { search.push(' '); search.push_str(&chord.to_lowercase()); }
             self.rows.push(KeymapSettingsRow {
                 command: info.command,
@@ -77,7 +84,7 @@ impl KeymapSettingsState {
                 has_override: overrides.has(info.command),
                 array_override: raw.get(info.id).is_none_or(serde_json::Value::is_array),
                 conflicted: keymap.conflicted(info.command),
-                terminal_warning: info.context == KeyContext::Global && keymap.chords(info.command).iter().any(|chord| crate::app::keyboard::input_owner::terminal_intercepts(*chord, crate::platform::CURRENT_PLATFORM)),
+                terminal_warning: matches!(info.context, KeyContext::Global | KeyContext::Terminal) && keymap.chords(info.command).iter().any(|chord| crate::app::keyboard::input_owner::terminal_intercepts(*chord, crate::platform::CURRENT_PLATFORM)),
                 search,
             });
         }
@@ -87,6 +94,7 @@ impl KeymapSettingsState {
     pub fn update_filter(&mut self, filter: String) {
         self.filter_lower = filter.to_lowercase();
         self.filter = filter;
+        self.filter_input.set_text_clean(&self.filter);
     }
 
     pub fn row_matches(&self, row: &KeymapSettingsRow) -> bool {
@@ -149,7 +157,7 @@ impl KeymapSettingsState {
 
     pub fn handle_recording_key(&mut self, key: PhysicalKey, chord: Option<Chord>, keymap: &crate::keymap::Keymap) -> RecordResult {
         if self.recording.is_none() { return RecordResult::Ignored; }
-        if key == PhysicalKey::Code(KeyCode::Escape) {
+        if key == PhysicalKey::Code(KeyCode::Escape) && chord.is_some_and(|chord| chord.mods.is_empty()) {
             self.cancel_recording();
             return RecordResult::Cancelled;
         }
@@ -178,20 +186,37 @@ impl App {
     pub(crate) fn handle_keymap_settings_key(&mut self, key_event: &KeyInput, chord: Option<Chord>) -> bool {
         if !self.show_settings || self.settings_tab != 6 || key_event.state != ElementState::Pressed { return false; }
         if self.keymap_settings.pending_conflict.is_some() {
-            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) { self.keymap_settings.cancel_recording(); }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) && chord.is_some_and(|chord| chord.mods.is_empty()) { self.keymap_settings.cancel_recording(); }
             if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return true;
         }
         if self.keymap_settings.filter_focused && self.keymap_settings.recording.is_none() {
-            match key_event.physical_key {
-                PhysicalKey::Code(KeyCode::Escape) => self.keymap_settings.filter_focused = false,
-                PhysicalKey::Code(KeyCode::Backspace) => { let mut filter = self.keymap_settings.filter.clone(); filter.pop(); self.keymap_settings.update_filter(filter); }
-                _ if !self.modifiers.control_key() && !self.modifiers.alt_key() && !self.modifiers.super_key() => {
-                    if let Some(text) = key_event.text.as_deref() {
-                        if !text.chars().any(char::is_control) { self.keymap_settings.filter.push_str(text); self.keymap_settings.filter_lower = self.keymap_settings.filter.to_lowercase(); }
-                    }
-                }
-                _ => {}
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::F1) {
+                return false;
+            }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) && chord.is_some_and(|chord| chord.mods.is_empty()) {
+                self.keymap_settings.filter_focused = false;
+            } else {
+                let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
+                let word = crate::platform::word_navigation_modifier(self.modifiers);
+                let shift = self.modifiers.shift_key();
+                let is_paste = primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV);
+                let paste_text = is_paste.then(|| self.get_clipboard_text()).flatten();
+                let copied = crate::app::single_line_input::handle_single_line_input(
+                    &mut self.keymap_settings.filter_input,
+                    key_event.physical_key,
+                    key_event.text.as_deref(),
+                    primary,
+                    word,
+                    shift,
+                    crate::platform::text_input_modifiers_allowed(self.modifiers),
+                    paste_text.as_deref(),
+                    256,
+                );
+                if let Some(copied) = copied { self.set_clipboard_text(copied); }
+                let filter = self.keymap_settings.filter_input.get_full_text();
+                self.keymap_settings.filter_lower = filter.to_lowercase();
+                self.keymap_settings.filter = filter;
             }
             if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return true;
@@ -215,6 +240,7 @@ impl App {
 mod tests {
     use super::{KeymapSettingsState, RecordResult};
     use crate::keymap::{Chord, Command, Keymap, KeymapOverrides};
+    use winit::keyboard::{KeyCode, PhysicalKey};
 
     fn chord(text: &str) -> Chord {
         Chord::parse(crate::platform::CURRENT_PLATFORM, text).expect("test chord parses")
@@ -247,5 +273,39 @@ mod tests {
         state.begin_recording(Command::GitRefresh);
         assert_eq!(state.record(chord("ctrl+e"), &keymap), RecordResult::Add { command: Command::GitRefresh, chord: chord("ctrl+e") });
         assert_eq!(state.hint, Some("В фокусе терминала сочетание перехватывает терминал"));
+    }
+
+    #[test]
+    fn terminal_context_chords_warn_when_pty_intercepts_them() {
+        let mut overrides = KeymapOverrides::default();
+        overrides.add_chord(crate::platform::PlatformKind::Linux, Command::TerminalCloseTab, chord("ctrl+c"));
+        let keymap = Keymap::build_for(crate::platform::PlatformKind::Linux, &overrides);
+        let mut state = KeymapSettingsState::default();
+        state.refresh(&keymap, &overrides);
+        let row = state.rows.iter().find(|row| row.command == Command::TerminalCloseTab);
+        let warning = row.is_some_and(|row| row.terminal_warning);
+        assert!(warning, "TerminalCloseTab terminal warning: {warning}, row_found={}", row.is_some());
+    }
+
+    #[test]
+    fn filter_matches_serialized_chord_text() {
+        let keymap = Keymap::build(&KeymapOverrides::default());
+        let mut state = KeymapSettingsState::default();
+        state.refresh(&keymap, &KeymapOverrides::default());
+        state.update_filter("mod+s".into());
+        let row = state.rows.iter().find(|row| row.command == Command::FileSave);
+        let matched = row.is_some_and(|row| state.row_matches(row));
+        assert!(matched, "FileSave matched serialized mod+s search: {matched}, row_found={}", row.is_some());
+    }
+
+    #[test]
+    fn modified_escape_is_recorded_as_a_chord() {
+        let keymap = Keymap::build(&KeymapOverrides::default());
+        let mut state = KeymapSettingsState::default();
+        state.begin_recording(Command::GitRefresh);
+        let ctrl_escape = chord("ctrl+escape");
+        let result = state.handle_recording_key(PhysicalKey::Code(KeyCode::Escape), Some(ctrl_escape), &keymap);
+        assert_eq!(result, RecordResult::Add { command: Command::GitRefresh, chord: ctrl_escape }, "Ctrl+Escape recording result and active recording: {result:?}, {:?}", state.recording);
+        assert!(state.recording.is_none(), "recording remained active after Ctrl+Escape: {:?}", state.recording);
     }
 }

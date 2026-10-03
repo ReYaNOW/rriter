@@ -235,7 +235,10 @@ impl KeymapOverrides {
             for entry in entries {
                 let parsed = entry.as_str().and_then(|text| Chord::parse(platform, text).ok()).filter(|chord| validate(platform, *chord).is_ok());
                 let Some(parsed) = parsed else { values.push(entry.clone()); continue; };
-                if seen.contains(&parsed) { continue; }
+                if seen.contains(&parsed) {
+                    if active.contains(&parsed) { values.push(entry.clone()); }
+                    continue;
+                }
                 seen.push(parsed);
                 if let Some(replacement) = active.get(active_index) {
                     values.push(Value::String(replacement.serialize(platform)));
@@ -302,6 +305,9 @@ impl Keymap {
             }
         }
         for (id, value) in &overrides.raw { if !COMMANDS.iter().any(|info| info.id == id) { skipped.push(SkippedEntry { id: id.clone(), value: value.to_string(), reason: "unknown command" }); } }
+        for entry in &skipped {
+            eprintln!("RRiter: skipped keymap entry {}={}: {}", entry.id, entry.value, entry.reason);
+        }
         let labels = chords.iter().map(|list| list.first().map(|c| c.display(platform)).unwrap_or_else(|| "не назначено".to_string())).collect();
         Self { platform, chords, labels, skipped }
     }
@@ -475,5 +481,26 @@ mod tests {
             let hit = format!("hit(crate::keymap::Command::{:?}", info.command);
             assert!(dispatchers.iter().any(|source| source.contains(&hit)), "{} has no dispatcher hit", info.id);
         }
+    }
+
+    #[test]
+    fn ui_edits_preserve_duplicate_valid_override_entries() {
+        let platform = PlatformKind::Linux;
+        let duplicate = "ctrl+escape";
+        let mut overrides = KeymapOverrides::from_value(json!({"file.save": [duplicate, duplicate]}));
+        overrides.add_chord(platform, Command::FileSave, chord(platform, "ctrl+e"));
+        let raw = overrides.to_value();
+        assert_eq!(raw["file.save"], json!(["mod+escape", duplicate, "mod+e"]), "raw keymap entry list after UI add: {}", raw["file.save"]);
+        let keymap = Keymap::build_for(platform, &overrides);
+        assert_eq!(keymap.skipped().iter().filter(|entry| entry.reason == "duplicate chord").count(), 1, "duplicate skipped entries after build: {:?}", keymap.skipped());
+    }
+
+    #[test]
+    fn keymap_build_reports_skipped_entries() {
+        let overrides = KeymapOverrides::from_value(json!({"file.save": ["ctrl+unknown"], "removed.command": []}));
+        let skipped = Keymap::build_for(PlatformKind::Linux, &overrides).skipped().to_vec();
+        assert_eq!(skipped.len(), 2, "skipped keymap entries: {skipped:?}");
+        assert!(skipped.iter().any(|entry| entry.id == "file.save" && entry.reason == "invalid chord"), "invalid chord entry missing from skipped list: {skipped:?}");
+        assert!(skipped.iter().any(|entry| entry.id == "removed.command" && entry.reason == "unknown command"), "unknown command entry missing from skipped list: {skipped:?}");
     }
 }

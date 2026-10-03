@@ -42,6 +42,29 @@ pub(super) fn draw(
     let filter_placeholder = if state.filter.is_empty() { "Фильтр по команде или сочетанию" } else { "" };
     register_button(renderer, ui, UiId::SettingsKeymapFilter, x, filter_y, width * 0.66, 34.0 * s, filter_placeholder, [0.8, 0.8, 0.82, 1.0]);
     renderer.draw_string_scaled(&state.filter, x + 8.0 * s, (filter_y + 22.0 * s).round(), [1.0, 1.0, 1.0, 1.0], 0.8);
+    if state.filter_focused {
+        let scale = 0.8;
+        let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+            x, width * 0.66, 8.0 * s, 0.0,
+        );
+        let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(s);
+        let cursor = crate::app::single_line_input::single_line_cursor_geometry(
+            &state.filter,
+            state.filter_input.cursor,
+            text_geometry.content_w,
+            0.0,
+            edge_pad,
+            edge_pad,
+            |ch| renderer.get_ui_glyph(ch).map(|glyph| glyph.advance * scale).unwrap_or(10.0 * scale),
+        );
+        renderer.push_rect(
+            (text_geometry.text_start_x + cursor.cursor_x - cursor.scroll_x).round(),
+            (filter_y + 8.0 * s).round(),
+            crate::app::single_line_input::single_line_caret_width(s),
+            (18.0 * s).round(),
+            [1.0, 1.0, 1.0, 0.9],
+        );
+    }
     register_button(renderer, ui, UiId::SettingsKeymapResetAll, x + width * 0.69, filter_y, width * 0.31, 34.0 * s, "Сбросить все", [0.9, 0.78, 0.8, 1.0]);
     if let Some(label) = &state.skipped_label {
         renderer.draw_string_scaled(label, x, (filter_y + 54.0 * s).round(), [1.0, 0.38, 0.38, 1.0], 0.9);
@@ -56,6 +79,7 @@ pub(super) fn draw(
     let mut row_index = 0usize;
     let row_step = (ROW_H * s).round().max(1.0);
     ui.push_clip(clip);
+    renderer.begin_tab_strip_scissor(clip.x, clip.y, clip.w, clip.h);
     for row in &state.rows {
         if !state.row_matches(row) { continue; }
 
@@ -99,6 +123,7 @@ pub(super) fn draw(
         row_y += row_step;
         row_index += 1;
     }
+    renderer.end_tab_strip_scissor();
     state.max_scroll = (row_y - list_y - clip.h).max(0.0);
     state.scroll.clamp_target(0.0, state.max_scroll);
     if state.max_scroll > 0.0 {
