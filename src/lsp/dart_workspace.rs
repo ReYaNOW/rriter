@@ -83,8 +83,8 @@ pub(super) fn dart_root_for_path(path: &Path, workspaces: &[PathBuf]) -> DartRoo
     }
 }
 
-fn nearest_marker(start: &Path, stop: Option<&Path>, marker: &str) -> Option<PathBuf> {
-    for ancestor in start.ancestors() {
+pub(super) fn nearest_marker(start: &Path, stop: Option<&Path>, marker: &str) -> Option<PathBuf> {
+    for ancestor in start.ancestors().take(32) {
         if ancestor.join(marker).is_file() {
             return Some(ancestor.to_path_buf());
         }
