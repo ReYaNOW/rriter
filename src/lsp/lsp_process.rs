@@ -625,6 +625,19 @@ fn run_supervisor(
     event_tx: WakeSender<LspEvent>,
     stop: Arc<AtomicBool>,
 ) {
+    run_supervisor_with_init_options(def, executable, workspaces, None, cmd_rx, event_tx, stop);
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_supervisor_with_init_options(
+    def: &'static LspServerDef,
+    executable: Option<PathBuf>,
+    workspaces: Vec<PathBuf>,
+    init_options: Option<serde_json::Value>,
+    cmd_rx: Receiver<Cmd>,
+    event_tx: WakeSender<LspEvent>,
+    stop: Arc<AtomicBool>,
+) {
     let mut open_files: HashMap<String, OpenFile> = HashMap::new();
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
@@ -706,7 +719,7 @@ fn run_supervisor(
             return;
         };
         init_id = next_init_id;
-        let init_msg = make_initialize_for_server(def.kind, init_id, &workspaces);
+        let init_msg = make_initialize_for_server(def.kind, init_id, &workspaces, init_options.as_ref());
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
         }
@@ -1109,18 +1122,20 @@ pub struct LspProcess {
 impl LspProcess {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>, ui_waker: UiWaker) -> Self {
-        Self::start_with_executable(def, workspaces, None, ui_waker)
+        Self::start_with_executable(def, workspaces, None, None, ui_waker)
     }
 
     fn start_with_executable(
         def: &'static LspServerDef,
         workspaces: Vec<PathBuf>,
         executable: Option<PathBuf>,
+        init_options: Option<&serde_json::Value>,
         ui_waker: UiWaker,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = ui_waker.channel();
         let ws = workspaces.clone();
+        let init_options = init_options.cloned();
         let stop = Arc::new(AtomicBool::new(false));
         let supervisor_stop = stop.clone();
 
@@ -1128,10 +1143,11 @@ impl LspProcess {
         let supervisor = match thread::Builder::new()
             .name(format!("lsp-supervisor-{}", def.program))
             .spawn(move || {
-                run_supervisor(
+                run_supervisor_with_init_options(
                     def,
                     executable,
                     ws,
+                    init_options,
                     cmd_rx,
                     supervisor_event_tx,
                     supervisor_stop,

@@ -134,13 +134,14 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
 
 #[cfg(test)]
 pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
-    make_initialize_for_server(LspServerKind::Ruff, id, workspaces)
+    make_initialize_for_server(LspServerKind::Ruff, id, workspaces, None)
 }
 
 pub(super) fn make_initialize_for_server(
     server: LspServerKind,
     id: i32,
     workspaces: &[PathBuf],
+    init_options: Option<&serde_json::Value>,
 ) -> Vec<u8> {
     let root_uri = workspaces.first().map(|workspace| path_to_uri(workspace));
     let workspace_folders = (!workspaces.is_empty()).then(|| {
@@ -246,12 +247,8 @@ pub(super) fn make_initialize_for_server(
     if let Some(folders) = workspace_folders {
         params["workspaceFolders"] = serde_json::Value::Array(folders);
     }
-    if server == LspServerKind::Dart {
-        params["initializationOptions"] = serde_json::json!({
-            "onlyAnalyzeProjectsWithOpenFiles": true,
-            "suggestFromUnimportedLibraries": true,
-            "closingLabels": true
-        });
+    if let Some(init_options) = init_options {
+        params["initializationOptions"] = init_options.clone();
     }
 
     serde_json::to_vec(&serde_json::json!({
