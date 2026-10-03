@@ -33,7 +33,7 @@ impl LspManager {
             cargo_missing: self.rust_tools.as_ref().is_some_and(|tools| tools.cargo.is_none()),
             component_missing,
             version,
-            roots: self.rust_roots.len(),
+            roots: self.rust.roots().len(),
         }
     }
 

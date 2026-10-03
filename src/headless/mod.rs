@@ -60,6 +60,10 @@ mod ui_tests_editor_sticky;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_dart_lsp;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_rust_lsp;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_rust_settings;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_deleted_tab;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_ide_startup;

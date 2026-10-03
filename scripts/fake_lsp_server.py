@@ -96,6 +96,11 @@ def record_start() -> None:
 
 
 def main() -> None:
+    # Version probe (rust_workspace::resolve_rust_root_with): answer and exit
+    # without counting it as a server start.
+    if "--version" in sys.argv[1:]:
+        print(f"{Path(sys.argv[0]).stem} 0.0.0-fake")
+        return
     record_start()
     mode = Path(sys.argv[0]).stem
     crash_after_initialize = "_crash" in mode
