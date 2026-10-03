@@ -9,6 +9,9 @@ pub fn highlight_hover_text(
     Vec<(usize, usize)>,
 ) {
     let preprocessed = preprocess_hover_text(msg);
+    if let Some(result) = highlight_tagged_fences(&preprocessed) {
+        return result;
+    }
     if looks_like_dart_hover(&preprocessed) {
         return highlight_dart_hover_doc(&preprocessed);
     }
@@ -20,7 +23,7 @@ pub fn highlight_hover_text(
         let spans = crate::highlighter::flatten_color_spans_prefer_specific(spans, clean_msg.len());
         return (clean_msg, spans, line_kinds, inline_code_ranges);
     }
-    let (clean_msg, inline_code_ranges) = normalize_hover_text(&preprocessed);
+    let (clean_msg, inline_code_ranges, _) = normalize_hover_text(&preprocessed);
     let mut spans = Vec::new();
 
     crate::languages::python::TS_DIAG_PARSER.with(|p_cell| {
@@ -121,6 +124,101 @@ pub fn highlight_hover_text(
         })
         .collect();
     (clean_msg, spans, line_kinds, inline_code_ranges)
+}
+
+fn highlight_tagged_fences(
+    msg: &str,
+) -> Option<(
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+)> {
+    let (clean_msg, inline_code_ranges, tagged_ranges) = normalize_hover_text(msg);
+    if tagged_ranges.is_empty() {
+        return None;
+    }
+    if tagged_ranges.iter().all(|(lang_ext, _, _)| *lang_ext == "dart") {
+        return Some(highlight_dart_hover_doc(msg));
+    }
+
+    let mut spans = Vec::new();
+    for (lang_ext, start, end) in tagged_ranges {
+        if end > start && end <= clean_msg.len() {
+            push_ts_spans_for(lang_ext, &clean_msg[start..end], start, &mut spans);
+        }
+    }
+    for &(start, end) in &inline_code_ranges {
+        if end > start && end <= clean_msg.len() {
+            crate::languages::python::push_python_ts_spans(
+                &clean_msg[start..end],
+                start,
+                &mut spans,
+            );
+        }
+    }
+    add_doc_arg_name_spans(&clean_msg, &mut spans);
+    spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+    let spans = crate::highlighter::flatten_color_spans_prefer_specific(spans, clean_msg.len());
+    let line_kinds = clean_msg
+        .split('\n')
+        .map(|line| {
+            if line.starts_with("## ") {
+                HoverLineKindPublic::Header2
+            } else if line.starts_with("# ") {
+                HoverLineKindPublic::Header1
+            } else {
+                HoverLineKindPublic::Text
+            }
+        })
+        .collect();
+    Some((clean_msg, spans, line_kinds, inline_code_ranges))
+}
+
+fn fence_language(tag: &str) -> Option<&'static str> {
+    match tag {
+        "rust" => Some("rs"),
+        "python" | "py" => Some("py"),
+        "dart" => Some("dart"),
+        _ => None,
+    }
+}
+
+fn push_ts_spans_for(
+    lang_ext: &str,
+    text: &str,
+    global_start: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    let Some((language, queries)) = crate::queries::get_ts_config(lang_ext) else {
+        return;
+    };
+    let query_text = queries.join("\n");
+    let Ok(query) = tree_sitter::Query::new(&language, &query_text) else {
+        return;
+    };
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&language).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return;
+    };
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    while let Some(found) = matches.next() {
+        for capture in found.captures {
+            let name = query.capture_names()[capture.index as usize];
+            let Some(color) = crate::languages::python::ts_capture_color(name) else {
+                continue;
+            };
+            spans.push(crate::highlighter::ColorSpan {
+                start: global_start + capture.node.start_byte(),
+                end: global_start + capture.node.end_byte(),
+                color,
+            });
+        }
+    }
 }
 
 fn looks_like_dart_hover(msg: &str) -> bool {
@@ -1116,9 +1214,13 @@ fn type_expr_token_color(token: &str) -> [f32; 4] {
     }
 }
 
-fn normalize_hover_text(msg: &str) -> (String, Vec<(usize, usize)>) {
+fn normalize_hover_text(
+    msg: &str,
+) -> (String, Vec<(usize, usize)>, Vec<(&'static str, usize, usize)>) {
     let mut out = String::new();
     let mut in_fence = false;
+    let mut active_tagged_fence = None;
+    let mut tagged_fence_ranges = Vec::new();
     let mut inline_ranges = Vec::new();
 
     for raw in msg.replace('\r', "").lines() {
@@ -1155,8 +1257,23 @@ fn normalize_hover_text(msg: &str) -> (String, Vec<(usize, usize)>) {
             out.push('\n');
             continue;
         }
-        if trimmed == "```" || trimmed == "```python" {
-            in_fence = !in_fence;
+        if let Some(tag) = crate::languages::python::fence_tag(trimmed) {
+            if in_fence {
+                if let Some((lang_ext, start)) = active_tagged_fence.take() {
+                    tagged_fence_ranges.push((lang_ext, start, out.len()));
+                }
+                in_fence = false;
+            } else {
+                if tag.is_empty() || fence_language(tag).is_some() {
+                    in_fence = true;
+                    if let Some(lang_ext) = fence_language(tag) {
+                        active_tagged_fence = Some((lang_ext, out.len()));
+                    }
+                } else {
+                    out.push_str(raw);
+                    out.push('\n');
+                }
+            }
             continue;
         }
         if trimmed.starts_with(".. code-block::") {
@@ -1180,7 +1297,11 @@ fn normalize_hover_text(msg: &str) -> (String, Vec<(usize, usize)>) {
         out.push_str(&normalized_line);
         out.push('\n');
     }
-    (out.trim_end().to_string(), inline_ranges)
+    let clean_msg = out.trim_end().to_string();
+    for (_, _, end) in &mut tagged_fence_ranges {
+        *end = (*end).min(clean_msg.len());
+    }
+    (clean_msg, inline_ranges, tagged_fence_ranges)
 }
 
 fn wrap_signature_after_first_param(signature: &str, def_prefix: &str) -> String {
