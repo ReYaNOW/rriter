@@ -269,7 +269,7 @@ fn headless_hotkeys_characterize_database_table_cell_filter_and_terminal_focus()
         &mut session,
         &format!("mouse_move {x} {y}\nclick\nkey ctrl+a\ntype <NULL>\nkey enter\n"),
     );
-    // today: Enter leaves the previous grid value when `<NULL>` is typed.
+    // today: <NULL> refused for NOT NULL column
     assert_eq!(
         active_table_state(&session).unwrap().grid.row(0).unwrap().cells[1]
             .value

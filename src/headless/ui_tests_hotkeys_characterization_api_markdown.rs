@@ -97,6 +97,9 @@ fn headless_hotkeys_characterize_api_request_and_field_redo() {
     wait_until(&mut session, 5000, "API request tab", |session| {
         session.app.active_api_tab().is_some_and(|(_, tab)| tab.route_idx == Some(route_idx))
     });
+    click_ui(&mut session, "SidebarSlot(ApiClient)");
+    assert!(session.app.active_tab_is_api_client());
+    assert!(session.app.handle_api_client_keyboard_input(&other_key));
     run_ok(&mut session, "key ctrl+z\n");
     // today: Ctrl+Z on an API request tab undoes the editor buffer.
     assert_eq!(session.app.editor.get_full_text(), "");
