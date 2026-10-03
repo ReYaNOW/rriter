@@ -133,6 +133,7 @@ fn about_to_wait_lsp_events(app: &mut App) {
             }
             crate::lsp::LspEvent::ServerReady { .. } => {}
             crate::lsp::LspEvent::StatusChanged { .. } => {}
+            crate::lsp::LspEvent::ServerStatus { .. } => {}
             crate::lsp::LspEvent::ConfigurationServed { .. } => {}
             crate::lsp::LspEvent::ClosingLabels { .. } => {}
             crate::lsp::LspEvent::WorkspaceDiagnosticsDone { .. } => {}

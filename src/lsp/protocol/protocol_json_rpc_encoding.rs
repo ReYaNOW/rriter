@@ -194,7 +194,7 @@ pub(super) fn make_initialize_for_server(
                 }
             }
         }),
-        LspServerKind::Ruff | LspServerKind::Ty => serde_json::json!({
+        LspServerKind::Ruff | LspServerKind::Ty | LspServerKind::RustAnalyzer => serde_json::json!({
             "workspace": {
                 "configuration": true,
                 "didChangeConfiguration": { "dynamicRegistration": true },
@@ -236,6 +236,19 @@ pub(super) fn make_initialize_for_server(
                 }
             }
         }),
+    };
+    let capabilities = if server == LspServerKind::RustAnalyzer {
+        let mut capabilities = capabilities;
+        if let Some(workspace) = capabilities
+            .get_mut("workspace")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            workspace.remove("didChangeWatchedFiles");
+        }
+        capabilities["experimental"] = serde_json::json!({"serverStatusNotification": true});
+        capabilities
+    } else {
+        capabilities
     };
 
     let mut params = serde_json::json!({
@@ -484,6 +497,7 @@ fn dart_configuration() -> serde_json::Value {
 fn configuration_response_for(
     server: LspServerKind,
     item: &serde_json::Value,
+    init_options: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let section = item.get("section").and_then(|value| value.as_str()).unwrap_or("");
     match server {
@@ -506,6 +520,7 @@ fn configuration_response_for(
             _ => serde_json::json!({}),
         },
         LspServerKind::Ruff => serde_json::json!({}),
+        LspServerKind::RustAnalyzer => init_options.cloned().unwrap_or(serde_json::Value::Null),
     }
 }
 
@@ -761,6 +776,33 @@ pub(super) fn dispatch_frame_for_server(
             }
         }
         Some("initialize") => {}
+        Some("experimental/serverStatus") => {
+            if server == LspServerKind::RustAnalyzer {
+                let params = msg.get("params");
+                let health = match params
+                    .and_then(|params| params.get("health"))
+                    .and_then(|value| value.as_str())
+                {
+                    Some("ok") => super::rooted_language::ServerHealth::Ok,
+                    Some("error") => super::rooted_language::ServerHealth::Error,
+                    Some("warning") | None | Some(_) => {
+                        super::rooted_language::ServerHealth::Warning
+                    }
+                };
+                let _ = event_tx.send(LspEvent::ServerStatus {
+                    server,
+                    quiescent: params
+                        .and_then(|params| params.get("quiescent"))
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false),
+                    health,
+                    message: params
+                        .and_then(|params| params.get("message"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned),
+                });
+            }
+        }
         Some("window/logMessage") | Some("window/showMessage") => {
             if let Some(params) = msg.get("params") {
                 if let Some(msg_str) = params.get("message").and_then(|v| v.as_str()) {
@@ -784,16 +826,16 @@ pub(super) fn dispatch_frame_for_server(
                 {
                     let values = items
                         .iter()
-                        .map(|item| configuration_response_for(server, item).to_string())
+                        .map(|item| configuration_response_for(server, item, None).to_string())
                         .collect::<Vec<_>>();
                     if values.is_empty() {
-                        configuration_response_for(server, &serde_json::Value::Null)
+                        configuration_response_for(server, &serde_json::Value::Null, None)
                             .to_string()
                     } else {
                         values.join(",")
                     }
                 } else {
-                    configuration_response_for(server, &serde_json::Value::Null).to_string()
+                    configuration_response_for(server, &serde_json::Value::Null, None).to_string()
                 };
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());
