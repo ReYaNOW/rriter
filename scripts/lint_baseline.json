@@ -640,8 +640,10 @@
     },
     "src/lsp/lsp_diagnostics_store.rs": {
       "clone_on_copy": 6,
+      "cognitive_complexity": 2,
       "collapsible_match": 4,
       "ptr_arg": 2,
+      "too_many_lines": 2,
       "unwrap_or_default": 2
     },
     "src/lsp/lsp_manager.rs": {
@@ -685,6 +687,9 @@
       "int_plus_one": 8,
       "manual_contains": 6,
       "too_many_lines": 1
+    },
+    "src/lsp/rooted_language.rs": {
+      "struct_excessive_bools": 2
     },
     "src/lsp/ruff_workspace.rs": {
       "obfuscated_if_else": 2

@@ -266,7 +266,7 @@ mod tests {
         cargo_file(&member);
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         let root = dir.join("Cargo.toml");
-        let result = cargo_root_for_path(&source, &[dir.clone()], &|_| Some(root.clone()));
+        let result = cargo_root_for_path(&source, std::slice::from_ref(&dir), &|_| Some(root.clone()));
         assert_eq!(result, Some(dir.clone()));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -279,7 +279,7 @@ mod tests {
         cargo_file(&member);
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(dir.join("Cargo.toml"), "[workspace]\nmembers = [\"member\"]\n").unwrap();
-        assert_eq!(cargo_root_for_path(&source, &[dir.clone()], &|_| None), Some(member.clone()));
+        assert_eq!(cargo_root_for_path(&source, std::slice::from_ref(&dir), &|_| None), Some(member.clone()));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -302,7 +302,7 @@ mod tests {
         cargo_file(&dir);
         cargo_file(&outside_crate);
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
-        assert_eq!(nearest_cargo_toml_dir(&source, &[workspace.clone()]), None);
+        assert_eq!(nearest_cargo_toml_dir(&source, std::slice::from_ref(&workspace)), None);
         assert_eq!(nearest_cargo_toml_dir(&outside_crate.join("src/main.rs"), &[workspace]), Some(outside_crate.clone()));
         let no_manifest = temp_dir("no-manifest");
         assert_eq!(nearest_cargo_toml_dir(&no_manifest.join("plain.rs"), &[]), None);
@@ -356,16 +356,12 @@ mod tests {
         let result = resolve_rust_root_with(Path::new("/crate"), &tools, &run);
         assert_eq!(result.executable, Ok(PathBuf::from("/toolchain/bin/rust-analyzer")));
 
-        let missing = |_: &Path, args: &[&str], _: &Path, _: Duration| {
-            if args.first() == Some(&"which") {
-                Err(RustToolError::ComponentMissing)
-            } else {
-                Err(RustToolError::ComponentMissing)
-            }
+        let missing = |_: &Path, _: &[&str], _: &Path, _: Duration| {
+            Err(RustToolError::ComponentMissing)
         };
         assert_eq!(resolve_rust_root_with(Path::new("/crate"), &tools, &missing).executable, Err(RustToolError::ComponentMissing));
         let timeout = |_: &Path, args: &[&str], _: &Path, _: Duration| {
-            if args.first() == Some(&"which") { Err(RustToolError::Timeout) } else { Err(RustToolError::ComponentMissing) }
+            Err(RustToolError::Timeout)
         };
         assert_eq!(resolve_rust_root_with(Path::new("/crate"), &tools, &timeout).executable, Err(RustToolError::Timeout));
     }

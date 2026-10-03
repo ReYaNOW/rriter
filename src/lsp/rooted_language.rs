@@ -108,7 +108,7 @@ pub struct RootedWorkspaces {
 impl RootedWorkspaces {
     pub fn new(lang: RootedLanguage, enabled: bool) -> Self {
         let init_options = match lang {
-            RootedLanguage::Dart => Some(super::dart_workspace::DART_INIT_OPTIONS.clone()),
+            RootedLanguage::Dart => Some(super::dart_workspace::dart_init_options()),
             RootedLanguage::Rust => None,
         };
         Self {
@@ -278,7 +278,7 @@ impl RootedWorkspaces {
     pub fn notify_saved(&mut self, path: &Path) {
         let Some(root) = self.open_files.get(&PathKey::new(path)).map(|file| PathKey::new(&file.root)) else { return; };
         if let Some(process) = self.roots.get_mut(&root).and_then(|state| state.process.as_mut()) {
-            process.notify_saved(&path.to_path_buf());
+            process.notify_saved(path);
         }
     }
 

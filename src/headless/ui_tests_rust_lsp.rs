@@ -22,15 +22,16 @@ pub(super) fn rust_crate_session(name: &str) -> (PathBuf, PathBuf, HeadlessSessi
 }
 
 fn rust_crate(dir: &Path) -> PathBuf {
-    std::fs::create_dir_all(dir.join("src")).expect("create Rust fixture source directory");
+    std::fs::create_dir_all(dir.join("src"))
+        .unwrap_or_else(|error| panic!("create Rust fixture source directory: {error}"));
     std::fs::write(
         dir.join("Cargo.toml"),
         "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     )
-    .expect("write Rust fixture Cargo.toml");
+    .unwrap_or_else(|error| panic!("write Rust fixture Cargo.toml: {error}"));
     let file = dir.join("src/main.rs");
     std::fs::write(&file, "fn main() {\n    missing_name();\n}\n")
-        .expect("write Rust fixture main.rs");
+        .unwrap_or_else(|error| panic!("write Rust fixture main.rs: {error}"));
     file
 }
 
@@ -51,15 +52,27 @@ fn close_tab(session: &mut HeadlessSession, index: usize) {
     click_ui(session, &format!("EditorTab({index})"));
     let state = dump(session);
     let element = format!("EditorTabClose({index})");
-    let ui = state["ui"].as_array().expect("UI array");
+    let ui = state["ui"]
+        .as_array()
+        .unwrap_or_else(|| panic!("UI array"));
     let rect = ui
         .iter()
         .find(|item| item["id"] == element)
         .unwrap_or_else(|| panic!("missing {element}: {state}"));
-    let x = rect["rect"][0].as_f64().expect("tab close x")
-        + rect["rect"][2].as_f64().expect("tab close width") / 2.0;
-    let y = rect["rect"][1].as_f64().expect("tab close y")
-        + rect["rect"][3].as_f64().expect("tab close height") / 2.0;
+    let x = rect["rect"][0]
+        .as_f64()
+        .unwrap_or_else(|| panic!("tab close x"))
+        + rect["rect"][2]
+            .as_f64()
+            .unwrap_or_else(|| panic!("tab close width"))
+            / 2.0;
+    let y = rect["rect"][1]
+        .as_f64()
+        .unwrap_or_else(|| panic!("tab close y"))
+        + rect["rect"][3]
+            .as_f64()
+            .unwrap_or_else(|| panic!("tab close height"))
+            / 2.0;
     run_script(session, format!("mouse_move {x} {y}\nwait 50\n").as_bytes());
     click_ui(session, &element);
 }
@@ -107,7 +120,8 @@ fn headless_rust_starts_on_open_and_stops_on_last_close() {
 fn headless_rust_diagnostics_reach_problems_including_unopened_file() {
     let (dir, file, mut session) = rust_crate_session("rust-diagnostics");
     let sibling = file.with_file_name("sibling.rs");
-    std::fs::write(&sibling, "pub fn sibling() {}\n").expect("write sibling Rust file");
+    std::fs::write(&sibling, "pub fn sibling() {}\n")
+        .unwrap_or_else(|error| panic!("write sibling Rust file: {error}"));
     install_rust_fake(
         &mut session,
         "rust-diagnostics",
@@ -149,7 +163,8 @@ fn headless_rust_save_notifies_server_and_refreshes_diagnostics() {
 fn headless_rust_outside_cargo_root_has_no_lsp() {
     let dir = scratch_dir("rust-no-cargo");
     let file = dir.join("main.rs");
-    std::fs::write(&file, "fn main() {}\n").expect("write standalone Rust file");
+    std::fs::write(&file, "fn main() {}\n")
+        .unwrap_or_else(|error| panic!("write standalone Rust file: {error}"));
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
     let executable = install_rust_fake(&mut session, "rust-no-cargo", "rust_analyzer");
 

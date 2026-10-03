@@ -18,10 +18,13 @@ use std::time::Duration;
 
 /// Writes `root/pubspec.yaml` and `root/lib/main.dart`; returns the Dart file.
 fn dart_package(root: &Path) -> PathBuf {
-    std::fs::create_dir_all(root.join("lib")).expect("create Dart package dirs");
-    std::fs::write(root.join("pubspec.yaml"), "name: fixture\n").expect("write pubspec");
+    std::fs::create_dir_all(root.join("lib"))
+        .unwrap_or_else(|error| panic!("create Dart package dirs: {error}"));
+    std::fs::write(root.join("pubspec.yaml"), "name: fixture\n")
+        .unwrap_or_else(|error| panic!("write pubspec: {error}"));
     let file = root.join("lib").join("main.dart");
-    std::fs::write(&file, "void main() {\n  print('hi');\n}\n").expect("write Dart file");
+    std::fs::write(&file, "void main() {\n  print('hi');\n}\n")
+        .unwrap_or_else(|error| panic!("write Dart file: {error}"));
     file
 }
 
@@ -83,7 +86,10 @@ fn root_has_job(session: &HeadlessSession, root: &Path) -> Option<bool> {
 /// Number of `initialize` requests the fake server received (one per LSP server start; the
 /// `.starts` counter would also count analyzer-style runs of the same binary).
 fn lsp_initializations(executable: &Path) -> usize {
-    let name = executable.file_name().expect("fake server name").to_string_lossy();
+    let name = executable
+        .file_name()
+        .unwrap_or_else(|| panic!("fake server name"))
+        .to_string_lossy();
     std::fs::read_to_string(executable.with_file_name(format!("{name}.init.jsonl")))
         .map(|log| log.lines().count())
         .unwrap_or(0)
@@ -221,7 +227,7 @@ fn headless_dart_two_roots_are_independent() {
         .app
         .lsp
         .as_mut()
-        .expect("workspace LSP manager")
+        .unwrap_or_else(|| panic!("workspace LSP manager"))
         .notify_close(&first, "dart");
     assert_eq!(root_has_process(&session, &first_root), Some(false));
     assert_eq!(root_has_process(&session, &second_root), Some(true));

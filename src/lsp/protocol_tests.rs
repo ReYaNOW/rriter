@@ -1091,7 +1091,7 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
         LspServerKind::Dart,
         201,
         &workspace,
-        Some(&dart_workspace::DART_INIT_OPTIONS),
+        Some(&dart_workspace::dart_init_options()),
     ))
     .unwrap();
 

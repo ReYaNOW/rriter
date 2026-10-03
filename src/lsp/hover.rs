@@ -1,13 +1,13 @@
 use tree_sitter::StreamingIterator;
 
-pub fn highlight_hover_text(
-    msg: &str,
-) -> (
+pub type HoverHighlight = (
     String,
     Vec<crate::highlighter::ColorSpan>,
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
-) {
+);
+
+pub fn highlight_hover_text(msg: &str) -> HoverHighlight {
     let preprocessed = preprocess_hover_text(msg);
     if let Some(result) = highlight_tagged_fences(&preprocessed) {
         return result;
@@ -126,14 +126,7 @@ pub fn highlight_hover_text(
     (clean_msg, spans, line_kinds, inline_code_ranges)
 }
 
-fn highlight_tagged_fences(
-    msg: &str,
-) -> Option<(
-    String,
-    Vec<crate::highlighter::ColorSpan>,
-    Vec<HoverLineKindPublic>,
-    Vec<(usize, usize)>,
-)> {
+fn highlight_tagged_fences(msg: &str) -> Option<HoverHighlight> {
     let (clean_msg, inline_code_ranges, tagged_ranges) = normalize_hover_text(msg);
     if tagged_ranges.is_empty() {
         return None;
@@ -450,14 +443,7 @@ fn dart_type_metadata_value(line: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
-fn highlight_dart_hover_doc(
-    msg: &str,
-) -> (
-    String,
-    Vec<crate::highlighter::ColorSpan>,
-    Vec<HoverLineKindPublic>,
-    Vec<(usize, usize)>,
-) {
+fn highlight_dart_hover_doc(msg: &str) -> HoverHighlight {
     let normalized_msg = normalize_dart_fenced_indentation(msg);
     let mut text = String::with_capacity(normalized_msg.len());
     let mut line_kinds = Vec::new();

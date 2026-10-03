@@ -259,9 +259,7 @@ impl LspManager {
                         };
                         if accepted {
                             let stored_version = if let Some(lang) = language {
-                                if lang == rooted_language::RootedLanguage::Dart {
-                                    version.or(current_version).unwrap_or(0)
-                                } else if is_open_file {
+                                if lang == rooted_language::RootedLanguage::Dart || is_open_file {
                                     version.or(current_version).unwrap_or(0)
                                 } else {
                                     0
@@ -393,17 +391,16 @@ impl LspManager {
                     self.rust.apply_server_status(!*quiescent, *health);
                     if *health == rooted_language::ServerHealth::Error
                         && message.as_ref() != self.rust_last_health_message.as_ref()
+                        && let Some(message) = message
                     {
-                        if let Some(message) = message {
-                            self.server_logs.entry(RUST_ANALYZER_SERVER.program)
-                                .or_default()
-                                .push(LogEntry {
-                                    text: format!("[LSP] {message}"),
-                                    spans: Vec::new(),
-                                    folds: Vec::new(),
-                                    created_at: Instant::now(),
-                                });
-                        }
+                        self.server_logs.entry(RUST_ANALYZER_SERVER.program)
+                            .or_default()
+                            .push(LogEntry {
+                                text: format!("[LSP] {message}"),
+                                spans: Vec::new(),
+                                folds: Vec::new(),
+                                created_at: Instant::now(),
+                            });
                     }
                     self.rust_last_health_message = message.clone();
                 }

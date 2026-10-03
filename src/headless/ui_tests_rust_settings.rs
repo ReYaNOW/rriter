@@ -66,7 +66,10 @@ fn scroll_to_rust_settings(session: &mut crate::headless::HeadlessSession) {
 }
 
 fn init_log(executable: &Path) -> Vec<serde_json::Value> {
-    let name = executable.file_name().expect("fake executable basename").to_string_lossy();
+    let name = executable
+        .file_name()
+        .unwrap_or_else(|| panic!("fake executable basename"))
+        .to_string_lossy();
     std::fs::read_to_string(executable.with_file_name(format!("{name}.init.jsonl")))
         .unwrap_or_default()
         .lines()

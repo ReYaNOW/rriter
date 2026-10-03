@@ -7,12 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub(super) static DART_INIT_OPTIONS: std::sync::LazyLock<serde_json::Value> =
-    std::sync::LazyLock::new(|| serde_json::json!({
+pub(super) fn dart_init_options() -> serde_json::Value {
+    serde_json::json!({
         "onlyAnalyzeProjectsWithOpenFiles": true,
         "suggestFromUnimportedLibraries": true,
         "closingLabels": true
-    }));
+    })
+}
 
 pub(super) const DART_SERVER_NAME: &str = DART_SERVER.program;
 

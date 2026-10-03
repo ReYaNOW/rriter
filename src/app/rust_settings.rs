@@ -1,6 +1,7 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RustCheckCommand {
     Check,
+    #[default]
     Clippy,
 }
 
@@ -18,12 +19,6 @@ impl RustCheckCommand {
             "clippy" => Self::Clippy,
             _ => Self::default(),
         }
-    }
-}
-
-impl Default for RustCheckCommand {
-    fn default() -> Self {
-        Self::Clippy
     }
 }
 
