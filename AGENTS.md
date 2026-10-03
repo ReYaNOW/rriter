@@ -38,7 +38,7 @@ No speculative features. No broad refactors unless asked; removing the cause of 
 * Context discipline: search first, then read relevant ranges (offset/limit for large files). Do not read whole large files or guides "just in case".
 * Long command output (builds, tests): redirect to a file (`cmd > /tmp/<task>.log 2>&1`), then `grep`/`tail` it. Never dump full logs into context.
 * While a long build or test run is in flight (`make codex_test`, `make test`, `make fast`, cargo builds): the main session starts it in the background and then **goes idle** (a subagent runs tests in the foreground, or its turn ends before the result). No polling the log, no peeking at partial output, no "meanwhile" side work, no thinking out loud. Every such check is a full model turn that re-ships the whole context for nothing. Wait for the completion notification, then read the result once with `grep`/`tail`.
-* Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on. Exception: UI tests are probed on the prebuilt binary via `dump`/`shot` (§0), not relinked per edit.
+* Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on. Before it, `make check-tests` (tests compiled with the same flags as `make test`, no link, no run) catches compile errors; it is not a test run and does not count against a run limit. Exception: UI tests are probed on the prebuilt binary via `dump`/`shot` (§0), not relinked per edit.
 * Fix at the root: if a shared helper is wrong, fix the helper, not one caller; check sibling code paths that use it.
 * Batch independent searches/reads in one step.
 * Edit files directly. Use unified diff only when showing changes; do not use chat parser `Before/After` blocks.
@@ -91,7 +91,7 @@ Forbidden unless user explicitly asks:
 
 Only one agent builds or tests at a time, in the main checkout where `target/` is warm. Parallel agents only edit; the integrator builds and runs tests once after integration. A fresh worktree starts with an empty `target/`: the first build takes tens of minutes and gigabytes, and concurrent Cargo processes fight for CPU and for one target directory.
 
-Exception: a subagent in its own worktree may build and test in parallel only when the main session explicitly allowed it in the brief and had it warm the worktree's target first with a btrfs reflink copy (`cp -a --reflink=always <main>/target/x86_64-unknown-linux-gnu <main>/target/debug target/`) — instant, no extra disk; dependencies stay cached and only the `rriter` crate rebuilds once (~1.5 min). Reason: a reflinked worktree agent built in 1m19s, then 25–60 s per run, alongside a builder in the main checkout (29.09).
+Exception: a subagent in its own worktree may build and test in parallel only when the main session explicitly allowed it in the brief and had it warm the worktree's target first with a btrfs reflink copy (`cp -a --reflink=always <main>/target/x86_64-unknown-linux-gnu <main>/target/debug <main>/target/pdfium.path target/`; without `pdfium.path` `make test` fetches pdfium over the network) — instant, no extra disk; dependencies stay cached and only the `rriter` crate rebuilds once (~1.5 min). Reason: a reflinked worktree agent built in 1m19s, then 25–60 s per run, alongside a builder in the main checkout (29.09).
 
 If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
