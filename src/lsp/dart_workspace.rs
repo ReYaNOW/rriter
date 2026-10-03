@@ -49,6 +49,12 @@ impl DartWorkspaceState {
     }
 }
 
+#[cfg(test)]
+pub(crate) struct DartRootStateForTest {
+    pub(crate) process: bool,
+    pub(crate) job: bool,
+}
+
 pub(super) struct DartWorkspaceResult {
     root: PathBuf,
     generation: u64,
@@ -239,6 +245,56 @@ impl LspManager {
 
     pub fn drain_closed_dart_documents(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.closed_dart_documents)
+    }
+
+    /// Lifecycle fields of one Dart root for headless characterization tests.
+    #[cfg(test)]
+    pub(crate) fn dart_root_state_for_test(&self, root: &Path) -> Option<DartRootStateForTest> {
+        self.dart_workspaces
+            .get(&crate::platform::PathKey::new(root))
+            .map(|state| DartRootStateForTest {
+                process: state.process.is_some(),
+                job: state.job.is_some(),
+            })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dart_workspace_count_for_test(&self) -> usize {
+        self.dart_workspaces.len()
+    }
+
+    /// Stands in for a slow `dart analyze`: installs a job on `root` that sleeps for `hold`
+    /// and then reports an empty result. False when the root has no state or already has a job.
+    #[cfg(test)]
+    pub(crate) fn dart_hold_job_for_test(&mut self, root: &Path, hold: Duration) -> bool {
+        let Some(state) = self
+            .dart_workspaces
+            .get_mut(&crate::platform::PathKey::new(root))
+        else {
+            return false;
+        };
+        if state.job.is_some() {
+            return false;
+        }
+        let result_root = state.root.clone();
+        let generation = state.generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let Ok(rx) = self.ui_waker.spawn_one_shot("rriter-dart-test-job", move || {
+            std::thread::sleep(hold);
+            DartWorkspaceResult {
+                root: result_root,
+                generation,
+                diagnostics: Ok(HashMap::new()),
+            }
+        }) else {
+            return false;
+        };
+        state.job = Some(DartAnalyzerJob {
+            generation,
+            cancel,
+            rx,
+        });
+        true
     }
 
     pub(super) fn dart_document_version(&self, path: &Path) -> Option<i32> {
