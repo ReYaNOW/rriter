@@ -288,6 +288,17 @@ impl LspManager {
             state.due_at = None;
         }
         self.dart.restart_all(|root| Some(dart_executable_for_root(root)), &self.ui_waker);
+        if self.dart_workspace_analysis_enabled {
+            let roots = self
+                .dart
+                .open_files()
+                .values()
+                .map(|document| document.root.clone())
+                .collect::<Vec<_>>();
+            for root in crate::platform::dedup_paths(roots) {
+                self.schedule_dart_workspace_analysis(&root, Duration::from_secs(1));
+            }
+        }
         let mut valid_roots = self.workspaces.iter().map(|workspace| crate::platform::PathKey::new(workspace)).collect::<std::collections::HashSet<_>>();
         valid_roots.extend(self.dart.open_files().values().map(|file| crate::platform::PathKey::new(&file.root)));
         self.dart_jobs.retain(|key, _| valid_roots.contains(key));
@@ -939,6 +950,55 @@ mod tests {
             manager.dart_jobs[&root_key].generation,
             disabled_generation
         );
+        let _ = std::fs::remove_dir_all(package);
+    }
+
+    #[test]
+    fn dart_reconfiguration_reschedules_open_workspace_analysis() {
+        let package = temp_dir("analyzer-reconfigure-open");
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        let path = package.join("lib/main.dart");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut manager = LspManager::new(vec![package.clone()]);
+        manager.dart.mark_missing();
+        manager.notify_open(&path, "dart", "void main() {}\n", 1);
+        let root_key = crate::platform::PathKey::new(&package);
+
+        manager.dart_jobs.get_mut(&root_key).unwrap().due_at = None;
+        manager.restart_server(DART_SERVER_NAME);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+
+        manager.set_server_enabled(DART_SERVER_NAME, false);
+        assert!(manager.dart_jobs[&root_key].due_at.is_none());
+        manager.set_server_enabled(DART_SERVER_NAME, true);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+
+        manager.dart_jobs.get_mut(&root_key).unwrap().due_at = None;
+        manager.set_workspaces(vec![package.clone()]);
+        assert!(manager.dart_jobs[&root_key].due_at.is_some());
+        let _ = std::fs::remove_dir_all(package);
+    }
+
+    #[test]
+    fn closing_python_keeps_diagnostics_for_configured_dart_job_root() {
+        let package = temp_dir("analyzer-configured-root-prune");
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        let python = package.join("main.py");
+        let dart_path = package.join("lib/main.dart");
+        std::fs::create_dir_all(dart_path.parent().unwrap()).unwrap();
+        let mut manager = LspManager::new(vec![package.clone()]);
+        manager.disable_python();
+        manager.dart_workspace_diagnostics.insert(
+            dart_path.clone(),
+            Arc::from(vec![test_diagnostic("workspace")].into_boxed_slice()),
+        );
+        assert!(manager.dart.open_files().is_empty());
+        assert!(manager.dart_job_roots.contains_key(&crate::platform::PathKey::new(&package)));
+
+        manager.notify_open(&python, "py", "print('hello')\n", 1);
+        manager.notify_close(&python, "py");
+
+        assert!(manager.dart_workspace_diagnostics.contains_key(&dart_path));
         let _ = std::fs::remove_dir_all(package);
     }
 

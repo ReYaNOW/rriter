@@ -38,11 +38,12 @@ impl LspManager {
             .keys()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
-        let dart_roots = self
+        let mut dart_roots = self
             .dart.roots()
             .values()
             .map(|state| state.root.clone())
             .collect::<Vec<_>>();
+        dart_roots.extend(self.dart_job_roots.values().cloned());
         let keep_path = |path: &Path| {
             active_workspaces
                 .iter()
