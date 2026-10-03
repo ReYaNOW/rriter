@@ -140,6 +140,12 @@ mod ui_tests_hotkeys_characterization_api_markdown;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys_characterization_git_settings;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_settings;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_settings_edit;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 
 use crate::app::automation::{AutomationOptions, PgoScenario};

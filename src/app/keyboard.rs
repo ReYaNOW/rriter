@@ -374,6 +374,15 @@ impl App {
             }
             return true;
         }
+        if self.show_settings && self.settings_tab == 6 && self.keymap_settings.filter_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() && !clean.chars().any(char::is_control) {
+                let mut filter = self.keymap_settings.filter.clone();
+                filter.push_str(&clean);
+                self.keymap_settings.update_filter(filter);
+            }
+            return true;
+        }
         if self.show_settings {
             return true;
         }
