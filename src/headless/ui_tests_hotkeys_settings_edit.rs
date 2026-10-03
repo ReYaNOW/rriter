@@ -17,7 +17,7 @@ fn add_save_chord(session: &mut HeadlessSession) {
     let state = dump(session);
     let add_id = state["ui"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("UI elements missing from settings dump: {state}"))
         .iter()
         .filter_map(|element| element["id"].as_str())
         .find(|id| {
@@ -40,9 +40,10 @@ fn add_save_chord(session: &mut HeadlessSession) {
 }
 
 fn visible_ids(session: &mut HeadlessSession) -> Vec<String> {
-    dump(session)["ui"]
+    let state = dump(session);
+    state["ui"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("UI elements missing from settings dump: {state}"))
         .iter()
         .filter_map(|element| element["id"].as_str().map(str::to_owned))
         .collect()
@@ -52,7 +53,7 @@ fn command_ui_id(session: &mut HeadlessSession, prefix: &str, command: Command) 
     let state = dump(session);
     state["ui"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("UI elements missing from settings dump: {state}"))
         .iter()
         .filter_map(|element| element["id"].as_str())
         .find(|id| {

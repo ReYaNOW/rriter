@@ -94,7 +94,7 @@ pub(super) fn draw(
             continue;
         }
         let metrics = keymap_row_metrics(row_y, s);
-        if row_index % 2 == 0 { renderer.push_rect(x.round(), row_y.round(), width.round(), metrics.row_h, [1.0, 1.0, 1.0, 0.025]); }
+        if row_index.is_multiple_of(2) { renderer.push_rect(x.round(), row_y.round(), width.round(), metrics.row_h, [1.0, 1.0, 1.0, 0.025]); }
         let command_index = row.command as usize;
         let color = if row.conflicted { [1.0, 0.46, 0.42, 1.0] } else { [0.88, 0.89, 0.92, 1.0] };
         renderer.draw_string_scaled(row.label, (x + (5.0 * s).round()).round(), metrics.first_baseline, color, 0.83);
@@ -105,9 +105,9 @@ pub(super) fn draw(
             chip_x += (82.0 * s).round();
         }
         for (chord_index, label) in row.chords.iter().enumerate() {
-            let chip_w = (renderer.measure_ui_width(&label, 0.76) + 25.0 * s).min(112.0 * s);
+            let chip_w = (renderer.measure_ui_width(label, 0.76) + 25.0 * s).min(112.0 * s);
             renderer.push_rounded_rect(chip_x.round(), metrics.chip_y, chip_w.round(), metrics.chip_h, (5.0 * s).round(), [0.3, 0.27, 0.38, 1.0]);
-            renderer.draw_string_scaled(&label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), [0.9, 0.88, 0.96, 1.0], 0.76);
+            renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), [0.9, 0.88, 0.96, 1.0], 0.76);
             register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", [1.0, 0.58, 0.62, 1.0]);
             chip_x += chip_w + (4.0 * s).round();
         }

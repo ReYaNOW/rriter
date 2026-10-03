@@ -164,16 +164,15 @@ fn key_token(key: KeyCode) -> &'static str {
 
 fn display_key(key: KeyCode) -> String {
     let token = key_token(key);
-    if token.starts_with('f') && token[1..].parse::<u8>().is_ok() { token.to_uppercase() } else if token.len() == 1 { token.to_uppercase() } else { match token { "up" => "↑".into(), "down" => "↓".into(), "left" => "←".into(), "right" => "→".into(), _ => { let mut chars = token.chars(); chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default() } } }
+    if (token.starts_with('f') && token[1..].parse::<u8>().is_ok()) || token.len() == 1 { token.to_uppercase() } else { match token { "up" => "↑".into(), "down" => "↓".into(), "left" => "←".into(), "right" => "→".into(), _ => { let mut chars = token.chars(); chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default() } } }
 }
 
 pub fn validate(platform: PlatformKind, chord: Chord) -> Result<(), ChordError> {
     if key_token(chord.key) == "?" { return Err(ChordError::UnknownKey); }
     if is_reserved(platform, chord) { return Err(ChordError::Reserved); }
-    let needs_modifier = match chord.key {
-        KeyCode::KeyA | KeyCode::KeyB | KeyCode::KeyC | KeyCode::KeyD | KeyCode::KeyE | KeyCode::KeyF | KeyCode::KeyG | KeyCode::KeyH | KeyCode::KeyI | KeyCode::KeyJ | KeyCode::KeyK | KeyCode::KeyL | KeyCode::KeyM | KeyCode::KeyN | KeyCode::KeyO | KeyCode::KeyP | KeyCode::KeyQ | KeyCode::KeyR | KeyCode::KeyS | KeyCode::KeyT | KeyCode::KeyU | KeyCode::KeyV | KeyCode::KeyW | KeyCode::KeyX | KeyCode::KeyY | KeyCode::KeyZ | KeyCode::Digit0 | KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 | KeyCode::Digit9 | KeyCode::Period | KeyCode::Comma | KeyCode::Slash | KeyCode::Minus | KeyCode::Equal | KeyCode::Semicolon | KeyCode::Quote | KeyCode::BracketLeft | KeyCode::BracketRight | KeyCode::Backslash | KeyCode::Backquote => true,
-        _ => false,
-    };
+    let needs_modifier = matches!(chord.key,
+        KeyCode::KeyA | KeyCode::KeyB | KeyCode::KeyC | KeyCode::KeyD | KeyCode::KeyE | KeyCode::KeyF | KeyCode::KeyG | KeyCode::KeyH | KeyCode::KeyI | KeyCode::KeyJ | KeyCode::KeyK | KeyCode::KeyL | KeyCode::KeyM | KeyCode::KeyN | KeyCode::KeyO | KeyCode::KeyP | KeyCode::KeyQ | KeyCode::KeyR | KeyCode::KeyS | KeyCode::KeyT | KeyCode::KeyU | KeyCode::KeyV | KeyCode::KeyW | KeyCode::KeyX | KeyCode::KeyY | KeyCode::KeyZ | KeyCode::Digit0 | KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 | KeyCode::Digit9 | KeyCode::Period | KeyCode::Comma | KeyCode::Slash | KeyCode::Minus | KeyCode::Equal | KeyCode::Semicolon | KeyCode::Quote | KeyCode::BracketLeft | KeyCode::BracketRight | KeyCode::Backslash | KeyCode::Backquote
+    );
     let unmodified_only_allowed = matches!(chord.key, KeyCode::F1 | KeyCode::F2 | KeyCode::F3 | KeyCode::F4 | KeyCode::F5 | KeyCode::F6 | KeyCode::F7 | KeyCode::F8 | KeyCode::F9 | KeyCode::F10 | KeyCode::F11 | KeyCode::F12 | KeyCode::Insert | KeyCode::Pause);
     if chord.mods.is_empty() && !unmodified_only_allowed { return Err(ChordError::NeedsModifier); }
     if needs_modifier && chord.mods.bits() & !Mods::SHIFT.0 == 0 { return Err(ChordError::NeedsModifier); }

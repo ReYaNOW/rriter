@@ -618,7 +618,6 @@ impl App {
         !self.show_welcome
             && !self.active_tab_is_git_diff()
             && !self.active_tab_is_api_client()
-            && !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf() || tab.kind.is_image())
             && !self.search_focused
             && !(self.show_settings && self.settings_ignore_focused)
             && !(self.ide_panel.is_open(PanelId::ApiClient) && self.ide_panel.api.focused.is_some())
@@ -1190,8 +1189,11 @@ mod editor_focus_keymap_tests {
             tab.kind = kind.clone();
             app.tabs = vec![tab];
             app.active_tab = 0;
+            app.show_welcome = false;
             let focused = app.editor_has_input_focus();
-            assert!(!focused, "Editor command context must be inactive for {kind:?} tabs: focused={focused}");
+            assert!(focused, "PDF/image tabs keep their own key input for {kind:?}: focused={focused}");
+            let active = app.command_context_active(crate::keymap::KeyContext::Editor);
+            assert!(!active, "Editor command context must be inactive for {kind:?} tabs: active={active}");
         }
     }
 }

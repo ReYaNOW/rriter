@@ -25,13 +25,15 @@ fn seed_git_log_selection(session: &mut HeadlessSession) {
     session.app.ide_panel.open(PanelId::Git);
     session.app.ide_panel.git.toggle_logs_pane();
     session.app.ide_panel.git.seed_git_log_for_test("selected git log text");
-    let line = session
+    let Some(line) = session
         .app
         .ide_panel
         .git
         .git_logs
         .display_line_at(0)
-        .expect("seeded Git log line");
+    else {
+        panic!("seeded Git log line is missing");
+    };
     assert!(session.app.ide_panel.git.git_logs.set_selection(
         GitLogTextPoint {
             line: line.id(),
@@ -83,7 +85,9 @@ fn headless_hotkeys_git_graph_selection_copy_precedes_terminal_owner() {
     let (dir, mut session) = terminal_session("ui-hotkeys-git-graph-copy-terminal");
     click_ui(&mut session, "TerminalBody");
     assert!(session.app.ide_panel.terminal_focused);
-    let renderer = session.app.renderer.as_mut().expect("headless renderer");
+    let Some(renderer) = session.app.renderer.as_mut() else {
+        panic!("headless renderer is missing");
+    };
     renderer.git_graph_tooltip_text = "selected graph tooltip text".to_string();
     renderer.git_graph_tooltip_selection_anchor = Some(0);
     renderer.git_graph_tooltip_selection_cursor = Some("selected graph tooltip text".len());
@@ -93,7 +97,9 @@ fn headless_hotkeys_git_graph_selection_copy_precedes_terminal_owner() {
         dump(&mut session)["clipboard"]["text"].as_str(),
         Some("selected graph tooltip text")
     );
-    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    let Some(renderer) = session.app.renderer.as_ref() else {
+        panic!("headless renderer is missing");
+    };
     assert!(renderer.git_graph_tooltip_selection_anchor.is_none());
     assert!(renderer.git_graph_tooltip_selection_cursor.is_none());
     drop(session);

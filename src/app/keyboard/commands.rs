@@ -175,10 +175,11 @@ impl App {
                 .map(|workspace| workspace.workspace_idx))
     }
 
-    fn command_context_active(&self, context: KeyContext) -> bool {
+    pub(crate) fn command_context_active(&self, context: KeyContext) -> bool {
         match context {
             KeyContext::Global => true,
             KeyContext::Editor => self.editor_has_input_focus()
+                && !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf() || tab.kind.is_image())
                 && !self.active_tab_is_database()
                 && !self.active_tab_is_api_client(),
             KeyContext::Git => self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Git),
