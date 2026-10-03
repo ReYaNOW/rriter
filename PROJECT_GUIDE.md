@@ -1418,6 +1418,7 @@ Root:
 * `PROJECT_GUIDE.md` -> broader architecture guide.
 * `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
 * `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
+* `docs/superpowers/plans/2026-10-03-rust-support-release.md` -> rust-analyzer release tag and verified platform archive names, SHA-256 digests, sizes, and download URLs.
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
@@ -1545,6 +1546,7 @@ Entrypoints/state:
 * `scripts/pgo_coverage.py` -> PGO pipeline coverage helpers: profdata parsing, per-module summary, group marker checks, PGO warning counts.
 * `scripts/pgo_fixtures.py` -> PGO pipeline fixture servers/data started by `pgo_pipeline.py`.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
+* `src/app/rust_settings.rs` -> persistent Rust support and rust-analyzer check-command settings, including config parsing and defaults.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
 * `src/app/database/database_postgres.rs` -> PostgreSQL TCP/TLS connection backend plus bounded autocommit discovery of databases and `public` tables.
@@ -1775,6 +1777,9 @@ Syntax/languages:
 * `src/app/markdown_nav.rs` -> pure Markdown reader navigation model: `heading_slugs` (GitHub-style, unique), `LinkTarget` and `resolve_link` (reference labels, percent-decoding, `http`/`https`/`mailto` only), `media_paragraph` (image-only and badge paragraphs to `MediaItem`s), `mermaid_item`; no I/O.
 * `src/app/markdown_media_wiring.rs` -> glue between the Reader state and the shared `MarkdownMedia` cache: per-tab request pass guarded by `MediaRequestMarker` (first pass also resets failures and revalidates files), per-frame step `markdown_media_prepare_frame` (poll, request, anchored layout, visible set, `prepare_gpu`), revalidation triggers (`revalidate_markdown_media`: watcher tick, tab activation, reopen), `media_dump` for the headless dump. `App` only routes here.
 * `src/headless/ui_tests_markdown_media.rs` -> headless Reader media coverage: PNG/SVG/missing states and sizes, revalidation on tab activation (changed and deleted file outside the watched workspace), Mermaid ready/failed, Edit-mode and text tabs unaffected.
+* `src/headless/ui_tests_dart_lsp.rs` -> headless Dart LSP lifecycle, root independence, analyzer-job close/reopen behavior, and live diagnostics coverage.
+* `src/headless/ui_tests_rust_lsp.rs` -> headless Rust LSP root lifecycle, multi-root behavior, Cargo-root gating, and diagnostics for open and unopened files.
+* `src/headless/ui_tests_rust_settings.rs` -> headless Rust settings enable/check-command behavior, missing-tool row, and rust-analyzer server status.
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
 * `src/languages/python_highlight_spans.rs` -> Python syntax highlight span extraction helpers included by `python.rs`.
 * `src/languages/sql_analysis_tests.rs` -> SQL AST diagnostics and completion analysis regressions included by `sql_analysis.rs`.
@@ -1789,7 +1794,10 @@ LSP:
 * `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, server control, document notifications, and explicit retry.
 * `src/lsp/lsp_diagnostics_store.rs` -> `LspManager` diagnostics polling, storage/compaction, merged indexes and queries.
 * `src/lsp/lsp_manager_support.rs` -> source actions, shutdown/Drop, LSP text/JSON helpers.
-* `src/lsp/dart_workspace.rs` -> Dart package-root lifecycle, versioned open documents, managed `dart analyze` workspace diagnostics, and Dart-specific manager tests.
+* `src/lsp/lsp_manager_rust.rs` -> Rust LSP routing, asynchronous Cargo/tool resolution, pending-document lifecycle, workspace init options, and Rust manager tests.
+* `src/lsp/rooted_language.rs` -> shared per-root LSP workspace state, process/document lifecycle, live diagnostics, status aggregation, and Dart/Rust server health.
+* `src/lsp/rust_workspace.rs` -> Cargo-root discovery, rust-analyzer archive metadata, initialization options, and bounded asynchronous tool resolution.
+* `src/lsp/dart_workspace.rs` -> Dart-specific package-root discovery, analyzer jobs, closing labels, `dart analyze` workspace diagnostics, and manager tests; shared per-root LSP lifecycle is in `rooted_language.rs`.
 * `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
 * `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.

@@ -81,6 +81,16 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |
 | `quit` | Stop. EOF does the same. | `ok` |
 
+Headless LSP tests use `scripts/fake_lsp_server.py`; its executable basename selects
+the enabled modes by suffix, and suffixes can be combined: `_crash` exits after
+`initialized`, `_long` returns a long hover, `_diagnostics` publishes diagnostics
+on `didOpen`, `_nodefinition` leaves definition requests unanswered,
+`_definitionerror` returns a definition error, `_serverstatus` sends busy then
+quiescent server status, `_unopened` also diagnoses a sibling `.rs` file, and
+`_initlog` appends the received `initializationOptions` to a JSONL file. A
+`--version` invocation prints a fake version and exits without counting as a
+server start.
+
 IDE image tabs appear in `dump` with `kind: "image"` and an `image` object containing `phase`, `natural_w`, `natural_h`, `zoom`, and `texture`.
 
 Rules:
