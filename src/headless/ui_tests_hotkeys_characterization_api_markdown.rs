@@ -1,5 +1,6 @@
 //! Characterization of API Client and Markdown keyboard ownership before keymap changes.
 
+use crate::app::keyboard::KeyInput;
 use crate::headless::tests_support::{
     api_client_session, click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state,
     run_script, scratch_dir, send_request, serve_api_spec, serve_http_responses, wait_until,
@@ -7,6 +8,8 @@ use crate::headless::tests_support::{
 };
 use crate::headless::HeadlessSession;
 use std::path::Path;
+use winit::event::ElementState;
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 pub(super) const EXCLUDED_API_MARKDOWN_ROWS: &[(&str, &str)] = &[
     (
@@ -14,8 +17,8 @@ pub(super) const EXCLUDED_API_MARKDOWN_ROWS: &[(&str, &str)] = &[
         "Alt+Enter was sent with the Python editor focused on the prebuilt binary, but the resulting type-check has no dump-visible status to assert",
     ),
     (
-        "markdown.read.copy_selection",
-        "the positive Ctrl+C path requires a drag selection over rendered Markdown text; this probe did not establish a stable selection target",
+        "api.edit.copy_route_or_hover_selection",
+        "the positive Ctrl+C path requires a drag selection over API route or hover text; this probe did not establish a stable selection target",
     ),
 ];
 
@@ -55,6 +58,20 @@ fn headless_hotkeys_characterize_api_request_and_field_redo() {
         }),
     );
     let (dir, mut session) = api_client_session("ui-hotkeys-api-send", &spec);
+    let f2 = KeyInput {
+        physical_key: PhysicalKey::Code(KeyCode::F2),
+        logical_text: None,
+        text: None,
+        state: ElementState::Pressed,
+        repeat: false,
+    };
+    assert!(!session.app.handle_api_client_keyboard_input(&f2));
+    let other_key = KeyInput {
+        physical_key: PhysicalKey::Code(KeyCode::KeyA),
+        ..f2.clone()
+    };
+    // today: API Client keys return false while its keyboard surface is hidden.
+    assert!(!session.app.handle_api_client_keyboard_input(&other_key));
     let editor_file = dir.join("editor.txt");
     std::fs::write(&editor_file, "").expect("write editor marker fixture");
     run_ok(&mut session, &format!("open {}\n", editor_file.display()));
@@ -88,6 +105,10 @@ fn headless_hotkeys_characterize_api_request_and_field_redo() {
         session.app.active_api_tab().and_then(|(_, tab)| tab.response.as_ref()).and_then(|response| response.status),
         Some(200)
     );
+    let tab_count = session.app.tabs.len();
+    run_ok(&mut session, "key ctrl+4\n");
+    assert_eq!(session.app.tabs.len(), tab_count - 1);
+    assert!(!session.app.active_tab_is_api_client());
     let _ = std::fs::remove_dir_all(dir);
 
     ensure_test_profile_root();
@@ -117,11 +138,30 @@ fn headless_hotkeys_characterize_markdown_read_and_toc_ownership() {
 
     run_ok(&mut session, "key ctrl+a\n");
     assert_eq!(session.app.editor.get_full_text(), "# Title\n\nParagraph.\n\n## More\n\nBody.\n");
+    assert_eq!(session.app.editor.selection_anchor, None);
     assert_eq!(dump(&mut session)["overlays"]["readonly_notice"], false);
     run_ok(&mut session, "key ctrl+c\n");
     assert_eq!(dump(&mut session)["clipboard"]["text"], serde_json::Value::Null);
+
+    for chord in ["ctrl+x", "ctrl+v", "ctrl+z", "ctrl+y"] {
+        session.app.readonly_notice_until = None;
+        run_ok(&mut session, &format!("key {chord}\n"));
+        assert!(session.app.readonly_notice_until.is_some(), "{chord}");
+    }
     run_ok(&mut session, "key alt+enter\n");
-    assert_eq!(dump(&mut session)["overlays"]["readonly_notice"], true);
+    assert!(session.app.readonly_notice_until.is_some());
+
+    let selection_start = session.app.markdown.read_source.find("Paragraph.").unwrap();
+    session.app.markdown.begin_read_selection(selection_start);
+    session.app.markdown.update_read_selection(selection_start + "Paragraph.".len());
+    session.app.markdown.finish_read_selection();
+    run_ok(&mut session, "key ctrl+c\n");
+    assert_eq!(dump(&mut session)["clipboard"]["text"], "Paragraph.");
+
+    session.app.editor.cursor = 5;
+    run_ok(&mut session, "key ctrl+w\nkey left\nkey right\n");
+    assert_eq!(session.app.editor.cursor, 5);
+    assert_eq!(session.app.editor.selection_anchor, None);
     run_ok(&mut session, "key escape\nkey ctrl+shift+o\n");
     assert_eq!(dump(&mut session)["markdown_toc"]["open"], true);
     run_ok(&mut session, "key f1\nkey alt+q\nkey ctrl+shift+o\n");

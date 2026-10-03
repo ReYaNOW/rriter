@@ -2,8 +2,9 @@
 
 use crate::app::EditorTabKind;
 use crate::headless::tests_support::{
-    PostgresFixture, click_ui, connect_postgres_fixture_through_ui, dump, has_ui, run_script,
-    scratch_dir, ui_center, wait_until, workspace_with_explorer,
+    PostgresFixture, click_ui, connect_postgres_fixture_through_ui, dump, has_ui,
+    open_terminal_with_alt_q, panel_open, run_script, scratch_dir, ui_center, wait_until,
+    workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
 
@@ -13,6 +14,10 @@ const EXCLUDED_SECTION_12_CELLS: &[(&str, &str)] = &[
     (
         "SQL query hotkeys with terminal focus",
         "No UI path was found that preserves terminal focus while a Database query tab is active.",
+    ),
+    (
+        "Database table NumpadEnter",
+        "The headless key protocol has no NumpadEnter token, so this physical-key branch cannot be synthesized.",
     ),
 ];
 
@@ -152,7 +157,6 @@ fn headless_hotkeys_characterize_database_query_run_and_completion() {
     );
     assert_chord_effect(
         &mut session,
-        // The headless key protocol has no NumpadEnter token today.
         "ctrl+enter",
         |_| {},
         |session| {
@@ -215,9 +219,13 @@ fn headless_hotkeys_characterize_database_table_cell_filter_and_terminal_focus()
         .cells[1]
         .value
         .copy_text();
+    open_terminal_with_alt_q(&mut session);
+    assert!(panel_open(&dump(&mut session), "terminal"));
+    assert!(session.app.ide_panel.terminal_focused);
     let (x, y) = ui_center(&dump(&mut session), name_cell);
     run_ok(&mut session, &format!("mouse_move {x} {y}\nclick\n"));
-    session.app.ide_panel.terminal_focused = true;
+    click_ui(&mut session, "TerminalBody");
+    assert!(session.app.ide_panel.terminal_focused);
     assert_chord_effect(
         &mut session,
         "ctrl+c",
@@ -259,9 +267,27 @@ fn headless_hotkeys_characterize_database_table_cell_filter_and_terminal_focus()
     let (x, y) = ui_center(&dump(&mut session), "DatabaseTableCellEditor");
     run_ok(
         &mut session,
+        &format!("mouse_move {x} {y}\nclick\nkey ctrl+a\ntype <NULL>\nkey enter\n"),
+    );
+    // today: Enter leaves the previous grid value when `<NULL>` is typed.
+    assert_eq!(
+        active_table_state(&session).unwrap().grid.row(0).unwrap().cells[1]
+            .value
+            .copy_text(),
+        "plain-enter-probe"
+    );
+    let (x, y) = ui_center(&dump(&mut session), name_cell);
+    run_ok(&mut session, &format!("mouse_move {x} {y}\ndblclick\n"));
+    wait_until(&mut session, 3000, "database table cell editor", |session| {
+        has_ui(&dump(session), "DatabaseTableCellEditor")
+    });
+    let (x, y) = ui_center(&dump(&mut session), "DatabaseTableCellEditor");
+    run_ok(
+        &mut session,
         &format!("mouse_move {x} {y}\nclick\nkey ctrl+a\ntype <NULL>\n"),
     );
-    session.app.ide_panel.terminal_focused = true;
+    click_ui(&mut session, "TerminalBody");
+    assert!(session.app.ide_panel.terminal_focused);
     assert_chord_effect(
         &mut session,
         "ctrl+enter",
@@ -276,7 +302,8 @@ fn headless_hotkeys_characterize_database_table_cell_filter_and_terminal_focus()
 
     let (x, y) = ui_center(&dump(&mut session), name_cell);
     run_ok(&mut session, &format!("mouse_move {x} {y}\nclick\n"));
-    session.app.ide_panel.terminal_focused = true;
+    click_ui(&mut session, "TerminalBody");
+    assert!(session.app.ide_panel.terminal_focused);
     assert_chord_effect(
         &mut session,
         "ctrl+z",
@@ -296,5 +323,58 @@ fn headless_hotkeys_characterize_database_table_cell_filter_and_terminal_focus()
             assert!(session.app.ide_panel.terminal_focused);
         },
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_database_table_insert_delete_and_filter_focus_guards() {
+    let fixture = crate::headless::tests_support::postgres_fixture();
+    let dir = scratch_dir("ui-hotkeys-database-row-ops");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+    open_fixture_table(&mut session, &fixture);
+
+    let state = active_table_state(&session).unwrap();
+    assert!(state.grid.added_rows.is_empty());
+    assert_eq!(
+        state.grid.row(0).unwrap().state,
+        crate::app::database::DatabaseRowState::Clean
+    );
+    assert_chord_effect(
+        &mut session,
+        "insert",
+        |_| {},
+        |session| {
+            let state = active_table_state(session).unwrap();
+            assert_eq!(state.grid.added_rows.len(), 1);
+            assert_eq!(
+                state.grid.added_rows[0].state,
+                crate::app::database::DatabaseRowState::Added
+            );
+        },
+    );
+    let (x, y) = ui_center(&dump(&mut session), "DatabaseTableCell(0, 1)");
+    run_ok(&mut session, &format!("mouse_move {x} {y}\ndblclick\n"));
+    wait_until(&mut session, 3000, "database table cell editor", |session| {
+        has_ui(&dump(session), "DatabaseTableCellEditor")
+    });
+    let (x, y) = ui_center(&dump(&mut session), "DatabaseTableCellEditor");
+    run_ok(
+        &mut session,
+        &format!("mouse_move {x} {y}\nclick\nkey ctrl+a\ntype focus-guard-probe\nkey enter\n"),
+    );
+    click_ui(&mut session, "DatabaseTableWhereInput");
+    run_ok(&mut session, "type filter-probe\nkey ctrl+a\nkey ctrl+c\nkey ctrl+z\n");
+    assert_eq!(dump(&mut session)["clipboard"]["text"], "filter-probe");
+    let row = active_table_state(&session).unwrap().grid.row(0).unwrap();
+    assert!(row.cells[1].dirty);
+    assert_eq!(row.cells[1].value.copy_text(), "focus-guard-probe");
+
+    let (x, y) = ui_center(&dump(&mut session), "DatabaseTableCell(0, 0)");
+    run_ok(&mut session, &format!("mouse_move {x} {y}\nclick\nkey delete\n"));
+    assert_eq!(
+        active_table_state(&session).unwrap().grid.row(0).unwrap().state,
+        crate::app::database::DatabaseRowState::Deleted
+    );
+
     let _ = std::fs::remove_dir_all(dir);
 }

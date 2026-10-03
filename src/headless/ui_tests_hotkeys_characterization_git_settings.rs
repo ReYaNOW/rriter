@@ -12,7 +12,7 @@ use crate::platform::ToolKind;
 pub(super) const EXCLUDED_HOTKEY_ROWS: &[(&str, &str)] = &[
     (
         "Git graph tooltip drag selection",
-        "the prebuilt binary rendered GitGraphCommit rows, but dump exposes neither tooltip text nor its text-row coordinates, so drag selection could not be established",
+        "dump exposes neither tooltip text nor its text-row coordinates, so the pointer gesture that creates a graph selection cannot be established headlessly",
     ),
 ];
 
@@ -74,6 +74,28 @@ fn headless_hotkeys_git_selection_copy_respects_terminal_focus() {
     seed_git_log_selection(&mut session);
     run_ok(&mut session, "key ctrl+c\n");
     assert_eq!(dump(&mut session)["clipboard"]["text"], serde_json::Value::Null);
+    drop(session);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_git_graph_selection_copy_precedes_terminal_owner() {
+    let (dir, mut session) = terminal_session("ui-hotkeys-git-graph-copy-terminal");
+    click_ui(&mut session, "TerminalBody");
+    assert!(session.app.ide_panel.terminal_focused);
+    let renderer = session.app.renderer.as_mut().expect("headless renderer");
+    renderer.git_graph_tooltip_text = "selected graph tooltip text".to_string();
+    renderer.git_graph_tooltip_selection_anchor = Some(0);
+    renderer.git_graph_tooltip_selection_cursor = Some("selected graph tooltip text".len());
+
+    run_ok(&mut session, "key ctrl+c\n");
+    assert_eq!(
+        dump(&mut session)["clipboard"]["text"].as_str(),
+        Some("selected graph tooltip text")
+    );
+    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    assert!(renderer.git_graph_tooltip_selection_anchor.is_none());
+    assert!(renderer.git_graph_tooltip_selection_cursor.is_none());
     drop(session);
     let _ = std::fs::remove_dir_all(dir);
 }

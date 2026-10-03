@@ -1,29 +1,18 @@
 //! Characterization of global and main-dispatch keyboard shortcuts before keymap changes.
 
 use crate::headless::tests_support::{
-    dump, has_ui, keyboard_session, open_terminal_with_alt_q, panel_open, run_script, scratch_dir,
-    terminal_session, wait_until,
+    click_ui, dump, has_ui, keyboard_session, open_settings_tab, open_terminal_with_alt_q,
+    panel_open, run_script, scratch_dir, terminal_session, wait_until,
 };
 use crate::headless::HeadlessSession;
 
-pub(super) const EXCLUDED_SECTION_1_ROWS: &[(&str, &str)] = &[
-    ("settings.copy_installer_log", "requires an installer log session that this fixture does not create"),
-    ("file_tree.undo/copy/cut/paste", "requires selected tree entries and filesystem mutations; covered by file-tree scenarios"),
-    ("git.copy_selection", "requires a selected Git graph/log row"),
-    ("database.query.run/complete", "requires an active database query and connection fixture"),
-];
+pub(super) const EXCLUDED_SECTION_1_ROWS: &[(&str, &str)] = &[];
 
 pub(super) const EXCLUDED_SECTION_10_ROWS: &[(&str, &str)] = &[
-    ("tree clipboard", "requires selected tree entries; covered by file-tree scenarios"),
-    ("Ctrl+Q on Welcome", "quits the headless session before a post-key dump can be read"),
-    ("DB cell Ctrl+Enter", "requires an active editable database table cell"),
     ("search Enter direction", "the active search result is not represented in dump state"),
-    ("SQL Enter", "requires an active database query fixture"),
 ];
 
-pub(super) const EXCLUDED_SECTION_12_CELLS: &[(&str, &str)] = &[
-    ("Dialog over terminal", "no reachable dialog fixture preserves simultaneous terminal focus"),
-];
+pub(super) const EXCLUDED_SECTION_12_CELLS: &[(&str, &str)] = &[];
 
 #[test]
 fn headless_hotkeys_excluded_rows_have_reasons() {
@@ -39,6 +28,17 @@ fn headless_hotkeys_excluded_rows_have_reasons() {
 fn run_ok(session: &mut HeadlessSession, script: &str) {
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn terminal_grid_text(session: &HeadlessSession) -> String {
+    let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
+    let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
+    grid.scrollback
+        .iter()
+        .chain(grid.lines.iter())
+        .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(super) fn assert_chord_effect(
@@ -111,6 +111,16 @@ fn headless_hotkeys_characterize_terminal_toggle_and_close() {
         "shift+alt+q",
         |_| {},
         |session| assert!(!panel_open(&dump(session), "terminal")),
+    );
+    assert_chord_effect(
+        &mut session,
+        "shift+alt+q",
+        |_| {},
+        |session| {
+            wait_until(session, 8000, "Shift+Alt+Q terminal open", |session| {
+                panel_open(&dump(session), "terminal") && !session.app.ide_panel.terminals.is_empty()
+            });
+        },
     );
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -213,5 +223,137 @@ fn headless_hotkeys_characterize_terminal_search_and_settings_owners() {
     assert!(session.app.ide_panel.term_search_focused);
     run_ok(&mut session, "type search-owner\nkey ctrl+a\n");
     assert!(session.app.ide_panel.term_search_editor.selection_anchor.is_some());
+    run_ok(&mut session, "key ctrl+c\n");
+    assert_eq!(dump(&mut session)["clipboard"]["text"], "search-owner");
+    session.app.set_clipboard_text("terminal-search-paste");
+    run_ok(&mut session, "key ctrl+v\n");
+    assert_eq!(
+        session.app.ide_panel.term_search_editor.get_full_text(),
+        "terminal-search-paste"
+    );
+    run_ok(&mut session, "key ctrl+shift+f\n");
+    assert!(panel_open(&dump(&mut session), "search"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_terminal_focused_control_bytes() {
+    let (dir, mut session) = terminal_session("ui-hotkeys-terminal-focused-control-bytes");
+    click_ui(&mut session, "TerminalBody");
+    run_ok(&mut session, "type cat -v\nkey enter\n");
+    wait_until(&mut session, 3000, "cat -v terminal command", |session| {
+        terminal_grid_text(session).contains("cat -v")
+    });
+
+    session.app.set_clipboard_text("terminal-paste-marker");
+    run_ok(&mut session, "key ctrl+a\nkey ctrl+v\nkey enter\n");
+    wait_until(&mut session, 3000, "terminal control-byte input", |session| {
+        let grid = terminal_grid_text(session);
+        grid.contains("^A") && grid.contains("terminal-paste-marker")
+    });
+    run_ok(&mut session, "key ctrl+c\n");
+    wait_until(&mut session, 3000, "Ctrl+C reaches PTY", |session| {
+        terminal_grid_text(session).contains("^C")
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_search_and_settings_over_terminal() {
+    let (dir, mut session) = terminal_session("ui-hotkeys-search-field-over-terminal");
+    click_ui(&mut session, "TerminalBody");
+    run_ok(&mut session, "key ctrl+shift+f\ntype field-marker\nkey ctrl+a\nkey ctrl+c\n");
+    assert_eq!(dump(&mut session)["clipboard"]["text"], "field-marker");
+    session.app.set_clipboard_text("field-paste-marker");
+    run_ok(&mut session, "key ctrl+v\n");
+    assert_eq!(
+        session.app.ide_panel.project_search.query_editor.get_full_text(),
+        "field-paste-marker"
+    );
+    assert!(session.app.ide_panel.terminal_focused);
+    run_ok(&mut session, "key ctrl+shift+f\n");
+    assert!(panel_open(&dump(&mut session), "search"));
+    assert!(session.app.ide_panel.terminal_focused);
+    drop(session);
+    let _ = std::fs::remove_dir_all(dir);
+
+    let (dir, mut session) = terminal_session("ui-hotkeys-settings-over-terminal");
+    click_ui(&mut session, "TerminalBody");
+    run_ok(&mut session, "key alt+q\n");
+    assert!(!session.app.ide_panel.terminal_focused);
+    open_settings_tab(&mut session, 0);
+    session.app.set_clipboard_text("settings-clipboard-sentinel");
+    run_ok(&mut session, "key ctrl+c\nkey ctrl+v\nkey ctrl+shift+f\nkey ctrl+a\n");
+    let state = dump(&mut session);
+    assert_eq!(state["overlays"]["settings"], true);
+    assert_eq!(state["overlays"]["search"], false);
+    assert_eq!(state["clipboard"]["text"], "settings-clipboard-sentinel");
+    assert!(!terminal_grid_text(&session).contains("settings-clipboard-sentinel"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_project_search_ctrl_enter() {
+    let (dir, mut session) = keyboard_session("ui-hotkeys-project-search-run");
+    run_ok(&mut session, "key ctrl+shift+f\ntype alpha\nkey ctrl+enter\n");
+    wait_until(&mut session, 5000, "Ctrl+Enter project search results", |session| {
+        has_ui(&dump(session), "ProjectSearchMatchJump(0, 0)")
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_startup_keyboard_gate() {
+    let (dir, mut session) = keyboard_session("ui-hotkeys-startup-key-gate");
+    session.app.startup_editor_pending = Some(
+        std::time::Instant::now() + std::time::Duration::from_secs(30),
+    );
+    run_ok(&mut session, "key ctrl+z\n");
+    assert_eq!(
+        session.app.editor.get_full_text(),
+        "alpha\n",
+        "the startup gate holds editor shortcuts"
+    );
+    run_ok(&mut session, "key f1\n");
+    assert_eq!(
+        dump(&mut session)["overlays"]["settings"],
+        true,
+        "global settings remains available during the startup gate"
+    );
+    session.app.startup_editor_pending = None;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_hotkeys_characterize_tab_switching_with_three_tabs() {
+    let (dir, mut session) = keyboard_session("ui-hotkeys-three-tabs");
+    for (index, (name, contents)) in [("b.txt", "beta\n"), ("c.txt", "gamma\n")]
+        .into_iter()
+        .enumerate()
+    {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).expect("write tab fixture");
+        run_ok(&mut session, &format!("open {}\n", path.display()));
+        let expected_tabs = index + 2;
+        wait_until(&mut session, 5000, "editor tab", |session| {
+            dump(session)["tabs"]
+                .as_array()
+                .is_some_and(|tabs| tabs.len() == expected_tabs)
+        });
+    }
+    let tabs = dump(&mut session)["tabs"].as_array().unwrap().len();
+    assert_eq!(tabs, 3);
+    assert_chord_effect(
+        &mut session,
+        "ctrl+pageup",
+        |_| {},
+        |session| assert_eq!(dump(session)["tabs"][1]["active"], true),
+    );
+    assert_chord_effect(
+        &mut session,
+        "ctrl+pagedown",
+        |_| {},
+        |session| assert_eq!(dump(session)["tabs"][2]["active"], true),
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
