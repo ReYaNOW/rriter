@@ -65,7 +65,7 @@ impl App {
                 if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsKeymapScrollY) {
                     let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
                     let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
-                    let bar = crate::render_view::settings_ui::settings_scrollbar(rect, rect.3, self.keymap_settings.max_scroll, self.keymap_settings.scroll.current, 6.0, 40.0, [0.7, 0.33, 0.54, 1.0]);
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(rect, rect.3, self.keymap_settings.max_scroll, self.keymap_settings.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
                     let geometry = bar.geometry(s);
                     crate::app::mouse::press_scrollbar(&mut self.keymap_settings.scroll, geometry, 0.0, pointer);
                 }

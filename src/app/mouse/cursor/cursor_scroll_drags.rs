@@ -287,7 +287,7 @@ impl App {
                 let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.keymap_settings.max_scroll,
-                    self.keymap_settings.scroll.current, 6.0, 36.0,
+                    self.keymap_settings.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB,
                     [0.7, 0.33, 0.54, 1.0],
                 );
                 crate::app::mouse::drag_scrollbar(

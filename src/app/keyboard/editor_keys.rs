@@ -190,12 +190,10 @@ fn markdown_editor_key_action(
 fn multicursor_keeps_bound_edit_command(
     keymap: &crate::keymap::Keymap,
     chord: crate::keymap::Chord,
-    alt: bool,
 ) -> bool {
     keymap.hit(crate::keymap::Command::EditPaste, chord)
-        || (!alt
-            && (keymap.hit(crate::keymap::Command::EditorUndo, chord)
-                || keymap.hit(crate::keymap::Command::EditorRedo, chord)))
+        || keymap.hit(crate::keymap::Command::EditorUndo, chord)
+        || keymap.hit(crate::keymap::Command::EditorRedo, chord)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -574,7 +572,7 @@ impl App {
                 || (!ctrl && !self.modifiers.alt_key()
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter)))
                 || chord.is_some_and(|chord| {
-                    multicursor_keeps_bound_edit_command(&self.keymap, chord, self.modifiers.alt_key())
+                    multicursor_keeps_bound_edit_command(&self.keymap, chord)
                 })
                 || (plain_navigation
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
@@ -1500,7 +1498,23 @@ mod multicursor_keymap_tests {
         let mut overrides = crate::keymap::KeymapOverrides::default();
         overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::EditPaste, chord);
         let keymap = crate::keymap::Keymap::build(&overrides);
-        let keeps_cursors = multicursor_keeps_bound_edit_command(&keymap, chord, true);
+        let keeps_cursors = multicursor_keeps_bound_edit_command(&keymap, chord);
         assert!(keeps_cursors, "Alt+V is EditPaste and must preserve extra cursors: chord={chord:?}, keeps={keeps_cursors}");
+    }
+
+    #[test]
+    fn rebound_alt_undo_and_redo_preserve_multicursor_actions() {
+        for (command, key) in [
+            (crate::keymap::Command::EditorUndo, "alt+u"),
+            (crate::keymap::Command::EditorRedo, "alt+r"),
+        ] {
+            let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, key)
+                .expect("test chord parses");
+            let mut overrides = crate::keymap::KeymapOverrides::default();
+            overrides.add_chord(crate::platform::CURRENT_PLATFORM, command, chord);
+            let keymap = crate::keymap::Keymap::build(&overrides);
+            let keeps_cursors = multicursor_keeps_bound_edit_command(&keymap, chord);
+            assert!(keeps_cursors, "Alt-bound {command:?} must preserve extra cursors: chord={chord:?}, keeps={keeps_cursors}");
+        }
     }
 }

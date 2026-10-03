@@ -14,7 +14,6 @@ mod api_client_keymap_tests {
         app.is_ide_mode = true;
         app.show_welcome = false;
         app.ide_panel.open(crate::app::PanelId::ApiClient);
-        app.ide_panel.open(crate::app::PanelId::Git);
         let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
             .expect("test chord parses");
         let mut overrides = crate::keymap::KeymapOverrides::default();

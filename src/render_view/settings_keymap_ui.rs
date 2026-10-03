@@ -127,7 +127,7 @@ pub(super) fn draw(
     state.max_scroll = (row_y - list_y - clip.h).max(0.0);
     state.scroll.clamp_target(0.0, state.max_scroll);
     if state.max_scroll > 0.0 {
-        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, clip.y, 14.0 * s, clip.h), clip.h, state.max_scroll, state.scroll.current, 6.0, 36.0, [0.7, 0.33, 0.54, 1.0]);
+        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, clip.y, 14.0 * s, clip.h), clip.h, state.max_scroll, state.scroll.current, 6.0, super::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
         renderer.draw_scrollbar(&bar, s, 1.0, Some(super::scrollbar_widget::ScrollbarHit { ui, id: UiId::SettingsKeymapScrollY, mx: renderer.last_mouse_x, my: renderer.last_mouse_y, blocker: false }));
     }
     ui.pop_clip();

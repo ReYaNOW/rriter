@@ -226,7 +226,7 @@ impl App {
         let query_review_open = self
             .active_database_query_meta_state()
             .is_some_and(|(_, state)| state.review.is_some());
-        if query_review_open {
+        if query_review_open && !self.show_settings {
             if key_event.state == ElementState::Pressed {
                 match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::Escape) => {
@@ -375,7 +375,7 @@ impl App {
                             return;
                         }
                     }
-                    _ if !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryRun, chord)) =>
+                    _ if !self.show_settings && !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryRun, chord)) =>
                     {
                         self.run_active_database_query(
                             crate::app::database::DatabaseQueryMode::Run,
@@ -385,7 +385,7 @@ impl App {
                         }
                         return;
                     }
-                    _ if !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryComplete, chord)) => {
+                    _ if !self.show_settings && !terminal_owns_chord && chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::DatabaseQueryComplete, chord)) => {
                         self.show_active_database_query_completion();
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -406,7 +406,7 @@ impl App {
             {
                 return;
             }
-            if self.handle_database_table_key(&key_event, chord, terminal_owns_chord)
+            if (!self.show_settings && self.handle_database_table_key(&key_event, chord, terminal_owns_chord))
                 || self.handle_pdf_key(&key_event, chord)
                 || self.handle_image_key(&key_event, chord)
             {
@@ -927,12 +927,12 @@ mod tests {
         app.show_welcome = false;
         app.show_settings = true;
         app.ide_panel.open(crate::app::PanelId::ApiClient);
-        app.ide_panel.open(crate::app::PanelId::Git);
         let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
             .expect("test chord parses");
         let mut overrides = crate::keymap::KeymapOverrides::default();
         overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::GitToggleGraph, chord);
         app.keymap = crate::keymap::Keymap::build(&overrides);
+        assert!(app.active_tab_is_api_client() || app.ide_panel.is_open(crate::app::PanelId::ApiClient), "Settings regression fixture must retain a visible API Client surface: active_api={} open_api={}", app.active_tab_is_api_client(), app.ide_panel.is_open(crate::app::PanelId::ApiClient));
         app.modifiers = if crate::platform::CURRENT_PLATFORM == crate::platform::PlatformKind::Macos {
             winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::ALT
         } else {
@@ -948,6 +948,182 @@ mod tests {
         };
         app.handle_main_key_input(&crate::app::events::host_loop::HostLoop::headless(&state), event);
         assert_eq!(app.ide_panel.git.bottom_pane, crate::app::git_panel::GitBottomPane::Closed, "Settings must own the key before API/global command dispatch: pane={:?}", app.ide_panel.git.bottom_pane);
+    }
+
+    fn database_table_hotkey_app() -> (App, crate::keymap::Chord) {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            panic!("test app must initialize");
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        let tab_id = crate::app::database::DatabaseTabId(7);
+        let mut tab = crate::app::app_behavior_tests::tab_with("items", None, "");
+        let mut table = crate::app::database::DatabaseTableTabState::default();
+        table.loading = false;
+        table.metadata = Some(crate::app::database::DatabaseTableMetadata {
+            database_name: "test".to_string(),
+            table_name: "items".to_string(),
+            columns: vec![crate::app::database::DatabaseColumnInfo {
+                ordinal: 1,
+                name: "value".to_string(),
+                type_name: "text".to_string(),
+                type_oid: 25,
+                type_kind: crate::app::database::DatabaseTypeKind::Other,
+                nullable: true,
+                default_expression: None,
+                identity: false,
+                generated: false,
+                primary_key: false,
+                enum_values: Vec::new(),
+            }],
+            primary_key_columns: Vec::new(),
+            editable: true,
+            read_only_reason: None,
+            notices: Vec::new(),
+        });
+        tab.kind = crate::app::EditorTabKind::DatabaseTable(
+            crate::app::database::DatabaseTableTabMeta {
+                tab_id,
+                connection_id: crate::app::database::DatabaseConnectionId(3),
+                database_name: "test".to_string(),
+                table_name: "items".to_string(),
+            },
+            table,
+        );
+        app.tabs = vec![tab];
+        app.active_tab = 0;
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("test chord parses");
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::DatabaseTableAddRow, chord);
+        app.keymap = crate::keymap::Keymap::build(&overrides);
+        app.modifiers = if crate::platform::CURRENT_PLATFORM == crate::platform::PlatformKind::Macos {
+            winit::keyboard::ModifiersState::SUPER | winit::keyboard::ModifiersState::ALT
+        } else {
+            winit::keyboard::ModifiersState::CONTROL | winit::keyboard::ModifiersState::ALT
+        };
+        (app, chord)
+    }
+
+    fn press_database_table_hotkey(app: &mut App) {
+        let state = crate::app::events::host_loop::HeadlessLoopState::default();
+        app.handle_main_key_input(
+            &crate::app::events::host_loop::HostLoop::headless(&state),
+            KeyInput {
+                physical_key: PhysicalKey::Code(KeyCode::KeyG),
+                logical_text: None,
+                text: None,
+                state: ElementState::Pressed,
+                repeat: false,
+            },
+        );
+    }
+
+    fn assert_active_database_table(app: &App, scenario: &str) {
+        assert!(app.active_tab_is_database_table(), "{scenario} fixture must have the DatabaseTable surface active: active={}", app.active_tab);
+    }
+
+    fn added_database_rows(app: &App) -> usize {
+        let Some(crate::app::EditorTabKind::DatabaseTable(_, state)) = app.tabs.get(app.active_tab).map(|tab| &tab.kind) else {
+            panic!("active DatabaseTable fixture must retain its table state");
+        };
+        state.grid.added_rows.len()
+    }
+
+    #[test]
+    fn database_table_chord_does_not_dispatch_behind_modal() {
+        let (mut app, _) = database_table_hotkey_app();
+        assert_active_database_table(&app, "modal");
+        app.ide_panel.database.table_modal = Some(crate::app::database::DatabaseTableModal::RefreshPrompt {
+            tab_id: crate::app::database::DatabaseTabId(7),
+            close_after_save: false,
+        });
+        assert!(app.ide_panel.database.table_modal.is_some(), "modal fixture must be open: modal={:?}", app.ide_panel.database.table_modal);
+        press_database_table_hotkey(&mut app);
+        assert_eq!(added_database_rows(&app), 0, "DatabaseTable chord must not add a row behind its modal: added={}", added_database_rows(&app));
+    }
+
+    #[test]
+    fn database_table_chord_does_not_dispatch_while_text_field_focused() {
+        let (mut app, _) = database_table_hotkey_app();
+        assert_active_database_table(&app, "text field");
+        let Some(crate::app::EditorTabKind::DatabaseTable(_, state)) = app.tabs.get_mut(app.active_tab).map(|tab| &mut tab.kind) else {
+            panic!("active DatabaseTable fixture must retain its table state");
+        };
+        state.grid.focused_input = Some(crate::app::database::DatabaseTableInputTarget::Where);
+        assert_eq!(state.grid.focused_input, Some(crate::app::database::DatabaseTableInputTarget::Where), "text input fixture must be focused: focused={:?}", state.grid.focused_input);
+        press_database_table_hotkey(&mut app);
+        assert_eq!(added_database_rows(&app), 0, "DatabaseTable chord must not add a row while a text field owns input: added={}", added_database_rows(&app));
+    }
+
+    #[test]
+    fn database_table_chord_does_not_dispatch_while_settings_is_open() {
+        let (mut app, _) = database_table_hotkey_app();
+        assert_active_database_table(&app, "Settings");
+        app.show_settings = true;
+        assert!(app.show_settings, "Settings fixture must be open: show_settings={}", app.show_settings);
+        press_database_table_hotkey(&mut app);
+        assert_eq!(added_database_rows(&app), 0, "DatabaseTable chord must not add a row while Settings is open: added={}", added_database_rows(&app));
+    }
+
+    #[test]
+    fn database_table_chord_dispatches_when_table_owns_input() {
+        let (mut app, _) = database_table_hotkey_app();
+        assert_active_database_table(&app, "positive control");
+        assert!(app.ide_panel.database.table_modal.is_none(), "positive control must not have a modal: modal={:?}", app.ide_panel.database.table_modal);
+        assert!(!app.show_settings, "positive control must have Settings closed: show_settings={}", app.show_settings);
+        assert!(app.database_table_command_context_unowned(), "positive control must have an unowned table context: unowned={}", app.database_table_command_context_unowned());
+        press_database_table_hotkey(&mut app);
+        assert_eq!(added_database_rows(&app), 1, "DatabaseTable chord must add a row when the table owns input: added={}", added_database_rows(&app));
+    }
+
+    #[test]
+    fn settings_prevents_enter_from_committing_database_query_review() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            panic!("test app must initialize");
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        let mut tab = crate::app::app_behavior_tests::tab_with("SQL Console", None, "select 1");
+        let mut query = crate::app::database::DatabaseQueryTabState::default();
+        query.review = Some(crate::app::database::DatabaseQueryReviewState {
+            transaction_id: crate::app::database::DatabaseTransactionId(2),
+            sql: "select 1".to_string(),
+            source_offset: 0,
+            started_unix_ms: 1,
+            deadline_unix_ms: 2,
+            duration_ms: 1,
+            returned_rows: 0,
+            changed_rows: 0,
+            mode: crate::app::database::DatabaseQueryMode::Run,
+            finishing: false,
+        });
+        tab.kind = crate::app::EditorTabKind::DatabaseQuery(
+            crate::app::database::DatabaseQueryTabMeta {
+                console_id: crate::app::database::SqlConsoleId(4),
+                connection_id: crate::app::database::DatabaseConnectionId(3),
+                database_name: "test".to_string(),
+                title: "SQL Console".to_string(),
+            },
+            query,
+        );
+        app.tabs = vec![tab];
+        app.active_tab = 0;
+        app.show_settings = true;
+        assert!(app.active_tab_is_database_query(), "review fixture must have the SQL Console surface active: active={}", app.active_tab);
+        assert!(app.active_database_query_meta_state().is_some_and(|(_, state)| state.review.is_some()), "review fixture must start in SQL review: review={:?}", app.active_database_query_meta_state().map(|(_, state)| &state.review));
+        let state = crate::app::events::host_loop::HeadlessLoopState::default();
+        app.handle_main_key_input(
+            &crate::app::events::host_loop::HostLoop::headless(&state),
+            KeyInput {
+                physical_key: PhysicalKey::Code(KeyCode::Enter),
+                logical_text: None,
+                text: None,
+                state: ElementState::Pressed,
+                repeat: false,
+            },
+        );
+        assert!(app.active_database_query_meta_state().is_some_and(|(_, state)| state.review.is_some()), "Enter must not commit a SQL review behind Settings: review={:?}", app.active_database_query_meta_state().map(|(_, state)| &state.review));
     }
 
     fn terminal_open(panels: &crate::app::IdePanelState) -> bool {
