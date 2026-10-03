@@ -1472,6 +1472,9 @@ Root:
 * `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
 * `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
+* `src/headless/ui_tests_hotkeys.rs` -> headless UI tests for keymap overrides from `config.json`, configurable commands, and terminal shortcut ownership.
+* `src/headless/ui_tests_hotkeys_settings.rs` -> headless UI tests for hotkey Settings filtering, skipped-entry warnings, and recording-state behavior.
+* `src/headless/ui_tests_hotkeys_settings_edit.rs` -> headless UI tests for adding/removing/resetting bindings, conflict decisions, reserved chords, and recording cancellation.
 * `src/headless/ui_tests_editor_selection.rs` -> headless UI tests for double-click word, Shift+Home/End, Ctrl+A, Ctrl+Shift+arrows, and typing over a selection.
 * `src/headless/ui_tests_editor_shortcuts.rs` -> headless UI tests for Home/End, word navigation/deletion, file edges, Enter auto-indent, and Tab indentation.
 * `src/headless/ui_tests_editor_folding_minimap.rs` -> headless UI tests for folded rows and cursor skipping, sibling folds, minimap thumb drag/click, and thumb geometry.
@@ -1664,7 +1667,8 @@ Input:
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
-* `src/keymap.rs` and `src/keymap/defaults.rs` -> command metadata, physical-key chords, parsing, validation, overrides, and resolved keymaps.
+* `src/keymap.rs` -> physical-key chords, parsing, validation, overrides, and resolved keymaps.
+* `src/keymap/defaults.rs` -> command metadata and default key bindings.
 * `src/app/mouse.rs` -> mouse module shell.
 * `src/app/mouse/input.rs` -> mouse button module shell + shared click helpers.
 * `src/app/mouse/input/mouse_dispatch.rs` -> `handle_main_mouse_input_inner`: ordered press/release phase dispatch.
