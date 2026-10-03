@@ -1048,7 +1048,7 @@ fn ty_context_suppresses_unscoped_self_member_completion() {
     app.autocomplete_mode = AutocompleteMode::TyContext;
     app.editor = editor_with("async def lifespan(_: Litestar):\n    self.");
 
-    app.request_ty_autocomplete(AutocompleteMode::TyContext, Some("."));
+    app.request_ide_autocomplete(AutocompleteMode::TyContext, Some("."));
 
     assert!(!app.autocomplete_active);
     assert!(app.autocomplete_options.is_empty());

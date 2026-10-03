@@ -102,7 +102,7 @@ impl LspManager {
         format!("[{}]", items.join(","))
     }
 
-    fn request_ty_workspace_diagnostics_if_ready(&mut self) {
+    fn request_workspace_diagnostics_if_ready(&mut self) {
         if !self.ty_workspace_diag_dirty
             || self.ty_workspace_diag_pending.is_some()
             || self.python_disabled
@@ -363,7 +363,7 @@ impl LspManager {
         }
 
         self.finish_diagnostics_poll(diagnostics_replaced);
-        self.request_ty_workspace_diagnostics_if_ready();
+        self.request_workspace_diagnostics_if_ready();
         self.request_ruff_workspace_diagnostics_if_ready();
         trim_allocator_after_large_diagnostics(received_diagnostics, workspace_diagnostics_done);
 

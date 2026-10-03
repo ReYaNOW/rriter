@@ -1,7 +1,50 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LangRoute {
+    Python,
+    Rooted(rooted_language::RootedLanguage),
+}
+
 pub struct LspServerSummary<'a> {
     pub name: &'static str,
     pub status: &'a LspServerStatus,
     pub log_count: usize,
+}
+
+#[cfg(test)]
+mod language_route_tests {
+    use super::*;
+
+    #[test]
+    fn language_for_ext_routes_supported_languages() {
+        assert_eq!(LspManager::language_for_ext(concat!("p", "y")), Some(LangRoute::Python));
+        assert_eq!(LspManager::language_for_ext(concat!("p", "y", "i")), Some(LangRoute::Python));
+        assert_eq!(
+            LspManager::language_for_ext(concat!("da", "rt")),
+            Some(LangRoute::Rooted(rooted_language::RootedLanguage::Dart))
+        );
+        assert_eq!(LspManager::language_for_ext("rs"), None);
+        assert_eq!(LspManager::language_for_ext("PY"), None);
+        assert_eq!(LspManager::language_for_ext("txt"), None);
+    }
+
+    #[test]
+    fn ide_completion_ignores_supported_extensions_without_processes() {
+        let mut manager = LspManager::new(Vec::new());
+        assert_eq!(
+            manager.request_ide_completion(
+                &PathBuf::from(concat!("sample.", "da", "rt")),
+                concat!("da", "rt"),
+                0,
+                0,
+                None,
+            ),
+            None
+        );
+        assert_eq!(
+            manager.request_ide_completion(&PathBuf::from("notes.txt"), "txt", 0, 0, None),
+            None
+        );
+    }
 }
 
 fn python_line_count(text: &str) -> usize {
@@ -80,8 +123,30 @@ impl LspManager {
         self.dirty_diagnostics = true;
     }
 
-    fn is_python_ext(ext: &str) -> bool {
-        matches!(ext, "py" | "pyi")
+    pub fn language_for_ext(ext: &str) -> Option<LangRoute> {
+        match ext {
+            "py" | "pyi" => Some(LangRoute::Python),
+            "dart" => Some(LangRoute::Rooted(rooted_language::RootedLanguage::Dart)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn rooted_mut(
+        &mut self,
+        lang: rooted_language::RootedLanguage,
+    ) -> &mut rooted_language::RootedWorkspaces {
+        match lang {
+            rooted_language::RootedLanguage::Dart => &mut self.dart,
+        }
+    }
+
+    pub(super) fn rooted(
+        &self,
+        lang: rooted_language::RootedLanguage,
+    ) -> &rooted_language::RootedWorkspaces {
+        match lang {
+            rooted_language::RootedLanguage::Dart => &self.dart,
+        }
     }
 
     #[cfg(test)]
@@ -566,25 +631,37 @@ impl LspManager {
     }
 
     fn ide_process_for_document(&mut self, path: &Path, ext: &str) -> Option<&mut LspProcess> {
-        match ext {
-            "py" | "pyi" => {
+        match Self::language_for_ext(ext)? {
+            LangRoute::Python => {
                 self.ensure_python();
                 self.ty_process.as_mut()
             }
-            "dart" => self.dart_process_for_path_mut(path),
-            _ => None,
+            LangRoute::Rooted(lang) => self.rooted_process_for_path_mut(lang, path),
         }
     }
 
     fn action_process_for_document(&mut self, path: &Path, ext: &str) -> Option<&mut LspProcess> {
-        match ext {
-            "py" | "pyi" => {
+        match Self::language_for_ext(ext)? {
+            LangRoute::Python => {
                 self.ensure_python();
                 self.python.as_mut()
             }
-            "dart" => self.dart_process_for_path_mut(path),
-            _ => None,
+            LangRoute::Rooted(lang) => self.rooted_process_for_path_mut(lang, path),
         }
+    }
+
+    fn rooted_process_for_path_mut(
+        &mut self,
+        lang: rooted_language::RootedLanguage,
+        path: &Path,
+    ) -> Option<&mut LspProcess> {
+        let root = self.rooted(lang).root_for_open_path(path)?.to_path_buf();
+        let executable = match lang {
+            rooted_language::RootedLanguage::Dart => dart_workspace::dart_executable_for_root(&root),
+        };
+        let ui_waker = self.ui_waker.clone();
+        self.rooted_mut(lang)
+            .process_for_path_mut(path, |_| Some(executable), &ui_waker)
     }
 
     /// Уведомляет LSP об открытии файла
@@ -598,7 +675,13 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         self.current_path = Some(abs_path.clone());
-        if Self::is_python_ext(ext) {
+        let Some(route) = Self::language_for_ext(ext) else {
+            self.current_python_file = None;
+            self.current_python_lines = None;
+            return;
+        };
+        match route {
+            LangRoute::Python => {
             let text = Arc::<str>::from(text);
             let lines = python_line_count(text.as_ref());
             self.current_python_file = Some((abs_path.clone(), text.clone(), version));
@@ -619,13 +702,16 @@ impl LspManager {
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
             self.mark_diagnostics_changed();
-        } else if ext == "dart" {
-            self.current_python_file = None;
-            self.current_python_lines = None;
-            self.open_dart_document(abs_path, Arc::<str>::from(text), version);
-        } else {
-            self.current_python_file = None;
-            self.current_python_lines = None;
+            }
+            LangRoute::Rooted(lang) => {
+                self.current_python_file = None;
+                self.current_python_lines = None;
+                match lang {
+                    rooted_language::RootedLanguage::Dart => {
+                        self.open_dart_document(abs_path, Arc::<str>::from(text), version);
+                    }
+                }
+            }
         }
     }
 
@@ -640,7 +726,11 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if Self::is_python_ext(ext) {
+        let Some(route) = Self::language_for_ext(ext) else {
+            return;
+        };
+        match route {
+            LangRoute::Python => {
             self.current_path = Some(abs_path.clone());
             let text = Arc::<str>::from(text);
             let lines = python_line_count(text.as_ref());
@@ -673,15 +763,19 @@ impl LspManager {
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
             self.mark_diagnostics_changed();
-        } else if ext == "dart"
-            && self
-                .dart.open_files()
-                .contains_key(&crate::platform::PathKey::new(&abs_path))
-        {
-            self.current_path = Some(abs_path.clone());
-            self.current_python_file = None;
-            self.current_python_lines = None;
-            self.change_dart_document(abs_path, Arc::<str>::from(text), version);
+            }
+            LangRoute::Rooted(lang) => {
+                if self.rooted(lang).open_files().contains_key(&crate::platform::PathKey::new(&abs_path)) {
+                    self.current_path = Some(abs_path.clone());
+                    self.current_python_file = None;
+                    self.current_python_lines = None;
+                    match lang {
+                        rooted_language::RootedLanguage::Dart => {
+                            self.change_dart_document(abs_path, Arc::<str>::from(text), version);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -797,7 +891,7 @@ impl LspManager {
             .and_then(|process| process.request_formatting(&abs_path, tab_size, insert_spaces))
     }
 
-    pub fn request_ty_completion(
+    pub fn request_ide_completion(
         &mut self,
         path: &PathBuf,
         ext: &str,
@@ -805,12 +899,13 @@ impl LspManager {
         col: u32,
         trigger: Option<&str>,
     ) -> Option<i32> {
-        Self::is_python_ext(ext)
-            .then_some(())
-            .and_then(|_| self.request_completion(path, ext, line, col, trigger))
+        Self::language_for_ext(ext)
+            .is_some()
+            .then(|| self.request_completion(path, ext, line, col, trigger))
+            .flatten()
     }
 
-    pub fn request_ty_signature_help(
+    pub fn request_ide_signature_help(
         &mut self,
         path: &PathBuf,
         ext: &str,
@@ -818,12 +913,13 @@ impl LspManager {
         col: u32,
         trigger: Option<&str>,
     ) -> Option<i32> {
-        Self::is_python_ext(ext)
-            .then_some(())
-            .and_then(|_| self.request_signature_help(path, ext, line, col, trigger))
+        Self::language_for_ext(ext)
+            .is_some()
+            .then(|| self.request_signature_help(path, ext, line, col, trigger))
+            .flatten()
     }
 
-    pub fn request_ty_inlay_hints(
+    pub fn request_ide_inlay_hints(
         &mut self,
         path: &PathBuf,
         ext: &str,
@@ -832,9 +928,9 @@ impl LspManager {
         end_line: u32,
         end_col: u32,
     ) -> Option<i32> {
-        Self::is_python_ext(ext).then_some(()).and_then(|_| {
+        Self::language_for_ext(ext).is_some().then(|| {
             self.request_inlay_hints(path, ext, start_line, start_col, end_line, end_col)
-        })
+        }).flatten()
     }
 
     /// Уведомляет LSP о закрытии файла
@@ -846,7 +942,11 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        if Self::is_python_ext(ext) {
+        let Some(route) = Self::language_for_ext(ext) else {
+            return;
+        };
+        match route {
+            LangRoute::Python => {
             if self.current_path.as_ref() == Some(&abs_path) {
                 self.current_path = None;
             }
@@ -869,16 +969,20 @@ impl LspManager {
                 self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
                 self.mark_diagnostics_changed();
             }
-        } else if ext == "dart" {
-            if self.current_path.as_ref() == Some(&abs_path) {
-                self.current_path = None;
             }
-            self.close_dart_document(&abs_path);
+            LangRoute::Rooted(lang) => {
+                if self.current_path.as_ref() == Some(&abs_path) {
+                    self.current_path = None;
+                }
+                match lang {
+                    rooted_language::RootedLanguage::Dart => self.close_dart_document(&abs_path),
+                }
+            }
         }
     }
 
     pub fn notify_python_tab_close(&mut self, path: &PathBuf, ext: &str) {
-        if Self::is_python_ext(ext) {
+        if matches!(Self::language_for_ext(ext), Some(LangRoute::Python)) {
             self.notify_close(path, ext);
         }
     }

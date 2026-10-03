@@ -180,15 +180,6 @@ impl LspManager {
         }
     }
 
-    fn rooted_mut(
-        &mut self,
-        lang: super::rooted_language::RootedLanguage,
-    ) -> &mut super::rooted_language::RootedWorkspaces {
-        match lang {
-            super::rooted_language::RootedLanguage::Dart => &mut self.dart,
-        }
-    }
-
     pub fn drain_closed_dart_documents(&mut self) -> Vec<PathBuf> {
         self.dart.drain_closed_documents()
     }
@@ -229,12 +220,6 @@ impl LspManager {
 
     pub(super) fn dart_document_version(&self, path: &Path) -> Option<i32> {
         self.dart.document_version(path)
-    }
-
-    pub(super) fn dart_process_for_path_mut(&mut self, path: &Path) -> Option<&mut LspProcess> {
-        let root = self.dart.root_for_open_path(path)?.to_path_buf();
-        let executable = dart_executable_for_root(&root);
-        self.dart.process_for_path_mut(path, |_| Some(executable), &self.ui_waker)
     }
 
     pub(super) fn poll_dart_processes(&mut self, events: &mut Vec<super::LspEvent>) {
@@ -316,23 +301,32 @@ impl LspManager {
             self.notify_analysis_configuration_changed(path);
             return;
         }
-        if ext != "dart" {
+        let Some(route) = Self::language_for_ext(ext) else {
             return;
-        }
-        if let Some(root) = self.dart.root_for_open_path(path).map(Path::to_path_buf) {
-            self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+        };
+        if let super::LangRoute::Rooted(lang) = route {
+            if let Some(root) = self.rooted(lang).root_for_open_path(path).map(Path::to_path_buf) {
+                self.schedule_dart_workspace_analysis(&root, Duration::from_millis(250));
+            }
         }
     }
 
     pub fn refresh_workspace_diagnostics(&mut self, path: &Path, ext: &str) {
-        if ext != "dart" {
+        let Some(route) = Self::language_for_ext(ext) else {
             return;
+        };
+        if let super::LangRoute::Rooted(lang) = route {
+            let root = self
+                .rooted(lang)
+                .root_for_open_path(path)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| match lang {
+                    super::rooted_language::RootedLanguage::Dart => {
+                        dart_root_for_path(path, &self.workspaces).path
+                    }
+                });
+            self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
         }
-        let root = self
-            .dart.root_for_open_path(path)
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| dart_root_for_path(path, &self.workspaces).path);
-        self.schedule_dart_workspace_analysis(&root, Duration::ZERO);
     }
 
     pub fn notify_analysis_configuration_changed(&mut self, path: &Path) {
@@ -509,7 +503,7 @@ impl LspManager {
     }
 }
 
-fn dart_executable_for_root(root: &Path) -> PathBuf {
+pub(super) fn dart_executable_for_root(root: &Path) -> PathBuf {
     crate::platform::resolve_dart_for_workspace(Some(root))
         .path
         .unwrap_or_else(|| PathBuf::from(DART_SERVER.program))

@@ -230,11 +230,7 @@ fn headless_dart_two_roots_are_independent() {
     let _ = std::fs::remove_dir_all(&parent);
 }
 
-/// Bug: `App::notify_lsp_tab_close` (app_file_tab_methods.rs) calls `notify_python_tab_close`,
-/// which ignores Dart, so closing one of several tabs leaves its Dart document (and root
-/// process) open in the LSP until the last tab closes.
 #[test]
-#[ignore = "bug: closing a non-last Dart tab never reaches the Dart LSP"]
 fn headless_dart_closing_non_last_tab_stops_its_root() {
     let parent = scratch_dir("ui-dart-non-last-close");
     let first_root = parent.join("first");

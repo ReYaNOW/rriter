@@ -498,7 +498,9 @@ impl App {
             return;
         };
         if let Some(lsp) = &mut self.lsp {
-            lsp.notify_python_tab_close(&path, &ext);
+            if crate::lsp::LspManager::language_for_ext(&ext).is_some() {
+                lsp.notify_close(&path, &ext);
+            }
         }
     }
 
