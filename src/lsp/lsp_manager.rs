@@ -24,15 +24,14 @@ pub struct LspManager {
     workspaces: Vec<PathBuf>,
     active_workspaces: Vec<PathBuf>,
     open_python_files: HashMap<crate::platform::PathKey, OpenPythonFile>,
-    open_dart_files: HashMap<crate::platform::PathKey, dart_workspace::OpenDartFile>,
-    dart_workspaces: HashMap<crate::platform::PathKey, dart_workspace::DartWorkspaceState>,
-    closed_dart_documents: Vec<PathBuf>,
+    pub(super) dart: rooted_language::RootedWorkspaces,
+    pub(super) dart_jobs: HashMap<crate::platform::PathKey, dart_workspace::DartAnalyzerState>,
+    pub(super) dart_job_roots: HashMap<crate::platform::PathKey, PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
     pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     ruff_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
-    dart_live_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     dart_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     diagnostic_generation: u64,
     diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
@@ -54,15 +53,12 @@ pub struct LspManager {
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     pub ty_status: LspServerStatus,
-    pub dart_status: LspServerStatus,
     /// Отключены ли Python-серверы вручную целиком.
     pub python_disabled: bool,
     ruff_disabled: bool,
     ty_disabled: bool,
     ruff_unavailable: bool,
     ty_unavailable: bool,
-    dart_disabled: bool,
-    dart_unavailable: bool,
     dart_workspace_analysis_enabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
     pub suppress_diagnostics: bool,
@@ -71,6 +67,10 @@ pub struct LspManager {
 }
 
 impl LspManager {
+    pub fn dart_status(&self) -> LspServerStatus {
+        self.dart.status()
+    }
+
     pub fn diagnostic_generation(&self) -> u64 {
         self.diagnostic_generation
     }
@@ -102,14 +102,13 @@ impl LspManager {
             workspaces: crate::platform::dedup_paths(workspaces),
             active_workspaces: Vec::new(),
             open_python_files: HashMap::new(),
-            open_dart_files: HashMap::new(),
-            dart_workspaces: HashMap::new(),
-            closed_dart_documents: Vec::new(),
+            dart: rooted_language::RootedWorkspaces::new(rooted_language::RootedLanguage::Dart, true),
+            dart_jobs: HashMap::new(),
+            dart_job_roots: HashMap::new(),
             diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
             ruff_workspace_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
-            dart_live_diagnostics: HashMap::new(),
             dart_workspace_diagnostics: HashMap::new(),
             diagnostic_generation: 0,
             diagnostic_ancestor_severities: HashMap::new(),
@@ -128,14 +127,11 @@ impl LspManager {
             current_python_lines: None,
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
-            dart_status: LspServerStatus::Disabled,
             python_disabled: false,
             ruff_disabled: false,
             ty_disabled: false,
             ruff_unavailable: false,
             ty_unavailable: false,
-            dart_disabled: false,
-            dart_unavailable: false,
             dart_workspace_analysis_enabled: true,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
@@ -293,7 +289,7 @@ impl LspManager {
     pub fn set_workspaces(&mut self, workspaces: Vec<PathBuf>) {
         self.workspaces = crate::platform::dedup_paths(workspaces);
         self.reconfigure_dart_workspaces();
-        if self.open_dart_files.is_empty() {
+        if self.dart.open_files().is_empty() {
             self.schedule_configured_dart_projects();
         }
         if self.refresh_active_workspaces() {
@@ -384,9 +380,8 @@ impl LspManager {
 
     pub fn restart_server(&mut self, name: &str) {
         if name == DART_SERVER.program {
-            self.dart_disabled = false;
-            self.dart_unavailable = false;
-            self.dart_status = LspServerStatus::Disabled;
+            self.dart.set_enabled(true);
+            self.dart.clear_missing();
             self.reconfigure_dart_workspaces();
             return;
         }
@@ -420,22 +415,22 @@ impl LspManager {
 
     pub fn set_server_enabled(&mut self, name: &str, enabled: bool) {
         if name == DART_SERVER.program {
-            self.dart_disabled = !enabled;
             if enabled {
-                self.dart_unavailable = false;
-                self.dart_status = LspServerStatus::Disabled;
+                self.dart.set_enabled(true);
+                self.dart.clear_missing();
                 self.reconfigure_dart_workspaces();
             } else {
-                for state in self.dart_workspaces.values_mut() {
+                for state in self.dart_jobs.values_mut() {
                     state.cancel_job();
-                    if let Some(process) = state.process.take() {
-                        process.shutdown();
-                    }
+                    state.generation = state.generation.wrapping_add(1).max(1);
+                    state.due_at = None;
                 }
-                self.dart_status = LspServerStatus::Disabled;
-                self.dart_live_diagnostics.clear();
+                let changed = self.dart.set_enabled(false);
                 self.dart_workspace_diagnostics.clear();
-                self.mark_diagnostics_changed();
+                if changed {
+                    self.mark_diagnostics_changed();
+                    self.prune_diag_text_pool();
+                }
             }
             self.rebuild_diagnostic_summary();
             return;
@@ -521,7 +516,7 @@ impl LspManager {
             },
             LspServerSummary {
                 name: dart_workspace::DART_SERVER_NAME,
-                status: &self.dart_status,
+                status: self.dart.status_ref(),
                 log_count: self
                     .server_logs
                     .get(dart_workspace::DART_SERVER_NAME)
@@ -560,7 +555,7 @@ impl LspManager {
             },
             LspServerInfo {
                 name: dart_workspace::DART_SERVER_NAME,
-                status: self.dart_status.clone(),
+                status: self.dart_status(),
                 logs: dart_logs,
             },
         ]
@@ -680,7 +675,7 @@ impl LspManager {
             self.mark_diagnostics_changed();
         } else if ext == "dart"
             && self
-                .open_dart_files
+                .dart.open_files()
                 .contains_key(&crate::platform::PathKey::new(&abs_path))
         {
             self.current_path = Some(abs_path.clone());

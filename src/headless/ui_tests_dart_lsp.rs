@@ -59,7 +59,7 @@ fn close_tab(session: &mut HeadlessSession, index: usize) {
 }
 
 fn dart_status(session: &HeadlessSession) -> Option<LspServerStatus> {
-    session.app.lsp.as_ref().map(|lsp| lsp.dart_status.clone())
+    session.app.lsp.as_ref().map(crate::lsp::LspManager::dart_status)
 }
 
 fn root_has_process(session: &HeadlessSession, root: &Path) -> Option<bool> {
@@ -146,6 +146,9 @@ fn headless_dart_process_survives_close_during_analyzer_job() {
         root_has_job(session, &root) == Some(false)
             && root_has_process(session, &root) == Some(false)
     });
+    wait_until(&mut session, 5000, "Dart status Disabled after job", |session| {
+        dart_status(session) == Some(LspServerStatus::Disabled)
+    });
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -222,6 +225,7 @@ fn headless_dart_two_roots_are_independent() {
         .notify_close(&first, "dart");
     assert_eq!(root_has_process(&session, &first_root), Some(false));
     assert_eq!(root_has_process(&session, &second_root), Some(true));
+    assert_eq!(dart_status(&session), Some(LspServerStatus::Running));
 
     let _ = std::fs::remove_dir_all(&parent);
 }

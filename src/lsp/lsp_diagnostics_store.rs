@@ -34,16 +34,16 @@ impl LspManager {
             .cloned()
             .collect::<std::collections::HashSet<_>>();
         let open_dart_files = self
-            .open_dart_files
+            .dart.open_files()
             .keys()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
         let dart_roots = self
-            .dart_workspaces
+            .dart.roots()
             .values()
             .map(|state| state.root.clone())
             .collect::<Vec<_>>();
-        let keep_path = |path: &PathBuf| {
+        let keep_path = |path: &Path| {
             active_workspaces
                 .iter()
                 .any(|ws| crate::platform::path_is_within(path, ws))
@@ -57,7 +57,7 @@ impl LspManager {
             + self.instant_diagnostics.len()
             + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
-            + self.dart_live_diagnostics.len()
+            + self.dart.live_diagnostics().len()
             + self.dart_workspace_diagnostics.len()
             + self.ty_diag_result_ids.len();
         self.diagnostics.retain(|path, _| keep_path(path));
@@ -66,7 +66,7 @@ impl LspManager {
             .retain(|path, _| keep_path(path));
         self.ty_instant_diagnostics
             .retain(|path, _| keep_path(path));
-        self.dart_live_diagnostics.retain(|path, _| keep_path(path));
+        self.dart.retain_live_diagnostics(|path, _| keep_path(path));
         self.dart_workspace_diagnostics
             .retain(|path, _| keep_path(path));
         self.ty_diag_result_ids.retain(|path, _| keep_path(path));
@@ -75,7 +75,7 @@ impl LspManager {
             + self.instant_diagnostics.len()
             + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
-            + self.dart_live_diagnostics.len()
+            + self.dart.live_diagnostics().len()
             + self.dart_workspace_diagnostics.len()
             + self.ty_diag_result_ids.len();
         if before != after {
@@ -142,6 +142,26 @@ impl LspManager {
             (Some(existing), Some(incoming)) => incoming >= existing,
         }
     }
+
+    fn store_dart_live_diagnostics(
+        &mut self,
+        path: &Path,
+        version: i32,
+        items: Arc<[Diagnostic]>,
+        root: Option<&crate::platform::PathKey>,
+    ) {
+        if let Some(root) = root {
+            self.dart.insert_live_diagnostics(
+                path.to_path_buf(),
+                rooted_language::LiveDiagnostics {
+                    version,
+                    root: root.clone(),
+                    items,
+                },
+            );
+        }
+    }
+
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
@@ -178,9 +198,9 @@ impl LspManager {
                                 .get(path)
                                 .map(|(version, _)| *version)
                         } else if is_dart {
-                            self.dart_live_diagnostics
+                            self.dart.live_diagnostics()
                                 .get(path)
-                                .map(|(version, _)| *version)
+                                .map(|diagnostics| diagnostics.version)
                         } else {
                             self.instant_diagnostics
                                 .get(path)
@@ -188,12 +208,17 @@ impl LspManager {
                         };
                         let path_key = crate::platform::PathKey::new(path);
                         let is_open_file = if is_dart {
-                            self.open_dart_files.contains_key(&path_key)
+                            self.dart.open_files().contains_key(&path_key)
                         } else {
                             self.open_python_files.contains_key(&path_key)
                         };
                         let current_dart_version =
                             is_dart.then(|| self.dart_document_version(path)).flatten();
+                        let diagnostic_root = if is_dart {
+                            self.dart.root_for_open_path(path).map(crate::platform::PathKey::new)
+                        } else {
+                            None
+                        };
                         let version_is_current = if is_dart {
                             is_open_file
                                 && current_dart_version.is_some_and(|current| {
@@ -234,8 +259,12 @@ impl LspManager {
                                     .insert(path.clone(), (stored_version, items));
                             } else if is_dart {
                                 let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                                self.dart_live_diagnostics
-                                    .insert(path.clone(), (stored_version, items));
+                                self.store_dart_live_diagnostics(
+                                    path,
+                                    stored_version,
+                                    items,
+                                    diagnostic_root.as_ref(),
+                                );
                             } else {
                                 let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
                                 self.instant_diagnostics
@@ -252,10 +281,7 @@ impl LspManager {
                 }
                 LspEvent::StatusChanged { server, status } => {
                     if *server == LspServerKind::Dart {
-                        self.dart_status = status.clone();
-                        if *status == LspServerStatus::Running {
-                            self.dart_unavailable = false;
-                        } else if *status == LspServerStatus::Missing {
+                        if *status == LspServerStatus::Missing {
                             self.mark_dart_missing();
                         }
                         continue;
@@ -394,7 +420,7 @@ impl LspManager {
         self.instant_diagnostics.remove(&abs_path);
         self.ruff_workspace_diagnostics.remove(&abs_path);
         self.ty_instant_diagnostics.remove(&abs_path);
-        self.dart_live_diagnostics.remove(&abs_path);
+        self.dart.remove_live_diagnostics(&abs_path);
         self.dart_workspace_diagnostics.remove(&abs_path);
         self.ty_diag_result_ids.remove(&abs_path);
         self.prune_diag_text_pool();
@@ -465,9 +491,9 @@ impl LspManager {
 
     fn dart_workspace_diagnostics_for_abs_path(&self, path: &Path) -> Option<&Arc<[Diagnostic]>> {
         if self
-            .open_dart_files
+            .dart.open_files()
             .contains_key(&crate::platform::PathKey::new(path))
-            || self.dart_live_diagnostics.contains_key(path)
+            || self.dart.live_diagnostics().contains_key(path)
         {
             return None;
         }
@@ -489,8 +515,8 @@ impl LspManager {
             .ty_instant_diagnostics
             .get(path)
             .map_or(&[][..], |(_, diagnostics)| diagnostics.as_ref());
-        let dart = match self.dart_live_diagnostics.get(path) {
-            Some((_, diagnostics)) => diagnostics.as_ref(),
+        let dart = match self.dart.live_diagnostics().get(path) {
+            Some(diagnostics) => diagnostics.items.as_ref(),
             None => self
                 .dart_workspace_diagnostics_for_abs_path(path)
                 .map_or(&[][..], |diagnostics| diagnostics.as_ref()),
@@ -601,8 +627,8 @@ impl LspManager {
             .ty_instant_diagnostics
             .get(path)
             .map(|(_, diagnostics)| diagnostics);
-        let dart = match self.dart_live_diagnostics.get(path) {
-            Some((_, diagnostics)) => Some(diagnostics),
+        let dart = match self.dart.live_diagnostics().get(path) {
+            Some(diagnostics) => Some(&diagnostics.items),
             None => self.dart_workspace_diagnostics_for_abs_path(path),
         };
         let legacy = if ruff.is_none_or(|diagnostics| diagnostics.is_empty())
@@ -650,7 +676,7 @@ impl LspManager {
             .chain(self.instant_diagnostics.keys())
             .chain(self.ruff_workspace_diagnostics.keys())
             .chain(self.ty_instant_diagnostics.keys())
-            .chain(self.dart_live_diagnostics.keys())
+            .chain(self.dart.live_diagnostics().keys())
             .chain(self.dart_workspace_diagnostics.keys())
             .collect();
         paths.sort_unstable();
@@ -710,7 +736,7 @@ impl LspManager {
             .chain(self.instant_diagnostics.keys())
             .chain(self.ruff_workspace_diagnostics.keys())
             .chain(self.ty_instant_diagnostics.keys())
-            .chain(self.dart_live_diagnostics.keys())
+            .chain(self.dart.live_diagnostics().keys())
             .chain(self.dart_workspace_diagnostics.keys())
         {
             if crate::platform::path_is_within(diagnostic_path, &abs_path)
@@ -741,7 +767,7 @@ impl LspManager {
             None
         };
         let ty = self.ty_instant_diagnostics.get(path);
-        let dart = self.dart_live_diagnostics.get(path);
+        let dart = self.dart.live_diagnostics().get(path);
         let dart_workspace = if dart.is_none() {
             self.dart_workspace_diagnostics_for_abs_path(path)
         } else {
@@ -750,7 +776,7 @@ impl LspManager {
         let count = ruff.map_or(0, |(_, diags)| diags.len())
             + ruff_workspace.map_or(0, |diags| diags.len())
             + ty.map_or(0, |(_, diags)| diags.len())
-            + dart.map_or(0, |(_, diags)| diags.len())
+            + dart.map_or(0, |diagnostics| diagnostics.items.len())
             + dart_workspace.map_or(0, |diags| diags.len());
         if count == 0 {
             return (0, Vec::new());
@@ -769,9 +795,9 @@ impl LspManager {
             max_v = max_v.max(*version);
             merged.extend(diagnostics.iter());
         }
-        if let Some((version, diagnostics)) = dart {
-            max_v = max_v.max(*version);
-            merged.extend(diagnostics.iter());
+        if let Some(diagnostics) = dart {
+            max_v = max_v.max(diagnostics.version);
+            merged.extend(diagnostics.items.iter());
         }
         if let Some(diagnostics) = dart_workspace {
             merged.extend(diagnostics.iter());
@@ -800,7 +826,8 @@ impl LspManager {
             };
             is_stale(&self.instant_diagnostics)
                 || is_stale(&self.ty_instant_diagnostics)
-                || is_stale(&self.dart_live_diagnostics)
+                || self.dart.live_diagnostics().get(path)
+                    .is_some_and(|diagnostics| (diagnostics.version as u64) < editor_version)
         } else if let Some(ws) = self.workspaces.first() {
             let abs_path = ws.join(path);
             let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
@@ -810,7 +837,8 @@ impl LspManager {
             };
             is_stale(&self.instant_diagnostics)
                 || is_stale(&self.ty_instant_diagnostics)
-                || is_stale(&self.dart_live_diagnostics)
+                || self.dart.live_diagnostics().get(abs_path.as_path())
+                    .is_some_and(|diagnostics| (diagnostics.version as u64) < editor_version)
         } else {
             let abs_path = self.relative_lookup_path(path);
             let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
@@ -820,7 +848,8 @@ impl LspManager {
             };
             is_stale(&self.instant_diagnostics)
                 || is_stale(&self.ty_instant_diagnostics)
-                || is_stale(&self.dart_live_diagnostics)
+                || self.dart.live_diagnostics().get(abs_path.as_path())
+                    .is_some_and(|diagnostics| (diagnostics.version as u64) < editor_version)
         }
     }
     /// Диагностики для текущего файла, отфильтрованные по строке

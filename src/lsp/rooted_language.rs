@@ -121,6 +121,7 @@ impl RootedWorkspaces {
     }
 
     pub fn status(&self) -> LspServerStatus { self.status }
+    pub fn status_ref(&self) -> &LspServerStatus { &self.status }
     pub fn health(&self) -> Option<ServerHealth> { self.health }
     pub fn busy(&self) -> bool { self.busy }
     pub fn enabled(&self) -> bool { self.enabled }
@@ -129,6 +130,14 @@ impl RootedWorkspaces {
     pub fn open_files(&self) -> &HashMap<PathKey, OpenRootedFile> { &self.open_files }
     pub fn roots(&self) -> &HashMap<PathKey, RootedWorkspaceState> { &self.roots }
     pub fn live_diagnostics(&self) -> &HashMap<PathBuf, LiveDiagnostics> { &self.live_diagnostics }
+    pub fn root_for_open_path(&self, path: &Path) -> Option<&Path> {
+        self.open_files.get(&PathKey::new(path)).map(|file| file.root.as_path())
+    }
+
+    pub fn clear_missing(&mut self) {
+        self.missing = false;
+        self.recompute_status(false);
+    }
 
     pub fn open_document(
         &mut self,
@@ -225,11 +234,13 @@ impl RootedWorkspaces {
         self.recompute_status(false);
     }
 
-    pub fn mark_missing(&mut self) {
+    pub fn mark_missing(&mut self) -> bool {
         self.missing = true;
         let keys = self.roots.keys().cloned().collect::<Vec<_>>();
-        for key in keys { self.stop_root(&key); }
+        let mut diagnostics_changed = false;
+        for key in keys { diagnostics_changed |= self.stop_root(&key); }
         self.recompute_status(false);
+        diagnostics_changed
     }
 
     pub fn reconfigure(&mut self, workspaces: &[PathBuf]) {
@@ -325,6 +336,15 @@ impl RootedWorkspaces {
 
     pub fn remove_live_diagnostics(&mut self, path: &Path) -> bool {
         self.live_diagnostics.remove(path).is_some()
+    }
+
+    pub fn retain_live_diagnostics(&mut self, mut keep: impl FnMut(&Path, &LiveDiagnostics) -> bool) {
+        self.live_diagnostics.retain(|path, diagnostics| keep(path, diagnostics));
+    }
+
+    #[cfg(test)]
+    pub(super) fn insert_root_for_test(&mut self, root: PathBuf, process: Option<LspProcess>) {
+        self.roots.insert(PathKey::new(&root), RootedWorkspaceState { root, process });
     }
 }
 
