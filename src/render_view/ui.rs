@@ -1397,7 +1397,7 @@ impl Renderer {
     }
     /// Рисует весёлый cowsay-экран когда в IDE-режиме нет открытых вкладок.
     /// Сайдбар уже нарисован до вызова, рисуем только зону редактора.
-    pub fn draw_empty_ide(&mut self, panel_left_w: f32) {
+    pub fn draw_empty_ide(&mut self, panel_left_w: f32, open_file_label: &str) {
         let s = self.scale_factor;
         let sb_w = 48.0 * s;
         let editor_x = sb_w + panel_left_w;
@@ -1468,7 +1468,7 @@ impl Renderer {
         }
         let current_art = arts[self.empty_ide_art_idx];
 
-        let hint_lines = ["Ctrl+O  — открыть файл", "Кликни в дереве файлов слева"];
+        let hint_lines = [open_file_label, "Кликни в дереве файлов слева"];
 
         // Измеряем ширину для центрирования
         let mono_scale = 0.95_f32;

@@ -189,13 +189,14 @@ impl Renderer {
         modal_overlay_open: bool,
         s: f32,
         blank_editor_area: bool,
+        empty_ide_open_label: &str,
     ) -> (bool, Vec<(usize, usize)>) {
         if blank_editor_area {
             // `--ide` startup, before the active tab's first highlight: theme background
             // only (no tab bar, no editor content, no cowsay).
             self.draw_blank_editor_area(panel_left_w);
         } else {
-            self.draw_empty_ide(panel_left_w);
+            self.draw_empty_ide(panel_left_w, empty_ide_open_label);
         }
 
         let (ui_mx, ui_my) = if modal_overlay_open {

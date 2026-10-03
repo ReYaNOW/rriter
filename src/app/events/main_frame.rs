@@ -188,6 +188,7 @@ impl App {
                     &self.pdf_engine,
                     self.pdf_dark_pages,
                     &self.markdown_media,
+                    &self.empty_ide_open_label,
                 );
 
                 self.target_sticky_lines = target_sticky;

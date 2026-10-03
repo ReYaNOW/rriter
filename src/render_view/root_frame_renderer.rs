@@ -168,6 +168,7 @@ impl Renderer {
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
         markdown_media: &crate::markdown_media::MarkdownMedia,
+        empty_ide_open_label: &str,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
@@ -373,6 +374,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 true,
+                empty_ide_open_label,
             );
         }
         if is_ide_mode && tabs.is_empty() {
@@ -391,6 +393,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 false,
+                empty_ide_open_label,
             );
         } else {
             self.was_empty_ide = false;

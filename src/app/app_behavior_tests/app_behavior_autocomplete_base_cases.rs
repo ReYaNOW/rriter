@@ -70,6 +70,8 @@ pub(crate) fn test_app() -> Option<App> {
     Some(App {
         keymap: crate::keymap::Keymap::build(&crate::keymap::KeymapOverrides::default()),
         keymap_overrides: crate::keymap::KeymapOverrides::default(),
+        empty_ide_open_label: "Ctrl+O  — открыть файл".into(),
+        project_search_run_label: "Literal-only. Ctrl+Enter или кнопка запуска.".into(),
         automation: None,
         database_runtime: None,
         scroll_render_bench: None,

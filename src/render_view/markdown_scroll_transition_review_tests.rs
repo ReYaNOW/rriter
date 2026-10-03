@@ -589,6 +589,7 @@ pub(crate) mod reviewer_stage2_integration {
             &app.pdf_engine,
             app.pdf_dark_pages,
             &app.markdown_media,
+            &app.empty_ide_open_label,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;
