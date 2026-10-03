@@ -39,7 +39,7 @@ pub const COMMANDS: &[CommandInfo] = &[
     CommandInfo { command: Command::DatabaseQueryRun, id: "database.query.run", label: "Выполнить SQL-запрос", context: KeyContext::DatabaseQuery, defaults: &["mod+enter", "mod+numpadenter"] },
     CommandInfo { command: Command::DatabaseQueryComplete, id: "database.query.complete", label: "Дополнение SQL", context: KeyContext::DatabaseQuery, defaults: &["mod+space"] },
     CommandInfo { command: Command::MarkdownToggleToc, id: "markdown.toggle_toc", label: "Оглавление Markdown", context: KeyContext::Markdown, defaults: &["mod+shift+o"] },
-    CommandInfo { command: Command::FileOpen, id: "file.open", label: "Открыть файл", context: KeyContext::Editor, defaults: &["mod+o"] },
+    CommandInfo { command: Command::FileOpen, id: "file.open", label: "Открыть файл", context: KeyContext::Editor, defaults: &["mod+o", "mod+shift+o"] },
     CommandInfo { command: Command::AppQuit, id: "app.quit", label: "Выйти из RRiter", context: KeyContext::Welcome, defaults: &["mod+q"] },
     CommandInfo { command: Command::TabsCloseAll, id: "tabs.close_all", label: "Закрыть все вкладки / документ", context: KeyContext::Editor, defaults: &["mod+q"] },
     CommandInfo { command: Command::SearchEditorOpen, id: "search.editor.open", label: "Найти в файле", context: KeyContext::Editor, defaults: &["mod+f"] },

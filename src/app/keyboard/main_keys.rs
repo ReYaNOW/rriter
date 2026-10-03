@@ -878,7 +878,7 @@ impl App {
             {
                 self.handle_terminal_keyboard_input(key_event);
             } else {
-                self.handle_editor_keyboard_input(event_loop, key_event);
+                self.handle_editor_keyboard_input(event_loop, key_event, chord);
             }
         }
     }
@@ -1382,7 +1382,7 @@ mod tests {
             "self.handle_terminal_search_keyboard_input(key_event);",
             "self.handle_search_keyboard_input(key_event);",
             "self.handle_terminal_keyboard_input(key_event);",
-            "self.handle_editor_keyboard_input(event_loop, key_event);",
+            "self.handle_editor_keyboard_input(event_loop, key_event, chord);",
         ] {
             let routed_field = source
                 .find(marker)
@@ -1400,7 +1400,7 @@ mod tests {
             .find("self.handle_terminal_keyboard_input(key_event);")
             .expect("terminal keyboard owner");
         let editor_route = source
-            .find("self.handle_editor_keyboard_input(event_loop, key_event);")
+            .find("self.handle_editor_keyboard_input(event_loop, key_event, chord);")
             .expect("editor keyboard route");
         assert!(api_route < editor_route);
         assert!(terminal_route < editor_route);

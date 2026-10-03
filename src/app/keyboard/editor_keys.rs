@@ -83,12 +83,25 @@ fn key_text_for_editor_insert<'a>(
 /// Keys a PDF tab still lets into the editor key match: exactly its application-level arms
 /// (settings F1, close-all Ctrl+Q, find Ctrl+F, open file Ctrl+O, close tab Ctrl+4, Escape
 /// closing the search panel). Every other arm there edits or moves the hidden text.
-fn pdf_tab_key_reaches_editor(physical_key: PhysicalKey, primary: bool) -> bool {
-    match physical_key {
-        PhysicalKey::Code(KeyCode::F1 | KeyCode::Escape) => true,
-        PhysicalKey::Code(KeyCode::KeyQ | KeyCode::KeyF | KeyCode::KeyO | KeyCode::Digit4) => primary,
-        _ => false,
-    }
+fn pdf_tab_key_reaches_editor(chord: Option<crate::keymap::Chord>, keymap: &crate::keymap::Keymap) -> bool {
+    let Some(chord) = chord else {
+        return false;
+    };
+    let allowed = [
+        crate::keymap::Command::SettingsToggle,
+        crate::keymap::Command::TabsCloseAll,
+        crate::keymap::Command::SearchEditorOpen,
+        crate::keymap::Command::FileOpen,
+        crate::keymap::Command::TabsClose,
+    ];
+    let reserved_escape = chord.key == KeyCode::Escape
+        && crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord);
+    (reserved_escape || allowed.iter().any(|command| keymap.hit(*command, chord)))
+        && !crate::keymap::COMMANDS.iter().any(|info| {
+            info.context == crate::keymap::KeyContext::Editor
+                && !allowed.contains(&info.command)
+                && keymap.hit(info.command, chord)
+        })
 }
 
 fn editor_line_comment_marker(
@@ -97,6 +110,13 @@ fn editor_line_comment_marker(
     primary: bool,
 ) -> Option<&'static str> {
     if !primary || physical_key != PhysicalKey::Code(KeyCode::Slash) {
+        return None;
+    }
+    editor_line_comment_marker_for_binding(file_extension, true)
+}
+
+fn editor_line_comment_marker_for_binding(file_extension: &str, bound: bool) -> Option<&'static str> {
+    if !bound {
         return None;
     }
     let lang_id = crate::highlighter::tree_sitter_lang_name_for_ext(file_extension);
@@ -157,6 +177,39 @@ fn markdown_editor_key_action(
     alt: bool,
     has_text_insert: bool,
 ) -> Option<MarkdownEditorKeyAction> {
+    let primary_copy = primary && physical_key == PhysicalKey::Code(KeyCode::KeyC);
+    let primary_cut = primary && physical_key == PhysicalKey::Code(KeyCode::KeyX);
+    let primary_paste = primary && physical_key == PhysicalKey::Code(KeyCode::KeyV);
+    let primary_undo = primary && physical_key == PhysicalKey::Code(KeyCode::KeyZ);
+    let primary_redo = primary && physical_key == PhysicalKey::Code(KeyCode::KeyY);
+    markdown_editor_key_action_with_commands(
+        markdown_document,
+        read_mode,
+        physical_key,
+        primary,
+        alt,
+        has_text_insert,
+        primary_copy,
+        primary_cut,
+        primary_paste,
+        primary_undo,
+        primary_redo,
+    )
+}
+
+fn markdown_editor_key_action_with_commands(
+    markdown_document: bool,
+    read_mode: bool,
+    physical_key: PhysicalKey,
+    primary: bool,
+    alt: bool,
+    has_text_insert: bool,
+    copy_bound: bool,
+    cut_bound: bool,
+    paste_bound: bool,
+    undo_bound: bool,
+    redo_bound: bool,
+) -> Option<MarkdownEditorKeyAction> {
     if !markdown_document || !read_mode {
         return None;
     }
@@ -173,18 +226,14 @@ fn markdown_editor_key_action(
                     | KeyCode::Delete
             )
         )
-        || (primary
-            && matches!(
-                physical_key,
-                PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)
-            ))
+        || cut_bound || paste_bound || undo_bound || redo_bound
         || (alt && matches!(physical_key, PhysicalKey::Code(KeyCode::Enter)))
     {
         return Some(MarkdownEditorKeyAction::ReadonlyNotice);
     }
 
     match physical_key {
-        PhysicalKey::Code(KeyCode::KeyC) if primary => Some(MarkdownEditorKeyAction::CopySelection),
+        _ if copy_bound => Some(MarkdownEditorKeyAction::CopySelection),
         PhysicalKey::Code(KeyCode::ArrowUp) => Some(MarkdownEditorKeyAction::ScrollLines(-1)),
         PhysicalKey::Code(KeyCode::ArrowDown) => Some(MarkdownEditorKeyAction::ScrollLines(1)),
         PhysicalKey::Code(KeyCode::PageUp) => Some(MarkdownEditorKeyAction::ScrollPages(-1)),
@@ -431,16 +480,14 @@ impl App {
         &mut self,
         event_loop: &HostLoop,
         key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
 
-        if key_event.state == ElementState::Pressed
-            && ctrl
-            && shift
-            && physical_key == PhysicalKey::Code(KeyCode::KeyO)
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::MarkdownToggleToc, chord))
             && self.active_document_is_markdown()
         {
             self.toggle_markdown_toc();
@@ -449,10 +496,10 @@ impl App {
 
         if self.show_welcome {
             match physical_key {
-                PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
+                _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::FileOpen, chord)) => {
                     self.trigger_file_picker();
                 }
-                PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+                _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::AppQuit, chord)) => {
                     let w = self.window.as_ref().unwrap();
                     let maximized = w.is_maximized();
                     let (width, height) = if maximized {
@@ -491,7 +538,7 @@ impl App {
         // select, clipboard, undo, save: Ctrl+S would overwrite the .pdf with the empty text).
         // Global shortcuts (tab switching, panels, project search, F8) are handled before this point.
         if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf() || tab.kind.is_image())
-            && !pdf_tab_key_reaches_editor(physical_key, ctrl)
+            && !pdf_tab_key_reaches_editor(chord, &self.keymap)
         {
             return;
         }
@@ -511,16 +558,21 @@ impl App {
                     && crate::platform::text_input_modifiers_allowed(self.modifiers))
                 || (!ctrl && !self.modifiers.alt_key()
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter)))
-                || (ctrl
-                    && !self.modifiers.alt_key()
-                    && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)))
+                || chord.is_some_and(|chord| {
+                    !self.modifiers.alt_key()
+                        && (self.keymap.hit(crate::keymap::Command::EditPaste, chord)
+                            || self.keymap.hit(crate::keymap::Command::EditorUndo, chord)
+                            || self.keymap.hit(crate::keymap::Command::EditorRedo, chord))
+                })
                 || (plain_navigation
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
                     && (!ctrl || word))
                 || (plain_navigation
                     && !ctrl
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::Home | KeyCode::End)));
-            if physical_key == PhysicalKey::Code(KeyCode::Escape) {
+            if physical_key == PhysicalKey::Code(KeyCode::Escape)
+                && chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord))
+            {
                 self.editor.clear_extra_cursors();
                 self.close_autocomplete();
                 if let Some(window) = self.window.as_ref() {
@@ -536,13 +588,18 @@ impl App {
         if multi_cursor_active {
             self.close_autocomplete();
         }
-        let markdown_action = markdown_editor_key_action(
+        let markdown_action = markdown_editor_key_action_with_commands(
             self.active_document_is_markdown(),
             self.markdown_mode() == crate::app::MarkdownMode::Read,
             physical_key,
             ctrl,
             self.modifiers.alt_key(),
             has_text_insert,
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCopy, chord)),
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCut, chord)),
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditPaste, chord)),
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorUndo, chord)),
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorRedo, chord)),
         );
         if let Some(action) = markdown_action {
             match action {
@@ -624,12 +681,9 @@ impl App {
             return;
         }
 
-        // Alt+Enter — меню быстрых действий LSP
-        if self.modifiers.alt_key() {
-            if let PhysicalKey::Code(KeyCode::Enter) = physical_key {
-                self.open_lsp_actions_menu();
-                return;
-            }
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::LspCodeActions, chord)) {
+            self.open_lsp_actions_menu();
+            return;
         }
 
         // Навигация в открытом меню LSP
@@ -675,8 +729,10 @@ impl App {
         let mut ty_completion_trigger: Option<&'static str> = None;
         let mut force_close_autocomplete = false;
         let is_git_diff_tab = self.active_tab_is_git_diff();
-        let line_comment_marker =
-            editor_line_comment_marker(&self.file_extension, physical_key, ctrl);
+        let line_comment_marker = chord
+            .is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorToggleLineComment, chord))
+            .then(|| editor_line_comment_marker_for_binding(&self.file_extension, true))
+            .flatten();
 
         if is_git_diff_tab {
             let text_insert = crate::platform::text_input_modifiers_allowed(self.modifiers)
@@ -697,11 +753,10 @@ impl App {
                         | KeyCode::Backspace
                         | KeyCode::Delete
                 )
-            ) || (ctrl
-                && matches!(
-                    physical_key,
-                    PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV)
-                ))
+            ) || chord.is_some_and(|chord| {
+                self.keymap.hit(crate::keymap::Command::EditCut, chord)
+                    || self.keymap.hit(crate::keymap::Command::EditPaste, chord)
+            })
                 || line_comment_marker.is_some();
             if text_insert || edit_key {
                 self.show_readonly_notice();
@@ -717,7 +772,7 @@ impl App {
             .1;
 
         match physical_key {
-            PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsCloseAll, chord)) => {
                 if self.is_ide_mode {
                     if self.has_unsaved_changes() {
                         self.show_action_dialog(event_loop, PendingAction::CloseAllTabs);
@@ -733,12 +788,12 @@ impl App {
                 }
                 return;
             }
-            PhysicalKey::Code(KeyCode::F1) => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SettingsToggle, chord)) => {
                 self.set_settings_visible(!self.show_settings);
                 self.is_dragging = false;
                 return;
             }
-            PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchEditorOpen, chord)) => {
                 self.show_search = true;
                 self.search_focused = true;
                 self.search_editor.select_all();
@@ -749,7 +804,7 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
-            PhysicalKey::Code(KeyCode::KeyW) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorExpandSelection, chord)) => {
                 let text = self.editor.get_full_text();
                 if let Some((start, end)) = crate::highlighter::ast_select_expand_range(
                     &text,
@@ -765,7 +820,9 @@ impl App {
                 self.close_autocomplete();
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Escape) => {
+            PhysicalKey::Code(KeyCode::Escape)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if self.show_search {
                     self.show_search = false;
                     self.search_focused = false;
@@ -775,7 +832,7 @@ impl App {
                     return;
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyS) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::FileSave, chord)) => {
                 if self.save_current_file() {
                     App::update_window_title(
                         self.window.as_ref().unwrap(),
@@ -784,14 +841,15 @@ impl App {
                     );
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyO) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::FileOpen, chord)) =>
+            {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::OpenFile);
                 } else {
                     self.trigger_file_picker();
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorUndo, chord)) => {
                 if let Some(delta) = self.editor.undo() {
                     if !is_git_diff_tab && !multi_cursor_active {
                         match delta {
@@ -820,7 +878,7 @@ impl App {
                     is_edit = true;
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyY) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorRedo, chord)) => {
                 if let Some(delta) = self.editor.redo() {
                     if !is_git_diff_tab && !multi_cursor_active {
                         match delta {
@@ -849,7 +907,9 @@ impl App {
                     is_edit = true;
                 }
             }
-            PhysicalKey::Code(KeyCode::ArrowLeft) => {
+            PhysicalKey::Code(KeyCode::ArrowLeft)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if word {
                     if multi_cursor_active {
                         self.editor.move_all_cursors(|editor| editor.move_word_left(false));
@@ -865,7 +925,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::ArrowRight) => {
+            PhysicalKey::Code(KeyCode::ArrowRight)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if word {
                     if multi_cursor_active {
                         self.editor.move_all_cursors(|editor| editor.move_word_right(false));
@@ -881,7 +943,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::ArrowUp) => {
+            PhysicalKey::Code(KeyCode::ArrowUp)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
@@ -892,7 +956,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::ArrowDown) => {
+            PhysicalKey::Code(KeyCode::ArrowDown)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
@@ -903,7 +969,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Home) => {
+            PhysicalKey::Code(KeyCode::Home)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if multi_cursor_active {
                     self.editor.move_all_cursors(|editor| editor.move_home(false));
                 } else if ctrl {
@@ -913,7 +981,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::End) => {
+            PhysicalKey::Code(KeyCode::End)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if multi_cursor_active {
                     self.editor.move_all_cursors(|editor| editor.move_end(false));
                 } else if ctrl {
@@ -923,21 +993,27 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::PageUp) => {
+            PhysicalKey::Code(KeyCode::PageUp)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let step = self.window.as_ref().unwrap().inner_size().height as f32 * 0.8;
                 self.scroll_y.scroll_by(-step);
                 self.editor
                     .move_page_up(self.renderer.as_mut().unwrap(), shift, step);
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::PageDown) => {
+            PhysicalKey::Code(KeyCode::PageDown)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let step = self.window.as_ref().unwrap().inner_size().height as f32 * 0.8;
                 self.scroll_y.scroll_by(step);
                 self.editor
                     .move_page_down(self.renderer.as_mut().unwrap(), shift, step);
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Backspace) if word => {
+            PhysicalKey::Code(KeyCode::Backspace)
+                if word && chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let before_cursor = self.editor.cursor;
                 let before_lines = self.editor.line_offsets.clone();
                 if let Some((offset, len)) = self.editor.delete_word_backward() {
@@ -958,7 +1034,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Delete) if word => {
+            PhysicalKey::Code(KeyCode::Delete)
+                if word && chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if let Some((offset, len)) = self.editor.delete_word_forward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
@@ -971,7 +1049,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Backspace) => {
+            PhysicalKey::Code(KeyCode::Backspace)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let before_sync_edits = self.editor.sync_edits.len();
                 let before_cursor = self.editor.cursor;
                 let before_lines = self.editor.line_offsets.clone();
@@ -1001,7 +1081,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Delete) => {
+            PhysicalKey::Code(KeyCode::Delete)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if multi_cursor_active {
                     let before_sync_edits = self.editor.sync_edits.len();
                     self.editor.apply_at_all_cursors(|editor| {
@@ -1021,7 +1103,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Enter) => {
+            PhysicalKey::Code(KeyCode::Enter)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if multi_cursor_active {
                     self.editor.apply_at_all_cursors(|editor| {
                         let insert_text = format!("\n{}", editor.get_auto_indent());
@@ -1045,7 +1129,9 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Tab) => {
+            PhysicalKey::Code(KeyCode::Tab)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 let (del_info, ins_len) = self.editor.insert_str("    ");
                 if let Some((offset, len)) = del_info {
                     self.highlighter.shift_delete(offset, len);
@@ -1055,7 +1141,7 @@ impl App {
                 cursor_moved = true;
                 is_edit = true;
             }
-            PhysicalKey::Code(KeyCode::Slash) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorToggleLineComment, chord)) => {
                 if let Some(marker) = line_comment_marker
                     && toggle_editor_line_comment_and_sync_highlighter(
                         &mut self.editor,
@@ -1068,7 +1154,7 @@ impl App {
                     force_close_autocomplete = true;
                 }
             }
-            PhysicalKey::Code(KeyCode::Space) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorComplete, chord)) => {
                 if self.file_extension == "dart" {
                     self.request_lsp_autocomplete(None);
                 } else {
@@ -1079,7 +1165,9 @@ impl App {
                 }
                 return;
             }
-            PhysicalKey::Code(KeyCode::Space) => {
+            PhysicalKey::Code(KeyCode::Space)
+                if chord.is_some_and(|chord| crate::keymap::is_reserved(crate::platform::CURRENT_PLATFORM, chord)) =>
+            {
                 if multi_cursor_active {
                     self.editor.apply_at_all_cursors(|editor| {
                         editor.insert_str(" ");
@@ -1098,11 +1186,11 @@ impl App {
                 cursor_moved = true;
                 should_notify_lsp = false;
             }
-            PhysicalKey::Code(KeyCode::Digit4) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsClose, chord)) => {
                 self.close_tab_at(self.active_tab);
                 return;
             }
-            PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCopy, chord)) => {
                 let mut copied = false;
                 if !copied && let Some(text) = self.selected_autocomplete_detail_text() {
                     self.set_clipboard_text(text);
@@ -1138,7 +1226,7 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCut, chord)) => {
                 if let Some(text) = self.editor.get_selection() {
                     self.set_clipboard_text(text);
                     if let Some((offset, len)) = self.editor.delete_selection() {
@@ -1148,7 +1236,7 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditPaste, chord)) => {
                 if let Some(text) = self.get_clipboard_text() {
                     if multi_cursor_active {
                         let before_sync_edits = self.editor.sync_edits.len();
@@ -1173,7 +1261,7 @@ impl App {
                     }
                 }
             }
-            PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+            _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditSelectAll, chord)) => {
                 self.editor.select_all();
                 self.close_autocomplete();
             }
@@ -1260,7 +1348,8 @@ impl App {
 
         if is_edit {
             crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
-            let git_diff_undo = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
+            let git_diff_undo = chord
+                .is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorUndo, chord));
             if self.finish_editor_edit_after_input(
                 is_git_diff_tab,
                 git_diff_undo,

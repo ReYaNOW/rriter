@@ -4,6 +4,25 @@ mod tests {
     use crate::app::{AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index};
 
     #[test]
+    fn pdf_editor_filter_uses_commands_and_rejects_editor_conflicts() {
+        let platform = crate::platform::CURRENT_PLATFORM;
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        let save_on_open = crate::keymap::Chord::parse(platform, "mod+o").expect("valid chord");
+        overrides.add_chord(platform, crate::keymap::Command::FileSave, save_on_open);
+        let keymap = crate::keymap::Keymap::build_for(platform, &overrides);
+        assert!(!pdf_tab_key_reaches_editor(Some(save_on_open), &keymap));
+
+        let find_on_g = crate::keymap::Chord::parse(platform, "mod+g").expect("valid chord");
+        overrides.add_chord(platform, crate::keymap::Command::SearchEditorOpen, find_on_g);
+        let keymap = crate::keymap::Keymap::build_for(platform, &overrides);
+        assert!(pdf_tab_key_reaches_editor(Some(find_on_g), &keymap));
+
+        overrides.add_chord(platform, crate::keymap::Command::FileSave, find_on_g);
+        let keymap = crate::keymap::Keymap::build_for(platform, &overrides);
+        assert!(!pdf_tab_key_reaches_editor(Some(find_on_g), &keymap));
+    }
+
+    #[test]
     fn autocomplete_key_action_maps_navigation_and_apply_keys() {
         assert_eq!(
             autocomplete_key_action(PhysicalKey::Code(KeyCode::Escape)),

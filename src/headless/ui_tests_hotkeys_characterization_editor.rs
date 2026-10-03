@@ -59,7 +59,7 @@ fn headless_hotkeys_editor_save_and_history() {
     assert_eq!(dump(&mut session)["tabs"][0]["modified"], true);
 
     run_ok(&mut session, "key ctrl+shift+z\n");
-    assert_eq!(session.app.editor.get_full_text(), original, "Ctrl+Shift+Z currently performs undo");
+    assert_eq!(session.app.editor.get_full_text(), edited, "Ctrl+Shift+Z currently performs redo");
     run_ok(&mut session, "key ctrl+y\n");
     assert_eq!(session.app.editor.get_full_text(), edited);
     run_ok(&mut session, "key ctrl+s\n");
