@@ -2,6 +2,8 @@ mod dart_workspace;
 mod rooted_language;
 mod lsp_manager_rust;
 mod rust_workspace;
+pub use lsp_manager_rust::RustRowInfo;
+pub use rust_workspace::initialization_options as rust_initialization_options;
 mod ruff_workspace;
 
 include!("lsp/lsp_process.rs");

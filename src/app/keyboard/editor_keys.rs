@@ -474,6 +474,7 @@ impl App {
                         ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
                         tool_paths: self.tool_paths.clone(),
                         dart_settings: self.dart_settings.clone(),
+                        rust_settings: self.rust_settings.clone(),
                     });
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);

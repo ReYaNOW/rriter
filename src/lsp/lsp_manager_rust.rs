@@ -6,7 +6,37 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RustRowInfo {
+    pub status: super::LspServerStatus,
+    pub busy: bool,
+    pub health_message: Option<String>,
+    pub cargo_missing: bool,
+    pub component_missing: bool,
+    pub version: Option<String>,
+    pub roots: usize,
+}
+
 impl LspManager {
+    pub fn rust_row_info(&self) -> RustRowInfo {
+        let component_missing = self.rust_roots.values().any(|entry| {
+            matches!(entry, RustRootEntry::Ready(result) if result.executable == Err(RustToolError::ComponentMissing))
+        });
+        let version = self.rust_roots.values().find_map(|entry| match entry {
+            RustRootEntry::Ready(result) => result.version.clone(),
+            RustRootEntry::Pending(_) => None,
+        });
+        RustRowInfo {
+            status: self.rust.status(),
+            busy: self.rust.busy(),
+            health_message: self.rust_last_health_message.clone(),
+            cargo_missing: self.rust_tools.as_ref().is_some_and(|tools| tools.cargo.is_none()),
+            component_missing,
+            version,
+            roots: self.rust_roots.len(),
+        }
+    }
+
     fn current_rust_tools(&mut self) -> &RustTools {
         #[cfg(test)]
         if let Some(tools) = self.rust_tools_override_for_test.as_ref() {

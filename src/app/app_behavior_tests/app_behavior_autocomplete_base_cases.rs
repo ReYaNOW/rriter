@@ -147,6 +147,7 @@ pub(crate) fn test_app() -> Option<App> {
         open_folder_rx: None,
         tool_paths: crate::platform::ToolPaths::default(),
         dart_settings: crate::app::DartSettings::default(),
+        rust_settings: crate::app::RustSettings::default(),
         settings_tool_picker_rx: None,
         tool_installer: crate::app::tool_installer::ToolInstaller::default(),
         dart_tool_state: crate::app::tool_installer::DartToolState::default(),

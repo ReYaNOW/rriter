@@ -445,8 +445,10 @@ impl Renderer {
         tool_paths: &crate::platform::ToolPaths,
         tool_installer: &crate::app::tool_installer::ToolInstaller,
         dart_settings: &crate::app::DartSettings,
+        rust_settings: &crate::app::RustSettings,
         dart_tool_state: &crate::app::tool_installer::DartToolState,
         dart_lsp_status: Option<crate::lsp::LspServerStatus>,
+        rust_row: Option<&crate::lsp::RustRowInfo>,
         database_settings: &crate::app::database::DatabaseSettings,
         ctrl_wheel_multiplier: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
@@ -998,8 +1000,10 @@ impl Renderer {
                 tool_paths,
                 tool_installer,
                 dart_settings,
+                rust_settings,
                 dart_tool_state,
                 dart_lsp_status,
+                rust_row,
                 ui_registry,
             );
         } else if active_tab == 2 {

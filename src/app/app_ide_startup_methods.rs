@@ -590,6 +590,10 @@ impl App {
                 self.ui_waker.clone(),
             );
             lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
+            lsp.set_rust_init_options(crate::lsp::rust_initialization_options(
+                self.rust_settings.check_command.config_value(),
+            ));
+            lsp.set_rust_enabled(self.rust_settings.enabled);
             if !self.dart_settings.enabled {
                 lsp.set_server_enabled("dart", false);
             }
