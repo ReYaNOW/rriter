@@ -1,6 +1,6 @@
 use crate::renderer::Theme;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ThemeId {
     Dracula,
     OneDark,

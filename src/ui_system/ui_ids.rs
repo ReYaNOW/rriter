@@ -20,6 +20,13 @@ pub enum ApiMockContractFieldProp {
     MaxItems,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThemeTarget {
+    Both,
+    Editor,
+    Ui,
+}
+
 /// Уникальный идентификатор UI элемента
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiId {
@@ -36,6 +43,8 @@ pub enum UiId {
 
     // Settings tabs
     SettingsTab(usize),
+    SettingsThemePick(ThemeTarget, crate::theme::ThemeId),
+    SettingsThemeLinked,
     SettingsEditorCtrlWheelAdjust(i8),
     SettingsDatabaseAdjust(usize, i8),
     SettingsKeymapFilter,

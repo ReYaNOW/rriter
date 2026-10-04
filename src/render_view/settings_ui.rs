@@ -431,6 +431,7 @@ impl Renderer {
         &mut self,
         anim_progress: f32,
         active_tab: usize,
+        editor_theme: crate::theme::ThemeId,
         faq_editor: &Editor,
         scroll_y: f32,
         general_scroll_y: f32,
@@ -1034,13 +1035,16 @@ impl Renderer {
                 ui_registry,
             );
         } else if active_tab == 3 {
-            self.draw_string_scaled(
-                "Тема: Dracula (По умолчанию)",
+            self.begin_settings_content_clip(ui_registry, settings_content_clip);
+            super::settings_appearance_ui::draw(
+                self,
                 content_x,
                 content_y,
-                [0.8, 0.8, 0.8, 1.0],
-                1.0,
+                content_available_w,
+                editor_theme,
+                ui_registry,
             );
+            self.end_settings_content_clip(ui_registry);
         } else if active_tab == 4 {
             self.flush();
             let text_area_y = content_y;

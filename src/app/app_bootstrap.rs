@@ -176,8 +176,11 @@ impl App {
             } else {
                 Some(crate::platform::Clipboard::deferred_system())
             },
-            theme: crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, system_selection),
+            theme: crate::renderer::Theme::for_id(config.editor_theme, system_selection),
             system_selection,
+            editor_theme_id: config.editor_theme,
+            ui_theme_id: config.ui_theme,
+            theme_linked: config.theme_linked,
             base_title: title,
             file_path: options.file_path,
             file_key,

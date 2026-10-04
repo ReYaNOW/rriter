@@ -106,6 +106,8 @@ mod ui_tests_scrollbars_panels;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_appearance;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_themes;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_database;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_general;
@@ -396,6 +398,7 @@ impl HeadlessSession {
             &mut app.startup_trace,
         )
         .map_err(|error| egl_failure(format!("Renderer: {error}")))?;
+        renderer.ui = crate::theme::UiPalette::for_id(app.ui_theme_id);
         app.startup_trace.mark("renderer");
         renderer.resize(w, h);
         app.window = Some(Arc::new(WindowHost::Headless(HeadlessWindow::new(

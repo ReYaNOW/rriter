@@ -289,6 +289,8 @@ fn bootstrap(app: &mut App,event_loop: &ActiveEventLoop) -> Result<BootstrappedW
         &mut app.startup_trace,
     )
     .map_err(|error| format!("RRiter renderer initialization failed: {error}"))?;
+    let mut renderer = renderer;
+    renderer.ui = crate::theme::UiPalette::for_id(app.ui_theme_id);
     app.startup_trace.mark("renderer");
     Ok(BootstrappedWindow {
         window: Arc::new(window),
@@ -377,6 +379,9 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
             .load(std::sync::atomic::Ordering::Relaxed),
         pdf_dark_pages: app.pdf_dark_pages,
+        theme_linked: app.theme_linked,
+        editor_theme: app.editor_theme_id,
+        ui_theme: app.ui_theme_id,
         ctrl_wheel_multiplier: app.ctrl_wheel_multiplier,
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),

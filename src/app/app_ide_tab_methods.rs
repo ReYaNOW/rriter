@@ -413,6 +413,9 @@ impl App {
             enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                 .load(std::sync::atomic::Ordering::Relaxed),
             pdf_dark_pages: self.pdf_dark_pages,
+            theme_linked: self.theme_linked,
+            editor_theme: self.editor_theme_id,
+            ui_theme: self.ui_theme_id,
             ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),

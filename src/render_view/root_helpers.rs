@@ -18,6 +18,7 @@ pub mod minimap_ui;
 pub(crate) mod scrollbar_widget;
 pub mod search;
 pub mod settings_ui;
+mod settings_appearance_ui;
 mod settings_tool_rows;
 mod settings_database_ui;
 mod settings_keymap_ui;
