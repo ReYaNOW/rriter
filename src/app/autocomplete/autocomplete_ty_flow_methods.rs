@@ -914,7 +914,10 @@ impl App {
             self.request_ide_autocomplete(AutocompleteMode::TyContext, trigger);
             return;
         }
-        if self.file_extension != "dart" || !self.is_ide_mode || self.show_welcome {
+        if !crate::lsp::has_server_for_extension(&self.file_extension)
+            || !self.is_ide_mode
+            || self.show_welcome
+        {
             return;
         }
         let source = ActiveAutocompleteSource::MainEditor;

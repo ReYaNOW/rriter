@@ -375,7 +375,10 @@ impl App {
         if should_notify_lsp {
             self.last_sent_version = self.editor.version;
         }
-        if should_trigger_autocomplete && self.file_extension == "dart" {
+        if should_trigger_autocomplete
+            && crate::lsp::has_server_for_extension(&self.file_extension)
+            && !matches!(self.file_extension.as_str(), "py" | "pyi")
+        {
             self.request_lsp_autocomplete(ty_completion_trigger);
         }
 
@@ -1166,7 +1169,9 @@ impl App {
                 }
             }
             _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorComplete, chord)) => {
-                if self.file_extension == "dart" {
+                if crate::lsp::has_server_for_extension(&self.file_extension)
+                    && !matches!(self.file_extension.as_str(), "py" | "pyi")
+                {
                     self.request_lsp_autocomplete(None);
                 } else {
                     self.update_autocomplete();
@@ -1334,7 +1339,11 @@ impl App {
                         if txt == "." && !multi_cursor_active {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
-                        } else if !multi_cursor_active && self.file_extension == "dart" && matches!(txt, "(" | ",") {
+                        } else if !multi_cursor_active
+                            && crate::lsp::has_server_for_extension(&self.file_extension)
+                            && !matches!(self.file_extension.as_str(), "py" | "pyi")
+                            && matches!(txt, "(" | ",")
+                        {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(if txt == "(" { "(" } else { "," });
                         } else if !multi_cursor_active && txt.chars().all(|c| c.is_alphanumeric() || c == '_') {

@@ -307,7 +307,6 @@ fn headless_rust_completion_lists_and_inserts_rust_server_item() {
 }
 
 #[test]
-#[ignore = "bug: Ctrl-hover definition routing excludes Rust files"]
 fn headless_rust_goto_definition_opens_server_target_in_same_root() {
     let (dir, file, mut session) = rust_crate_session("rust-definition-request");
     let source = "fn main() {\n    rust_definition_target();\n}\n";
@@ -337,5 +336,23 @@ fn headless_rust_goto_definition_opens_server_target_in_same_root() {
     let state = dump(&mut session);
     assert_eq!(state["tabs"][1]["path"], target.display().to_string());
     assert_eq!(state["tabs"][1]["cursor"]["line"], 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_rust_signature_help_uses_rust_server_parameters() {
+    let (dir, file, mut session) = rust_crate_session("rust-signature-help");
+    let source = "fn main() {\n    rust_signature_target\n}\n";
+    std::fs::write(&file, source).expect("write Rust signature fixture");
+    let executable = install_rust_fake(&mut session, "rust-signature-help", "rust_ide_requests");
+    open_file(&mut session, &file);
+    wait_until(&mut session, 8000, "Rust signature server", |session| {
+        rust_status(session) == Some(LspServerStatus::Running)
+    });
+    assert_ok(run_script(&mut session, b"key ctrl+end\ntype (\n"));
+    wait_until(&mut session, 5000, "Rust signature parameter completion", |session| {
+        session.app.autocomplete_options.iter().any(|(item, _)| item.word == "value")
+    });
+    assert_request_for_root(&executable, "textDocument/signatureHelp", &dir, &file);
     let _ = std::fs::remove_dir_all(dir);
 }

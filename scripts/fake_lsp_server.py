@@ -143,6 +143,7 @@ def main() -> None:
                         "capabilities": {
                             "hoverProvider": True,
                             "inlayHintProvider": True,
+                            "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                         }
                     },
                 }
@@ -189,6 +190,19 @@ def main() -> None:
                             "start": {"line": 0, "character": 7},
                             "end": {"line": 0, "character": 29},
                         },
+                    },
+                })
+            elif method == "textDocument/signatureHelp":
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "signatures": [{
+                            "label": "rust_signature_target(value: i32)",
+                            "parameters": [{"label": "value", "documentation": "Input value"}],
+                        }],
+                        "activeSignature": 0,
+                        "activeParameter": 0,
                     },
                 })
         elif method == "textDocument/hover":

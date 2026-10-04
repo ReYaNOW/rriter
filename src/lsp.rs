@@ -25,6 +25,10 @@ pub(crate) fn server_names_for_extension(extension: &str) -> &'static [&'static 
     }
 }
 
+pub(crate) fn has_server_for_extension(extension: &str) -> bool {
+    !server_names_for_extension(extension).is_empty()
+}
+
 #[cfg(test)]
 mod restart_server_keymap_tests {
     use super::*;

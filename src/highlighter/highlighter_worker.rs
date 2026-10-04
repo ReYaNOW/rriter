@@ -1295,7 +1295,10 @@ impl Highlighter {
     }
 
     pub fn lsp_signature_help_allowed_at_cursor(&self, ext: &str, cursor: usize) -> bool {
-        if ext != "dart" || self.sync_ext != ext || self.sync_text.is_empty() {
+        if !crate::lsp::has_server_for_extension(ext)
+            || self.sync_ext != ext
+            || self.sync_text.is_empty()
+        {
             return false;
         }
         let Some(tree) = self.sync_tree.as_ref() else {
