@@ -15,7 +15,14 @@ mod editor_keys;
 mod key_input;
 mod main_keys;
 mod commands;
+mod key_routes;
 pub(crate) mod input_owner;
+#[cfg(test)]
+mod key_route_char_a;
+#[cfg(test)]
+mod key_route_char_b;
+#[cfg(test)]
+mod key_route_char_c;
 pub(crate) use editor_keys::paired_editor_insert_text;
 pub(crate) use key_input::{KeyComboHold, KeyInput};
 
