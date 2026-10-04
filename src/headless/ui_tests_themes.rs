@@ -60,9 +60,12 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     );
     let closed_settings = run_script(&mut session, b"key escape\n");
     assert!(closed_settings.iter().all(|line| line == "ok"), "{closed_settings:?}");
-    let switched = run_script(&mut session, b"key ctrl+tab\n");
-    assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
-    assert_eq!(session.app.active_tab, 0);
+    // The slide-out keeps dimming the editor until the animation reaches 0.
+    wait_until(&mut session, 5000, "Settings overlay closed", |session| {
+        dump(session)["overlays"]["settings"] == false && session.app.settings_anim_progress <= 0.0
+    });
+    // No default binding for ctrl+tab (tabs switch on mod+pagedown), so click the tab itself.
+    switch_to_tab(&mut session, 0);
     assert!(session.app.highlighter.spans
         .iter()
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
@@ -73,9 +76,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
             .color(crate::theme::SyntaxRole::KeywordControl),
     );
 
-    let switched = run_script(&mut session, b"key ctrl+tab\n");
-    assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
-    assert_eq!(session.app.active_tab, 1);
+    switch_to_tab(&mut session, 1);
     assert!(session.app.highlighter.spans
         .iter()
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
@@ -99,6 +100,13 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     let session = session_for_test(1280, 800);
     assert_eq!(session.app.editor_theme_id, ThemeId::Sepia);
     assert_eq!(session.app.ui_theme_id, ThemeId::OneDark);
+}
+
+fn switch_to_tab(session: &mut crate::headless::HeadlessSession, tab: usize) {
+    click_ui(session, &format!("EditorTab({tab})"));
+    wait_until(session, 5000, "switched tab highlight", |session| {
+        session.app.active_tab == tab && session.app.is_highlight_complete
+    });
 }
 
 fn assert_keyword_pixel(
