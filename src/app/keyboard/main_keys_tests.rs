@@ -792,5 +792,7 @@
         assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::LspLogFilter), "Markdown toggle precedes LSP filter input");
         assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::GitMessage), "Markdown toggle precedes Git message input");
         assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::ApiClient), "Markdown toggle precedes API Client input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::TerminalGate), "Markdown toggle precedes the terminal gate");
+        assert!(route_position(RouteId::ApiClient) < route_position(RouteId::TerminalGate), "API Client input precedes the terminal gate");
         assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::FinalRoute), "Markdown toggle precedes final terminal search, global search, and editor routing");
     }

@@ -334,6 +334,9 @@ fn route_database_table_commands(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 }
 
 fn route_database_table_pdf_image(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
+    if ctx.key_event.state != ElementState::Pressed {
+        return false;
+    }
     let terminal_owns_chord = terminal_owns_chord(app, ctx.chord);
     if (!app.show_settings && app.handle_database_table_key(ctx.key_event, ctx.chord, terminal_owns_chord))
         || app.handle_pdf_key(ctx.key_event, ctx.chord)
@@ -347,7 +350,7 @@ fn route_database_table_pdf_image(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 }
 
 fn route_database_dialog(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
-    if app.handle_database_dialog_keyboard(ctx.key_event) {
+    if ctx.key_event.state == ElementState::Pressed && app.handle_database_dialog_keyboard(ctx.key_event) {
         app.request_redraw();
         true
     } else {
@@ -356,7 +359,9 @@ fn route_database_dialog(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 }
 
 fn route_database_prompt(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
-    if app.ide_panel.database.delete_prompt.is_some() || app.ide_panel.database.host_key_prompt.is_some() {
+    if ctx.key_event.state == ElementState::Pressed
+        && (app.ide_panel.database.delete_prompt.is_some() || app.ide_panel.database.host_key_prompt.is_some())
+    {
         if ctx.key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
             app.ide_panel.database.delete_prompt = None;
             if app.ide_panel.database.host_key_prompt.is_some() {
@@ -619,7 +624,7 @@ fn route_settings_escape(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 }
 
 fn route_settings(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
-    if app.show_settings {
+    if ctx.key_event.state == ElementState::Pressed && app.show_settings {
         if ctx.key_event.state == ElementState::Pressed
             && ctx.chord.is_some_and(|chord| app.keymap.hit(crate::keymap::Command::SettingsToggle, chord))
         {
