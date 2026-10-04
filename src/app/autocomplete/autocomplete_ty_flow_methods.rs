@@ -909,15 +909,27 @@ impl App {
         }
     }
 
+    /// Whether completion and signature help for the active document go
+    /// through `request_lsp_autocomplete`: an LSP-context language in IDE
+    /// mode whose server for this document is running. Otherwise (server
+    /// missing, still starting, crashed) the document keeps Tree-sitter
+    /// completion instead of opening nothing.
+    pub(crate) fn lsp_context_completion_active(&self) -> bool {
+        if !self.is_ide_mode || !crate::lsp::uses_lsp_context_completion(&self.file_extension) {
+            return false;
+        }
+        let (Some(lsp), Some(path)) = (self.lsp.as_ref(), self.current_abs_path()) else {
+            return false;
+        };
+        lsp.rooted_document_server_running(&path, &self.file_extension)
+    }
+
     pub fn request_lsp_autocomplete(&mut self, trigger: Option<&str>) {
         if matches!(self.file_extension.as_str(), "py" | "pyi") {
             self.request_ide_autocomplete(AutocompleteMode::TyContext, trigger);
             return;
         }
-        if !crate::lsp::uses_lsp_context_completion(&self.file_extension)
-            || !self.is_ide_mode
-            || self.show_welcome
-        {
+        if self.show_welcome || !self.lsp_context_completion_active() {
             return;
         }
         let source = ActiveAutocompleteSource::MainEditor;

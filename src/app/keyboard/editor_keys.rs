@@ -304,10 +304,8 @@ impl App {
             }
         } else if force_close_autocomplete {
             self.close_autocomplete();
-        } else if should_trigger_autocomplete
-            && !(self.is_ide_mode && crate::lsp::uses_lsp_context_completion(&self.file_extension))
-        {
-            // LSP-context languages in IDE mode are served by
+        } else if should_trigger_autocomplete && !self.lsp_context_completion_active() {
+            // LSP-context languages with a running server are served by
             // `request_lsp_autocomplete` below; running the Ty flow too would
             // send a second, discarded completion request.
             if let Some(trigger) = ty_completion_trigger {
@@ -380,7 +378,7 @@ impl App {
         if should_notify_lsp {
             self.last_sent_version = self.editor.version;
         }
-        if should_trigger_autocomplete && crate::lsp::uses_lsp_context_completion(&self.file_extension) {
+        if should_trigger_autocomplete && self.lsp_context_completion_active() {
             self.request_lsp_autocomplete(ty_completion_trigger);
         }
 
@@ -460,8 +458,7 @@ impl App {
         // Same triggers as the key path in `handle_editor_keyboard_input`: `(`/`,`
         // open signature help for LSP-context languages, so IME commits of them
         // must request it as well.
-        let signature_trigger = matches!(text, "(" | ",")
-            && crate::lsp::uses_lsp_context_completion(&self.file_extension);
+        let signature_trigger = matches!(text, "(" | ",") && self.lsp_context_completion_active();
         let trigger = match text {
             "." => Some("."),
             "(" if signature_trigger => Some("("),
@@ -1182,7 +1179,7 @@ impl App {
                 }
             }
             _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorComplete, chord)) => {
-                if crate::lsp::uses_lsp_context_completion(&self.file_extension) {
+                if self.lsp_context_completion_active() {
                     self.request_lsp_autocomplete(None);
                 } else {
                     self.update_autocomplete();
@@ -1351,8 +1348,8 @@ impl App {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
                         } else if !multi_cursor_active
-                            && crate::lsp::uses_lsp_context_completion(&self.file_extension)
                             && matches!(txt, "(" | ",")
+                            && self.lsp_context_completion_active()
                         {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(if txt == "(" { "(" } else { "," });
