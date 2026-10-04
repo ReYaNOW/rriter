@@ -25,6 +25,7 @@ mod scroll;
 mod startup_environment;
 mod startup_trace;
 mod state_persistence;
+mod theme;
 mod headless_ty_mem_probe;
 mod ui_system;
 mod ui_waker;

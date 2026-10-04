@@ -1723,6 +1723,7 @@ Editor/text:
 
 Rendering:
 
+* `src/theme.rs` -> theme IDs, syntax roles and palettes, editor theme construction.
 * `src/renderer.rs` -> include shell for OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
 * `src/renderer/*` -> renderer chunks for types, init, glyph cache, primitives/tests; `geometry.rs` stays primitive geometry.
 * `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.

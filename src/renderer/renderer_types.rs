@@ -128,6 +128,12 @@ pub struct Theme {
     pub diag_warn: [f32; 4],
     pub diag_error: [f32; 4],
     pub unused: [f32; 4],
+    pub surface_bg: [f32; 4],
+    pub syntax: crate::theme::SyntaxPalette,
+    pub terminal: [[f32; 4]; 16],
+    pub search_match: [f32; 4],
+    pub search_match_active: [f32; 4],
+    pub diff_added: [f32; 4],
 }
 
 #[derive(Copy, Clone)]
