@@ -8,7 +8,7 @@ use crate::languages::markdown::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle, MarkdownListKind,
     MarkdownTableAlignment,
 };
-use crate::renderer::{EDITOR_SURFACE_BG, Renderer};
+use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 
 const BODY_SCALE: f32 = 0.96;
@@ -992,7 +992,7 @@ impl Renderer {
         h: f32,
         ui_registry: &mut UiRegistry,
     ) {
-        self.push_rect(x, y, w, h, EDITOR_SURFACE_BG);
+        self.push_rect(x, y, w, h, self.theme.surface_bg);
         let editor_version = editor.version;
 
         if markdown.read_document(editor_version).is_none() {
@@ -1256,7 +1256,7 @@ impl Renderer {
                     (right - left).max(1.0),
                     (block.bottom - block.top).max(1.0),
                     5.0 * self.scale_factor,
-                    [0.11, 0.12, 0.15, 0.96],
+                    self.theme.markdown_code_bg,
                 );
                 if let Some(language) = code.language.as_deref().filter(|lang| !lang.is_empty()) {
                     let header =
@@ -1399,7 +1399,7 @@ impl Renderer {
                 top,
                 (2.0 * self.scale_factor).round().max(1.0),
                 (bottom - top).max(1.0),
-                [0.52, 0.46, 0.72, 0.72],
+                self.theme.markdown_quote_guide,
             );
         }
     }
@@ -1434,7 +1434,7 @@ impl Renderer {
                         "✓",
                         x + 5.0 * self.scale_factor,
                         baseline - 1.0,
-                        [0.45, 0.86, 0.60, 1.0],
+                        self.theme.markdown_check,
                         0.72,
                     );
                 }

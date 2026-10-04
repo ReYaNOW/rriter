@@ -523,11 +523,11 @@ impl Renderer {
                 let color = match kind {
                     crate::app::git_diff::DiffLineKind::Added
                     | crate::app::git_diff::DiffLineKind::ModifiedNew => {
-                        Some([0.18, 0.82, 0.34, 0.26])
+                        Some(self.theme.diff_added)
                     }
                     crate::app::git_diff::DiffLineKind::Deleted
                     | crate::app::git_diff::DiffLineKind::ModifiedOld => {
-                        Some([0.76, 0.78, 0.84, 0.24])
+                        Some(self.theme.diff_deleted)
                     }
                     crate::app::git_diff::DiffLineKind::Context => None,
                 };
@@ -709,9 +709,9 @@ impl Renderer {
                     } else if is_search_res {
                         let w = if is_newline { 10.0 } else { adv };
                         let color = if is_active_search {
-                            crate::render_view::SEARCH_ACTIVE_HIGHLIGHT_COLOR
+                            self.theme.search_match_active
                         } else {
-                            crate::render_view::SEARCH_HIGHLIGHT_COLOR
+                            self.theme.search_match
                         };
                         self.push_rect(
                             x - render_scroll_x,
@@ -737,7 +737,7 @@ impl Renderer {
                             y - self.baseline_offset + 2.0,
                             adv,
                             self.line_height,
-                            [0.6, 0.6, 0.6, 0.3],
+                            self.theme.bracket_match,
                         );
                     }
 
@@ -747,7 +747,7 @@ impl Renderer {
                             y - self.baseline_offset + self.line_height - 3.0 * s,
                             adv,
                             1.5 * s,
-                            [0.545, 0.913, 0.992, 0.95],
+                            self.theme.definition_underline,
                         );
                     }
 
@@ -760,7 +760,7 @@ impl Renderer {
                             if folded_keyword_range.is_some_and(|(start, end)| {
                                 current_offset >= start && current_offset < end
                             }) {
-                                current_color = [0.55, 0.62, 0.80, 1.0];
+                                current_color = self.theme.folded_keyword;
                             }
 
                             if is_unused {
@@ -1209,7 +1209,7 @@ mod stage5_overlay_boundary_tests {
             !has_solid_fg_rect(renderer),
             "caret inside transparent scrollbar track must stay clipped at interaction_right"
         );
-        let diff_color = [0.18, 0.82, 0.34, 0.26];
+        let diff_color = renderer.theme.diff_added;
         let diff_right = renderer
             .vertices
             .iter()

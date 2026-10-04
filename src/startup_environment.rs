@@ -1,4 +1,3 @@
-use crate::renderer::Theme;
 use crate::{load_config, load_panel_state};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -133,26 +132,11 @@ pub(super) fn selection_color(desktop_color: Option<[f32; 4]>, system_color: Opt
         .unwrap_or(crate::platform::DEFAULT_ACCENT_COLOR)
 }
 
-pub(super) fn load_dracula() -> Theme {
-    let sel_color = selection_color(
+pub(crate) fn system_selection_color() -> [f32; 4] {
+    selection_color(
         get_kde_color("Colors:Selection", "BackgroundNormal"),
         crate::platform::system_accent_color(),
-    );
-
-    Theme {
-        bg: [0.156, 0.164, 0.211, 1.0],
-        fg: [0.972, 0.972, 0.949, 1.0],
-        sel: sel_color,
-        minimap_bg: [0.129, 0.133, 0.172, 1.0],
-        line_num: [0.384, 0.447, 0.643, 1.0],
-        minimap_cursor: sel_color,
-        modified_unsaved: [1.0, 0.474, 0.776, 1.0],
-        modified_saved: [0.313, 0.980, 0.482, 1.0],
-        diag_warn: [0.945, 0.980, 0.549, 1.0],
-        diag_error: [1.0, 0.333, 0.333, 1.0],
-        unused: [0.48, 0.48, 0.48, 0.6],
-        ..Theme::for_id(crate::theme::ThemeId::Dracula, sel_color)
-    }
+    )
 }
 
 #[cfg(target_os = "linux")]

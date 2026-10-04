@@ -188,6 +188,7 @@ struct ThemeValues {
     class: [f32; 4],
     md_code: [f32; 4],
     terminal: [[f32; 4]; 16],
+    terminal_bg: [f32; 4],
 }
 
 const fn rgb(hex: u32) -> [f32; 4] {
@@ -232,6 +233,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
                 [0.50, 0.70, 1.00, 1.0], [1.00, 0.50, 1.00, 1.0],
                 [0.40, 1.00, 1.00, 1.0], [1.00, 1.00, 1.00, 1.0],
             ],
+            terminal_bg: [0.129, 0.133, 0.173, 1.0],
         },
         ThemeId::OneDark => ThemeValues {
             bg: rgb(0x282c34), fg: rgb(0xabb2bf), minimap_bg: rgb(0x21252b),
@@ -241,6 +243,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             string: rgb(0x98c379), constant: rgb(0xd19a66), parameter: rgb(0xe06c75),
             class: rgb(0xe5c07b), md_code: rgb(0xd19a66),
             terminal: [0x3f4451,0xe06c75,0x98c379,0xe5c07b,0x61afef,0xc678dd,0x56b6c2,0xd7dae0,0x5c6370,0xef7f88,0xa9d48a,0xf0cc8c,0x74bdf5,0xd38be6,0x6bc6d2,0xf0f2f5].map(rgb),
+            terminal_bg: rgb(0x282c34),
         },
         ThemeId::Forest => ThemeValues {
             bg: rgb(0x2d353b), fg: rgb(0xd3c6aa), minimap_bg: rgb(0x272e33),
@@ -250,6 +253,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             string: rgb(0xdbbc7f), constant: rgb(0xd699b6), parameter: rgb(0xe69875),
             class: rgb(0x83c092), md_code: rgb(0xdbbc7f),
             terminal: [0x475258,0xe67e80,0xa7c080,0xdbbc7f,0x7fbbb3,0xd699b6,0x83c092,0xd3c6aa,0x859289,0xf0959a,0xb8d08f,0xe6c98e,0x93c9c1,0xe2a9c4,0x96d0a4,0xe8dcc0].map(rgb),
+            terminal_bg: rgb(0x2d353b),
         },
         ThemeId::Sepia => ThemeValues {
             bg: rgb(0xf4ecd8), fg: rgb(0x5b4636), minimap_bg: rgb(0xebe1c8),
@@ -259,6 +263,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             string: rgb(0x86600c), constant: rgb(0x7a4e8c), parameter: rgb(0xa85a14),
             class: rgb(0x2e7562), md_code: rgb(0x86600c),
             terminal: [0x3b2e24,0xa0442c,0x56701a,0x86600c,0x2f6f7e,0x7a4e8c,0x2e7562,0x5b4636,0x8a7a62,0xb5512f,0x627f1f,0x9a6f10,0x2b7f92,0x8c5aa0,0x33856f,0x3b2e24].map(rgb),
+            terminal_bg: rgb(0xf4ecd8),
         },
         ThemeId::OneLight => ThemeValues {
             bg: rgb(0xfafafa), fg: rgb(0x383a42), minimap_bg: rgb(0xeeeeef),
@@ -268,6 +273,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             string: rgb(0x478f46), constant: rgb(0x986801), parameter: rgb(0xd84a3d),
             class: rgb(0xa96f00), md_code: rgb(0x986801),
             terminal: [0x383a42,0xd84a3d,0x478f46,0xa96f00,0x4078f2,0xa626a4,0x0184bc,0x383a42,0x84858c,0xc4433a,0x3f7f3e,0x956200,0x3366d6,0x921f90,0x0172a3,0x202227].map(rgb),
+            terminal_bg: rgb(0xfafafa),
         },
     }
 }
@@ -298,6 +304,24 @@ impl Theme {
             search_match,
             search_match_active,
             diff_added,
+            terminal_bg: [values.terminal_bg[0], values.terminal_bg[1], values.terminal_bg[2], 0.80],
+            diff_deleted: [0.76, 0.78, 0.84, 0.24],
+            diff_added_gutter: [diff_added[0], diff_added[1], diff_added[2], 0.95],
+            diff_deleted_gutter: [0.76, 0.78, 0.84, 0.90],
+            cursor_line: [0.9, 0.9, 0.9, 0.12],
+            bracket_match: [0.6, 0.6, 0.6, 0.3],
+            definition_underline: [0.545, 0.913, 0.992, 0.95],
+            folded_keyword: [0.55, 0.62, 0.80, 1.0],
+            markdown_code_bg: [0.11, 0.12, 0.15, 0.96],
+            markdown_quote_guide: [0.52, 0.46, 0.72, 0.72],
+            markdown_check: [0.45, 0.86, 0.60, 1.0],
+            sticky_shadow: [0.0, 0.0, 0.0, 1.0],
+            terminal_search_bg: [0.18, 0.20, 0.22, 1.0],
+            terminal_text_dim: [0.6, 0.6, 0.6, 1.0],
+            terminal_cursor: if id.is_dark() { [1.0, 1.0, 1.0, 0.5] } else { [values.fg[0], values.fg[1], values.fg[2], 0.5] },
+            terminal_close_hover: if id.is_dark() { [1.0, 1.0, 1.0, 1.0] } else { values.fg },
+            rollback_hover: [0.92, 0.96, 1.0, 1.0],
+            markdown_copy_success: [0.3, 0.9, 0.4, 1.0],
         }
     }
 }
@@ -346,6 +370,24 @@ mod tests {
         assert_eq!(theme.search_match, [0.6, 0.6, 0.6, 0.35]);
         assert_eq!(theme.search_match_active, [1.0, 0.6, 0.0, 0.5]);
         assert_eq!(theme.diff_added, [0.18, 0.82, 0.34, 0.26]);
+        assert_eq!(theme.terminal_bg, [0.129, 0.133, 0.173, 0.80]);
+        assert_eq!(theme.diff_deleted, [0.76, 0.78, 0.84, 0.24]);
+        assert_eq!(theme.diff_added_gutter, [0.18, 0.82, 0.34, 0.95]);
+        assert_eq!(theme.diff_deleted_gutter, [0.76, 0.78, 0.84, 0.90]);
+        assert_eq!(theme.cursor_line, [0.9, 0.9, 0.9, 0.12]);
+        assert_eq!(theme.bracket_match, [0.6, 0.6, 0.6, 0.3]);
+        assert_eq!(theme.definition_underline, [0.545, 0.913, 0.992, 0.95]);
+        assert_eq!(theme.folded_keyword, [0.55, 0.62, 0.80, 1.0]);
+        assert_eq!(theme.markdown_code_bg, [0.11, 0.12, 0.15, 0.96]);
+        assert_eq!(theme.markdown_quote_guide, [0.52, 0.46, 0.72, 0.72]);
+        assert_eq!(theme.markdown_check, [0.45, 0.86, 0.60, 1.0]);
+        assert_eq!(theme.sticky_shadow, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(theme.terminal_search_bg, [0.18, 0.20, 0.22, 1.0]);
+        assert_eq!(theme.terminal_text_dim, [0.6, 0.6, 0.6, 1.0]);
+        assert_eq!(theme.terminal_cursor, [1.0, 1.0, 1.0, 0.5]);
+        assert_eq!(theme.terminal_close_hover, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(theme.rollback_hover, [0.92, 0.96, 1.0, 1.0]);
+        assert_eq!(theme.markdown_copy_success, [0.3, 0.9, 0.4, 1.0]);
         assert_eq!(theme.terminal, [
             [0.10, 0.10, 0.10, 1.0], [0.95, 0.30, 0.30, 1.0],
             [0.30, 0.85, 0.30, 1.0], [0.90, 0.85, 0.20, 1.0],
@@ -396,6 +438,27 @@ mod tests {
                 rgb(row[3]), rgb(row[3]),
             ];
             assert_eq!(theme.syntax.colors, expected_roles, "{:?} syntax roles", id);
+        }
+    }
+
+    #[test]
+    fn terminal_panel_background_and_cursor_follow_editor_theme() {
+        for (id, bg) in [
+            (ThemeId::OneDark, rgb(0x282c34)),
+            (ThemeId::Forest, rgb(0x2d353b)),
+            (ThemeId::Sepia, rgb(0xf4ecd8)),
+            (ThemeId::OneLight, rgb(0xfafafa)),
+        ] {
+            let theme = Theme::for_id(id, [0.0; 4]);
+            assert_eq!(theme.terminal_bg, [bg[0], bg[1], bg[2], 0.80]);
+            let cursor = if id.is_dark() {
+                [1.0, 1.0, 1.0, 0.5]
+            } else {
+                [theme.fg[0], theme.fg[1], theme.fg[2], 0.5]
+            };
+            assert_eq!(theme.terminal_cursor, cursor);
+            let close_hover = if id.is_dark() { [1.0, 1.0, 1.0, 1.0] } else { theme.fg };
+            assert_eq!(theme.terminal_close_hover, close_hover);
         }
     }
 

@@ -96,8 +96,12 @@ mod interaction_tests {
             ]
         );
         assert_eq!(
-            search_highlight_color(highlights, 0),
-            crate::render_view::SEARCH_ACTIVE_HIGHLIGHT_COLOR
+            search_highlight_color(
+                highlights,
+                0,
+                &crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4]),
+            ),
+            [1.0, 0.6, 0.0, 0.5]
         );
     }
 

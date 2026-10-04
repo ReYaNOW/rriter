@@ -171,7 +171,7 @@ impl Renderer {
                 cursor_line_y - self.baseline_offset + 2.0,
                 editor_right.visual_width_from(self.left_padding),
                 self.line_height,
-                [0.9, 0.9, 0.9, 0.12],
+                self.theme.cursor_line,
             );
         }
 
@@ -452,9 +452,9 @@ impl Renderer {
                     icon_y,
                     icon_size,
                     if hovered {
-                        [0.92, 0.96, 1.0, 1.0]
+                        self.theme.rollback_hover
                     } else {
-                        [1.0, 1.0, 1.0, 1.0]
+                        self.theme.fg
                     },
                 );
             } else if active_git_diff_state.is_none()

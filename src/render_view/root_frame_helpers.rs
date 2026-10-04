@@ -220,11 +220,11 @@ impl Renderer {
             let color = match line.kind {
                 crate::app::git_diff::DiffLineKind::Added
                 | crate::app::git_diff::DiffLineKind::ModifiedNew => {
-                    Some([0.18, 0.82, 0.34, 0.26])
+                    Some(self.theme.diff_added)
                 }
                 crate::app::git_diff::DiffLineKind::Deleted
                 | crate::app::git_diff::DiffLineKind::ModifiedOld => {
-                    Some([0.76, 0.78, 0.84, 0.24])
+                    Some(self.theme.diff_deleted)
                 }
                 crate::app::git_diff::DiffLineKind::Context => None,
             };

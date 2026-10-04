@@ -279,22 +279,29 @@ fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize,
 fn terminal_cell_background(
     cell_bg: u8,
     ansi: &[[f32; 4]],
+    search_match: [f32; 4],
+    search_match_active: [f32; 4],
     in_selection: bool,
     is_search_result: bool,
     is_active_search: bool,
     selection: [f32; 4],
 ) -> Option<[f32; 4]> {
     if is_active_search {
-        Some([1.0, 0.6, 0.0, 0.5])
+        Some(search_match_active)
     } else if in_selection {
         Some(selection)
     } else if is_search_result {
-        Some([0.6, 0.6, 0.6, 0.35])
+        Some(search_match)
     } else if cell_bg != 0 && cell_bg < 16 {
         ansi.get(cell_bg as usize).copied()
     } else {
         None
     }
+}
+
+#[inline(always)]
+fn terminal_cell_foreground(cell_fg: u8, ansi: &[[f32; 4]], default: [f32; 4]) -> [f32; 4] {
+    ansi.get(cell_fg as usize).copied().unwrap_or(default)
 }
 
 fn terminal_glyph_anchor(
@@ -450,13 +457,13 @@ impl Renderer {
                         close.hit_w,
                         close.hit_h,
                         4.0 * s,
-                        [1.0, 1.0, 1.0, 0.1],
+                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.1],
                     );
                 }
                 let icon_color = if close_hovered {
-                    [1.0, 1.0, 1.0, 1.0]
+                    self.theme.terminal_close_hover
                 } else {
-                    [1.0, 1.0, 1.0, 0.8]
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.8]
                 };
                 self.draw_atlas_icon(
                     crate::widgets::IconType::Close,
@@ -494,7 +501,7 @@ impl Renderer {
                 add_sz + 4.0 * s,
                 add_sz + 4.0 * s,
                 2.0 * s,
-                [1.0, 1.0, 1.0, 0.1],
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.1],
             );
         }
         self.draw_atlas_icon(
@@ -564,7 +571,7 @@ impl Renderer {
             let presentation_visible = grid.presentation_visible();
             grid.dirty = false;
 
-            let ansi_colors = crate::app::terminal::ANSI_16_COLORS;
+            let ansi_colors = self.theme.terminal;
 
             let scrollback_len = if grid.is_alt {
                 0
@@ -671,6 +678,8 @@ impl Renderer {
                                 if let Some(bg) = terminal_cell_background(
                                     cell.bg,
                                     &ansi_colors,
+                                    self.theme.search_match,
+                                    self.theme.search_match_active,
                                     in_sel,
                                     is_search_res,
                                     is_active_search,
@@ -691,11 +700,7 @@ impl Renderer {
                                 let cx = (draw_x + c_idx as f32 * char_w).round();
                                 let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
                                 let cell_w = next_cx - cx;
-                                let fg_color = if cell.fg < 16 {
-                                    ansi_colors[cell.fg as usize]
-                                } else {
-                                    self.theme.fg
-                                };
+                                let fg_color = terminal_cell_foreground(cell.fg, &ansi_colors, self.theme.fg);
                                 let prefer_color = match cell.presentation {
                                     crate::app::terminal::CELL_PRESENTATION_TEXT => Some(false),
                                     crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
@@ -749,7 +754,7 @@ impl Renderer {
                         cursor_px_y,
                         cursor_next_x - cursor_px_x,
                         char_h,
-                        [1.0, 1.0, 1.0, 0.5],
+                        self.theme.terminal_cursor,
                     );
                 }
 
@@ -818,7 +823,7 @@ impl Renderer {
                 search_w,
                 search_h,
                 6.0 * s,
-                [0.18, 0.20, 0.22, 1.0],
+                self.theme.terminal_search_bg,
             );
             self.push_rounded_rect(
                 search_x - 1.0,
@@ -990,7 +995,7 @@ impl Renderer {
                         "Нет",
                         input_x + input_w + 10.0 * s,
                         text_y,
-                        [0.6, 0.6, 0.6, 1.0],
+                        self.theme.terminal_text_dim,
                         0.9,
                     );
                 }
@@ -1009,7 +1014,7 @@ impl Renderer {
                     &scratch,
                     input_x + input_w + 10.0 * s,
                     text_y,
-                    [0.6, 0.6, 0.6, 1.0],
+                    self.theme.terminal_text_dim,
                     0.9,
                 );
                 self.scratch_buffer = scratch;
@@ -1405,16 +1410,24 @@ mod tests {
     fn terminal_cell_background_priority_is_active_search_selection_match_ansi() {
         let ansi = [[0.1, 0.1, 0.1, 1.0]; 16];
         let sel = [0.2, 0.3, 0.4, 1.0];
-        assert_eq!(terminal_cell_background(0, &ansi, false, false, false, sel), None);
-        assert_eq!(terminal_cell_background(3, &ansi, false, false, false, sel), Some(ansi[3]));
-        assert_eq!(terminal_cell_background(3, &ansi, true, true, false, sel), Some(sel));
+        let search_match = [0.6, 0.6, 0.6, 0.35];
+        let search_match_active = [1.0, 0.6, 0.0, 0.5];
+        assert_eq!(terminal_cell_background(0, &ansi, search_match, search_match_active, false, false, false, sel), None);
+        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, false, false, false, sel), Some(ansi[3]));
+        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, false, sel), Some(sel));
         assert_eq!(
-            terminal_cell_background(3, &ansi, false, true, false, sel),
-            Some([0.6, 0.6, 0.6, 0.35])
+            terminal_cell_background(3, &ansi, search_match, search_match_active, false, true, false, sel),
+            Some(search_match)
         );
         assert_eq!(
-            terminal_cell_background(3, &ansi, true, true, true, sel),
-            Some([1.0, 0.6, 0.0, 0.5])
+            terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, true, sel),
+            Some(search_match_active)
         );
+    }
+
+    #[test]
+    fn terminal_default_cell_text_uses_theme_ansi_seven() {
+        let theme = crate::renderer::Theme::for_id(crate::theme::ThemeId::OneLight, [0.0; 4]);
+        assert_eq!(terminal_cell_foreground(7, &theme.terminal, theme.fg), theme.terminal[7]);
     }
 }

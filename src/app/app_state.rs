@@ -1176,6 +1176,7 @@ pub struct App {
     pub editor: Editor,
     pub clipboard: Option<crate::platform::Clipboard>,
     pub theme: Theme,
+    pub system_selection: [f32; 4],
     pub base_title: String,
     pub file_path: Option<PathBuf>,
     pub file_key: Option<crate::platform::PathKey>,

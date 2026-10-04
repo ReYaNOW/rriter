@@ -168,8 +168,8 @@ impl Renderer {
                     self.theme.minimap_bg[2],
                     alpha,
                 ];
-                let shadow_top = [0.0, 0.0, 0.0, 0.4 * alpha];
-                let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
+                let shadow_top = [self.theme.sticky_shadow[0], self.theme.sticky_shadow[1], self.theme.sticky_shadow[2], 0.4 * alpha];
+                let shadow_bottom = [self.theme.sticky_shadow[0], self.theme.sticky_shadow[1], self.theme.sticky_shadow[2], 0.0];
 
                 let sticky_x = gutter_x + 2.0;
                 let sticky_w = rect_w - sticky_x;

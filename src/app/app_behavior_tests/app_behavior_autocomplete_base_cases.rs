@@ -95,6 +95,7 @@ pub(crate) fn test_app() -> Option<App> {
         editor: Editor::new(128),
         clipboard: Some(Clipboard::deferred_system()),
         theme: test_theme(),
+        system_selection: [0.0; 4],
         base_title: "Безымянный".to_string(),
         file_path: None,
         file_key: None,
