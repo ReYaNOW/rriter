@@ -55,7 +55,7 @@ impl Renderer {
             let advance = self.char_advance(ch);
             if !matches!(ch, ' ' | '\t') {
                 let mut color = if span_color[0].is_nan() {
-                    self.theme.fg
+                    palette.color(crate::theme::SyntaxRole::Fg)
                 } else {
                     span_color
                 };
@@ -92,7 +92,7 @@ impl Renderer {
                 && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, 1.0)
             {
                 let mut color = if span_color[0].is_nan() {
-                    self.theme.fg
+                    palette.color(crate::theme::SyntaxRole::Fg)
                 } else {
                     span_color
                 };
@@ -1203,7 +1203,11 @@ impl Renderer {
                 return;
             }
             if let Some(glyph) = self.get_ui_glyph(ch) {
-                let mut color = if span_color[0].is_nan() { self.theme.fg } else { span_color };
+                let mut color = if span_color[0].is_nan() {
+                    palette.color(crate::theme::SyntaxRole::Fg)
+                } else {
+                    span_color
+                };
                 color[3] *= alpha;
                 if ch != ' ' && ch != '\t'
                     && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, scale)

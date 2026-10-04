@@ -31,6 +31,32 @@ fn module_header_wrap_does_not_split_marker_from_path() {
 }
 
 #[test]
+fn cached_hover_layout_resolves_roles_from_the_current_palette() {
+    let cache = crate::app::mouse::HoverLayoutCache {
+        scale_factor: 1.0,
+        max_text_w: 200.0,
+        span_count: 1,
+        text_len: 1,
+        lines: vec![crate::app::mouse::HoverVisualLine {
+            glyphs: vec![(
+                'x',
+                crate::theme::SyntaxRole::KeywordControl,
+                0,
+            )],
+            kind: crate::lsp::HoverLineKindPublic::Text,
+        }],
+        max_line_w: 8.0,
+        total_text_h: 22.0,
+    };
+    let role = cache.lines[0].glyphs[0].1;
+    let first_palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+    let current_palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::OneDark);
+
+    assert_ne!(first_palette.color(role), current_palette.color(role));
+    assert_eq!(current_palette.color(role), current_palette.color(cache.lines[0].glyphs[0].1));
+}
+
+#[test]
 fn test_valid_diagnostic_popup_cache_drops_stale_indices() {
     let diagnostic = crate::lsp::Diagnostic {
         start_line: 0,
