@@ -15,14 +15,10 @@
       "cognitive_complexity": 2,
       "too_many_lines": 2
     },
-    "src/app/api_client/api_client_app_focus_methods.rs": {
-      "too_many_lines": 2
-    },
     "src/app/api_client/api_client_app_request_methods.rs": {
-      "cognitive_complexity": 4,
+      "cognitive_complexity": 2,
       "collapsible_if": 2,
-      "collapsible_str_replace": 4,
-      "too_many_lines": 6
+      "too_many_lines": 4
     },
     "src/app/api_client/api_client_input_state.rs": {
       "too_many_lines": 2
@@ -75,11 +71,10 @@
       "collapsible_if": 8,
       "implicit_saturating_sub": 2,
       "nonminimal_bool": 2,
-      "redundant_pattern_matching": 8
+      "redundant_pattern_matching": 4
     },
     "src/app/app_ide_tab_methods.rs": {
-      "collapsible_if": 4,
-      "redundant_pattern_matching": 6
+      "collapsible_if": 4
     },
     "src/app/app_state.rs": {
       "collapsible_if": 2,
@@ -89,11 +84,11 @@
       "unnecessary_lazy_evaluations": 2
     },
     "src/app/app_state_tests.rs": {
-      "field_reassign_with_default": 3
+      "field_reassign_with_default": 1
     },
     "src/app/app_window_external_methods.rs": {
-      "collapsible_if": 7,
-      "redundant_pattern_matching": 7
+      "collapsible_if": 6,
+      "redundant_pattern_matching": 6
     },
     "src/app/autocomplete/autocomplete_detail_flow_methods.rs": {
       "ptr_arg": 2,
@@ -177,24 +172,15 @@
     "src/app/database/database_table_cell_edit_state.rs": {
       "collapsible_if": 2
     },
-    "src/app/database/database_table_edit_methods.rs": {
-      "cognitive_complexity": 2,
-      "too_many_lines": 2
-    },
-    "src/app/database/database_table_key_methods.rs": {
-      "cognitive_complexity": 2,
-      "too_many_lines": 2
-    },
     "src/app/events.rs": {
-      "collapsible_if": 4,
+      "collapsible_if": 2,
       "too_many_lines": 2,
-      "unwrap_used": 42
+      "unwrap_used": 36
     },
     "src/app/events/about.rs": {
       "manual_is_multiple_of": 2
     },
     "src/app/events/about/about_helpers.rs": {
-      "collapsible_if": 4,
       "manual_pattern_char_comparison": 2
     },
     "src/app/events/about/about_tick_input_sections.rs": {
@@ -212,7 +198,7 @@
     },
     "src/app/events/main_frame.rs": {
       "cognitive_complexity": 2,
-      "collapsible_if": 6,
+      "collapsible_if": 4,
       "if_same_then_else": 4,
       "needless_bool_assign": 2,
       "too_many_lines": 2,
@@ -227,7 +213,7 @@
       "manual_strip": 4
     },
     "src/app/file_tree_app_actions.rs": {
-      "collapsible_if": 4
+      "collapsible_if": 2
     },
     "src/app/file_tree_dialog.rs": {
       "too_many_lines": 2
@@ -237,7 +223,6 @@
     },
     "src/app/file_tree_scan.rs": {
       "cloned_ref_to_slice_refs": 1,
-      "collapsible_if": 2,
       "type_complexity": 2
     },
     "src/app/file_tree_tests.rs": {
@@ -260,15 +245,15 @@
     "src/app/git_panel/git_panel_graph_helpers.rs": {
       "too_many_lines": 2
     },
-    "src/app/git_panel/git_panel_status_tests.rs": {
-      "needless_range_loop": 2,
-      "question_mark": 2
-    },
     "src/app/git_panel/git_panel_graph_tests.rs": {
       "needless_range_loop": 2
     },
     "src/app/git_panel/git_panel_stage_status_tests.rs": {
       "field_reassign_with_default": 7
+    },
+    "src/app/git_panel/git_panel_status_tests.rs": {
+      "needless_range_loop": 2,
+      "question_mark": 2
     },
     "src/app/git_panel/git_panel_types.rs": {
       "field_reassign_with_default": 2,
@@ -280,14 +265,13 @@
     "src/app/keyboard.rs": {
       "collapsible_if": 8,
       "collapsible_str_replace": 2,
-      "too_many_lines": 2,
       "unwrap_used": 10
     },
     "src/app/keyboard/editor_keys.rs": {
       "cognitive_complexity": 2,
-      "collapsible_if": 10,
+      "collapsible_if": 8,
       "too_many_lines": 2,
-      "unwrap_used": 52
+      "unwrap_used": 48
     },
     "src/app/keyboard/key_input.rs": {
       "double_ended_iterator_last": 1
@@ -296,12 +280,8 @@
       "cognitive_complexity": 2,
       "collapsible_if": 14,
       "collapsible_str_replace": 2,
-      "field_reassign_with_default": 1,
       "too_many_lines": 2,
       "unwrap_used": 54
-    },
-    "src/app/keymap_settings.rs": {
-      "struct_excessive_bools": 2
     },
     "src/app/lsp_actions.rs": {
       "collapsible_if": 8,
@@ -336,7 +316,7 @@
     },
     "src/app/mouse/cursor/cursor_scroll_drags.rs": {
       "too_many_lines": 2,
-      "unwrap_used": 64
+      "unwrap_used": 62
     },
     "src/app/mouse/hover_bridge_tests.rs": {
       "field_reassign_with_default": 1
@@ -386,7 +366,7 @@
       "unwrap_used": 26
     },
     "src/app/mouse/input/mouse_editor_terminal_press.rs": {
-      "collapsible_if": 8,
+      "collapsible_if": 6,
       "unwrap_used": 26
     },
     "src/app/mouse/input/mouse_overlay_press.rs": {
@@ -395,11 +375,11 @@
     },
     "src/app/mouse/input/mouse_ui_element_press.rs": {
       "cognitive_complexity": 2,
-      "collapsible_if": 4,
+      "collapsible_if": 2,
       "needless_bool_assign": 2,
       "too_many_lines": 2,
       "unnecessary_map_or": 2,
-      "unwrap_used": 22
+      "unwrap_used": 16
     },
     "src/app/mouse/wheel.rs": {
       "cognitive_complexity": 2,
@@ -482,7 +462,7 @@
     "src/app/ui_handlers/ui_settings.rs": {
       "cognitive_complexity": 2,
       "too_many_lines": 2,
-      "unwrap_used": 16
+      "unwrap_used": 14
     },
     "src/bin/api_fetch_bench.rs": {
       "expect_used": 22
@@ -500,17 +480,14 @@
     },
     "src/headless/tests.rs": {
       "disallowed_methods": 1,
-      "expect_used": 21,
+      "expect_used": 17,
       "unwrap_used": 14
-    },
-    "src/headless/ui_tests_api_client_import.rs": {
-      "expect_used": 3
     },
     "src/headless/ui_tests_api_client_multipart.rs": {
       "expect_used": 16
     },
     "src/headless/ui_tests_api_client_request.rs": {
-      "expect_used": 9
+      "expect_used": 3
     },
     "src/headless/ui_tests_api_client_spec.rs": {
       "expect_used": 9
@@ -547,8 +524,14 @@
       "expect_used": 2,
       "unwrap_used": 4
     },
-    "src/headless/ui_tests_keyboard_panels.rs": {
-      "unwrap_used": 1
+    "src/headless/ui_tests_hotkeys_feature_commands.rs": {
+      "expect_used": 2
+    },
+    "src/headless/ui_tests_hotkeys_git_commands.rs": {
+      "expect_used": 6
+    },
+    "src/headless/ui_tests_hotkeys_persistence.rs": {
+      "expect_used": 2
     },
     "src/headless/ui_tests_layout.rs": {
       "unnecessary_cast": 3,
@@ -565,10 +548,14 @@
       "expect_used": 9
     },
     "src/headless/ui_tests_problems.rs": {
-      "expect_used": 3
+      "expect_used": 2
     },
     "src/headless/ui_tests_project_search.rs": {
       "unwrap_used": 1
+    },
+    "src/headless/ui_tests_rust_lsp.rs": {
+      "expect_used": 1,
+      "unwrap_used": 4
     },
     "src/headless/ui_tests_settings_database.rs": {
       "type_complexity": 2
@@ -584,14 +571,12 @@
       "unwrap_used": 5
     },
     "src/highlighter/highlighter_core.rs": {
-      "collapsible_if": 10,
+      "collapsible_if": 6,
       "implicit_saturating_sub": 2,
-      "map_entry": 2,
       "needless_range_loop": 2,
       "obfuscated_if_else": 2,
       "ptr_arg": 2,
       "question_mark": 2,
-      "string_from_utf8_as_bytes": 4,
       "too_many_lines": 2,
       "type_complexity": 2
     },
@@ -600,7 +585,6 @@
       "collapsible_if": 30,
       "if_same_then_else": 8,
       "needless_borrow": 6,
-      "string_from_utf8_as_bytes": 6,
       "too_many_lines": 2
     },
     "src/highlighter_runtime.rs": {
@@ -644,19 +628,17 @@
     "src/lsp/hover.rs": {
       "collapsible_if": 8,
       "if_same_then_else": 2,
-      "type_complexity": 4,
+      "type_complexity": 2,
       "while_let_loop": 2
     },
     "src/lsp/lsp_diagnostics_store.rs": {
-      "clone_on_copy": 6,
-      "cognitive_complexity": 2,
-      "collapsible_match": 4,
+      "clone_on_copy": 4,
+      "collapsible_match": 2,
       "ptr_arg": 2,
-      "too_many_lines": 2,
       "unwrap_or_default": 2
     },
     "src/lsp/lsp_manager.rs": {
-      "clone_on_copy": 6,
+      "clone_on_copy": 4,
       "nonminimal_bool": 4,
       "ptr_arg": 20,
       "struct_excessive_bools": 2
@@ -668,9 +650,9 @@
       "unwrap_used": 2
     },
     "src/lsp/lsp_process.rs": {
-      "collapsible_if": 4,
+      "collapsible_if": 2,
       "manual_flatten": 2,
-      "ptr_arg": 14,
+      "ptr_arg": 12,
       "too_many_lines": 2
     },
     "src/lsp/lsp_tests.rs": {
@@ -696,9 +678,6 @@
       "int_plus_one": 8,
       "manual_contains": 6,
       "too_many_lines": 1
-    },
-    "src/lsp/rooted_language.rs": {
-      "struct_excessive_bools": 2
     },
     "src/lsp/ruff_workspace.rs": {
       "obfuscated_if_else": 2
@@ -790,7 +769,7 @@
     },
     "src/render_view/hover_overlays.rs": {
       "collapsible_if": 4,
-      "too_many_lines": 4
+      "too_many_lines": 2
     },
     "src/render_view/ide_panels/ide_panel_behavior_tests.rs": {
       "assertions_on_constants": 2
@@ -809,7 +788,7 @@
     },
     "src/render_view/ide_panels/ide_panel_git_graph_renderer.rs": {
       "collapsible_if": 2,
-      "too_many_lines": 4
+      "too_many_lines": 2
     },
     "src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs": {
       "too_many_lines": 2
@@ -875,9 +854,6 @@
     "src/render_view/root_frame_overlay_helpers.rs": {
       "unwrap_used": 2
     },
-    "src/render_view/root_frame_editor_chrome_renderer.rs": {
-      "if_same_then_else": 16
-    },
     "src/render_view/root_frame_renderer.rs": {
       "too_many_lines": 2
     },
@@ -936,7 +912,7 @@
       "unwrap_used": 2
     },
     "src/round3_regression_tests.rs": {
-      "field_reassign_with_default": 8
+      "field_reassign_with_default": 7
     },
     "src/scroll.rs": {
       "unnecessary_lazy_evaluations": 2
@@ -948,7 +924,7 @@
       "cloned_ref_to_slice_refs": 1,
       "collapsible_if": 2,
       "expect_used": 2,
-      "field_reassign_with_default": 4
+      "field_reassign_with_default": 3
     },
     "src/widgets.rs": {
       "collapsible_if": 2
@@ -963,22 +939,56 @@
   },
   "file_length": {},
   "patterns": {
-    "src/platform.rs": {"global-lock": 3},
-    "src/platform/offscreen_gl.rs": {"global-lock": 1},
-    "src/platform/integration.rs": {"global-lock": 5},
-    "src/headless/ui_tests_settings_database.rs": {"global-lock": 1},
-    "src/app/git_panel/git_process.rs": {"global-lock": 1},
-    "src/app/api_client.rs": {"global-lock": 1},
-    "src/app/file_tree_scan.rs": {"global-lock": 1},
-    "src/app/database/database_postgres.rs": {"global-lock": 1},
-    "src/app/autocomplete/autocomplete_detail_helpers.rs": {"global-lock": 1},
-    "src/languages/python.rs": {"thread-local": 1},
-    "src/languages/dart.rs": {"thread-local": 1},
-    "src/render_view/root_helpers.rs": {"thread-local": 1},
-    "src/render_view/ui/hover_widget.rs": {"thread-local": 1},
-    "src/render_view/database_query_tab.rs": {"thread-local": 1},
-    "src/app/events.rs": {"thread-local": 1},
-    "src/app/api_client/api_client_app_click_methods.rs": {"app-methods-impl": 1},
-    "src/app/api_client/api_client_app_text_methods.rs": {"app-methods-impl": 1}
+    "src/app/api_client.rs": {
+      "global-lock": 1
+    },
+    "src/app/api_client/api_client_app_click_methods.rs": {
+      "app-methods-impl": 1
+    },
+    "src/app/api_client/api_client_app_text_methods.rs": {
+      "app-methods-impl": 1
+    },
+    "src/app/autocomplete/autocomplete_detail_helpers.rs": {
+      "global-lock": 1
+    },
+    "src/app/database/database_postgres.rs": {
+      "global-lock": 1
+    },
+    "src/app/events.rs": {
+      "thread-local": 1
+    },
+    "src/app/file_tree_scan.rs": {
+      "global-lock": 1
+    },
+    "src/app/git_panel/git_process.rs": {
+      "global-lock": 1
+    },
+    "src/headless/ui_tests_settings_database.rs": {
+      "global-lock": 1
+    },
+    "src/languages/dart.rs": {
+      "thread-local": 1
+    },
+    "src/languages/python.rs": {
+      "thread-local": 1
+    },
+    "src/platform.rs": {
+      "global-lock": 3
+    },
+    "src/platform/integration.rs": {
+      "global-lock": 5
+    },
+    "src/platform/offscreen_gl.rs": {
+      "global-lock": 1
+    },
+    "src/render_view/database_query_tab.rs": {
+      "thread-local": 1
+    },
+    "src/render_view/root_helpers.rs": {
+      "thread-local": 1
+    },
+    "src/render_view/ui/hover_widget.rs": {
+      "thread-local": 1
+    }
   }
 }
