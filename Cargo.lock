@@ -2604,18 +2604,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify-debouncer-mini"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17849edfaabd9a5fef1c606d99cfc615a8e99f7ac4366406d86c7942a3184cf2"
-dependencies = [
- "log",
- "notify",
- "notify-types",
- "tempfile",
-]
-
-[[package]]
 name = "notify-types"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3865,7 +3853,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "mermaid-rs-renderer",
- "notify-debouncer-mini",
+ "notify",
  "once_cell",
  "pdfium-render",
  "portable-pty",
@@ -4727,19 +4715,6 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
-]
-
-[[package]]
-name = "tempfile"
-version = "3.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
-dependencies = [
- "fastrand",
- "getrandom 0.4.2",
- "once_cell",
- "rustix 1.1.4",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
