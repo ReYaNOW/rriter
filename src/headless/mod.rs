@@ -148,6 +148,8 @@ mod ui_tests_hotkeys_characterization_git_settings;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_git_commands;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys_settings;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys_settings_edit;

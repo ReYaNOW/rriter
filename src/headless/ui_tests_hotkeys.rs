@@ -13,7 +13,7 @@ fn run_ok(session: &mut HeadlessSession, script: &str) {
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 }
 
-fn install_config_keymap(session: &mut HeadlessSession, config_path: &Path, keymap: Value) {
+pub(super) fn install_config_keymap(session: &mut HeadlessSession, config_path: &Path, keymap: Value) {
     let content = serde_json::json!({"keymap": keymap}).to_string();
     std::fs::write(config_path, &content)
         .unwrap_or_else(|error| panic!("write config fixture {}: {error}", config_path.display()));
