@@ -15,7 +15,8 @@ struct DatabaseTableKeyContext<'a> {
     word: bool,
     shift: bool,
     text_input_allowed: bool,
-    paste_text: Option<String>,
+    // Taken by the one handler that consumes the key; avoids cloning the clipboard text.
+    paste_text: std::cell::Cell<Option<String>>,
     default_table_copy_chord: bool,
     default_table_undo_chord: bool,
 }
@@ -74,7 +75,7 @@ impl App {
             word: crate::platform::word_navigation_modifier(self.modifiers),
             shift: self.modifiers.shift_key(),
             text_input_allowed: crate::platform::text_input_modifiers_allowed(self.modifiers),
-            paste_text,
+            paste_text: std::cell::Cell::new(paste_text),
             default_table_copy_chord,
             default_table_undo_chord,
         };
@@ -162,7 +163,7 @@ impl App {
                         context.word,
                         context.shift,
                         context.text_input_allowed,
-                        context.paste_text.clone(),
+                        context.paste_text.take(),
                         if multiline {
                             crate::app::database::MAX_EDITABLE_MULTILINE_BYTES
                         } else {
@@ -498,7 +499,7 @@ impl App {
             context.word,
             context.shift,
             context.text_input_allowed,
-            context.paste_text.clone(),
+            context.paste_text.take(),
             if matches!(focus, Some(DatabaseTableInputTarget::Cell)) {
                 crate::app::database::MAX_EDITABLE_MULTILINE_BYTES
             } else {
