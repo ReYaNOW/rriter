@@ -8,9 +8,11 @@ import json
 import os
 import shutil
 import struct
+import threading
 import subprocess
 import sys
 import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,11 +21,16 @@ SIZE = "1280x720"
 SCALE = "1"
 THEMES = {"dracula", "one_dark", "forest", "sepia", "one_light"}
 # Status clock and transient caret area; fixed in framebuffer coordinates.
-MASKS = {"status-bar.png": [(1170, 690, 1280, 720)]}
+MASKS = {
+    "status-bar.png": [(1170, 690, 1280, 720)],
+    "api-response.png": [(58, 470, 278, 500), (370, 568, 580, 592)],
+    "api-auth.png": [(58, 470, 278, 500), (58, 570, 278, 592)],
+    "db-query.png": [(295, 467, 660, 496)],
+}
 
 
 class Session:
-    def __init__(self, profile: Path, workspace: Path | None, config: dict):
+    def __init__(self, profile: Path, workspace: Path | None, config: dict, extra_env: dict | None = None):
         profile.mkdir(parents=True, exist_ok=True)
         config_dir = profile / "config"
         config_dir.mkdir(exist_ok=True)
@@ -31,6 +38,7 @@ class Session:
         args = [str(DRIVER), "run", "-", "--size", SIZE, "--scale", SCALE, "--profile", str(profile)]
         env = os.environ.copy()
         env["RRITER_BIN"] = str(ROOT / "target/x86_64-unknown-linux-gnu/release/rriter")
+        env.update(extra_env or {})
         self.proc = subprocess.Popen(
             [sys.executable, *args], cwd=ROOT, env=env, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
@@ -178,6 +186,263 @@ def git_fixture(path: Path) -> None:
     (path / "notes.txt").write_text("Untracked theme fixture file\n", encoding="utf-8")
 
 
+class ApiFixtureHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if self.path == "/openapi.json":
+            body = json.dumps({
+                "openapi": "3.1.0",
+                "info": {"title": "Theme API", "version": "1.0"},
+                "servers": [{"url": self.server.api_base}],
+                "components": {"securitySchemes": {
+                    "BearerAuth": {"type": "http", "scheme": "bearer"}
+                }},
+                "paths": {"/hello": {"get": {
+                    "security": [{"BearerAuth": []}],
+                    "responses": {"200": {"description": "Fixed response"}},
+                }}},
+            }).encode()
+        elif self.path == "/hello":
+            body = b'{"message":"Hello from the theme fixture"}'
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        pass
+
+
+def click_at(s: Session, x: float, y: float, double: bool = False) -> None:
+    s.command(f"mouse_move {x:g} {y:g}")
+    s.command("dblclick" if double else "click")
+    s.command("settle 250")
+
+
+def click_id(s: Session, wanted: str, double: bool = False) -> dict:
+    state = s.dump()
+    element = next((e for e in state.get("ui", []) if e.get("id") == wanted), None)
+    if not element:
+        raise RuntimeError(f"UI element missing: {wanted}")
+    x, y, width, height = element["rect"]
+    click_at(s, x + width / 2, y + height / 2, double)
+    return s.dump()
+
+
+def reveal(s: Session, wanted: str, point: tuple[float, float], limit: int = 30) -> None:
+    for _ in range(limit + 1):
+        element = next((e for e in s.dump().get("ui", []) if e.get("id") == wanted), None)
+        if element and element["rect"][3] >= 24:
+            return
+        s.command(f"mouse_move {point[0]:g} {point[1]:g}")
+        s.command("wheel 0 -1")
+        s.command("settle 500")
+    raise RuntimeError(f"UI element did not enter viewport: {wanted}")
+
+
+def set_database_field(s: Session, field: str, value: str) -> None:
+    click_id(s, f"DatabaseDialogField({field})")
+    s.command("key ctrl+a")
+    s.command("type " + value)
+
+
+def capture_api_screens(scratch: Path, out: Path, config: dict) -> list[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ApiFixtureHandler)
+    server.api_base = f"http://127.0.0.1:{server.server_port}"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    shots: list[str] = []
+    try:
+        s = Session(scratch / (out.name + "-api-response-profile"), scratch / "sample-project", config)
+        s.click("SidebarSlot(ApiClient)")
+        s.click("ApiImportAdd")
+        s.click("ApiImportUrl")
+        s.click("ApiImportUrlInput")
+        s.command("type " + server.api_base + "/openapi.json")
+        s.click("ApiImportUrlConfirm")
+        for _ in range(100):
+            state = s.dump()
+            if any(e.get("id") == "ApiRouteRow(0)" for e in state.get("ui", [])):
+                break
+            s.command("wait 100")
+        reveal(s, "ApiRouteRow(0)", (200, 500))
+        click_id(s, "ApiRouteRow(0)")
+        reveal(s, "ApiTryRequest", (800, 400))
+        click_id(s, "ApiTryRequest")
+        for _ in range(150):
+            s.command("wait 100")
+            if any(e.get("id") == "ApiResponseBody(0)" for e in s.dump().get("ui", [])):
+                break
+        reveal(s, "ApiResponseBody(0)", (800, 400))
+        s.shot(out / "api-response.png")
+        s.close()
+        shots.append("api-response.png")
+
+        s = Session(scratch / (out.name + "-api-auth-profile"), scratch / "sample-project", config)
+        s.click("SidebarSlot(ApiClient)")
+        s.click("ApiImportAdd")
+        s.click("ApiImportUrl")
+        s.click("ApiImportUrlInput")
+        s.command("type " + server.api_base + "/openapi.json")
+        s.click("ApiImportUrlConfirm")
+        for _ in range(100):
+            if any(e.get("id") == "ApiAuthRoot" for e in s.dump().get("ui", [])):
+                break
+            s.command("wait 100")
+        reveal(s, "ApiAuthRoot", (200, 500))
+        click_id(s, "ApiAuthRoot")
+        s.shot(out / "api-auth.png")
+        s.close()
+        shots.append("api-auth.png")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    return shots
+
+
+def start_database_fixture() -> tuple[subprocess.Popen, int]:
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / "scripts" / "postgres_fixture.py"), "--port", "0"],
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8",
+    )
+    assert process.stdout is not None
+    port_line = process.stdout.readline().strip()
+    if not port_line.isdigit():
+        process.kill()
+        raise RuntimeError(f"PostgreSQL fixture failed to start: {port_line}")
+    return process, int(port_line)
+
+
+def capture_database_screens(scratch: Path, out: Path, config: dict) -> list[str]:
+    fixture, port = start_database_fixture()
+    shots: list[str] = []
+    try:
+        s = Session(scratch / (out.name + "-database-table-profile"), scratch / "sample-project", config)
+        s.click("SidebarSlot(Database)")
+        s.click("DatabaseAdd")
+        for field, value in (
+            ("DisplayName", "Theme database"), ("Host", "127.0.0.1"), ("Port", str(port)),
+            ("Username", "rriter_pgo"), ("PostgresPassword", "fixture"),
+            ("MaintenanceDatabase", "rriter_pgo"),
+        ):
+            set_database_field(s, field, value)
+        s.click("DatabaseDialogSave")
+        for _ in range(50):
+            state = s.dump()
+            if any(e.get("id") == "DatabaseConnectionArrow(0)" for e in state.get("ui", [])):
+                break
+            s.command("wait 100")
+        s.click("DatabaseConnectionArrow(0)")
+        for _ in range(100):
+            state = s.dump()
+            if any(e.get("id") == "DatabaseArrow(0, 0)" for e in state.get("ui", [])):
+                break
+            s.command("wait 100")
+        s.click("DatabaseArrow(0, 0)")
+        for _ in range(100):
+            state = s.dump()
+            if any(e.get("id", "").startswith("DatabaseTableRow(0, 0,") for e in state.get("ui", [])):
+                break
+            s.command("wait 100")
+        click_id(s, "DatabaseTableRow(0, 0, 0)", double=True)
+        for _ in range(100):
+            if s.dump().get("tabs") and any(t.get("kind") == "database_table" for t in s.dump()["tabs"]):
+                break
+            s.command("wait 100")
+        s.shot(out / "db-table.png")
+        s.close()
+        shots.append("db-table.png")
+
+        s = Session(scratch / (out.name + "-database-query-profile"), scratch / "sample-project", config)
+        s.click("SidebarSlot(Database)")
+        s.click("DatabaseAdd")
+        for field, value in (
+            ("DisplayName", "Theme database"), ("Host", "127.0.0.1"), ("Port", str(port)),
+            ("Username", "rriter_pgo"), ("PostgresPassword", "fixture"),
+            ("MaintenanceDatabase", "rriter_pgo"),
+        ):
+            set_database_field(s, field, value)
+        s.click("DatabaseDialogSave")
+        for _ in range(50):
+            if any(e.get("id") == "DatabaseConnectionArrow(0)" for e in s.dump().get("ui", [])):
+                break
+            s.command("wait 100")
+        s.click("DatabaseConnectionArrow(0)")
+        for _ in range(100):
+            if any(e.get("id") == "DatabaseRow(0, 0)" for e in s.dump().get("ui", [])):
+                break
+            s.command("wait 100")
+        state = s.dump()
+        row = next(e for e in state["ui"] if e.get("id") == "DatabaseRow(0, 0)")
+        x, y, width, height = row["rect"]
+        s.command(f"mouse_move {x + width / 2:g} {y + height / 2:g}")
+        s.command("click right")
+        for _ in range(30):
+            if any(e.get("id") == "DatabaseContextItem(0)" for e in s.dump().get("ui", [])):
+                break
+            s.command("wait 100")
+        s.click("DatabaseContextItem(0)")
+        for _ in range(100):
+            state = s.dump()
+            if any(e.get("id") == "DatabaseQueryRun" for e in state.get("ui", [])):
+                break
+            s.command("wait 100")
+        body = next(e for e in s.dump()["ui"] if e.get("id") == "EditorTextBody")
+        x, y, width, height = body["rect"]
+        click_at(s, x + width / 2, y + height / 2)
+        s.command("key ctrl+a")
+        s.command("type SELECT id, name, active FROM public.pgo_items ORDER BY id LIMIT 3;")
+        s.click("DatabaseQueryRun")
+        for _ in range(100):
+            if any(e.get("id") == "DatabaseQueryResultBody" for e in s.dump().get("ui", [])):
+                break
+            s.command("wait 100")
+        s.shot(out / "db-query.png")
+        s.close()
+        shots.append("db-query.png")
+    finally:
+        if fixture.stdin:
+            fixture.stdin.close()
+        try:
+            fixture.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            fixture.kill()
+            fixture.wait()
+    return shots
+
+
+def capture_hover(scratch: Path, out: Path, config: dict) -> str:
+    root = scratch / "rust-hover"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "Cargo.toml").write_text(
+        '[package]\nname = "theme_hover"\nversion = "0.1.0"\nedition = "2021"\n'
+        '[lib]\npath = "main.rs"\n', encoding="utf-8"
+    )
+    source = root / "main.rs"
+    source.write_text("fn main() {\n    hover_subject();\n}\n", encoding="utf-8")
+    fake = scratch / "rust-analyzer"
+    shutil.copyfile(ROOT / "scripts" / "fake_lsp_server.py", fake)
+    fake.chmod(0o755)
+    s = Session(scratch / (out.name + "-hover-profile"), root, config, extra_env={"RRITER_RUST_ANALYZER_PATH": str(fake)})
+    for _ in range(100):
+        if s.dump().get("tabs"):
+            break
+        s.command("wait 100")
+    state = s.dump()
+    body = next(e for e in state["ui"] if e.get("id") == "EditorTextBody")
+    x, y, _width, _height = body["rect"]
+    s.command(f"mouse_move {x + 5 * 8:g} {y + 1 * 18:g}")
+    s.command("wait 1000")
+    s.shot(out / "hover.png")
+    s.close()
+    return "hover.png"
+
+
 def capture(out: Path, theme_editor: str, theme_ui: str, linked: bool) -> list[str]:
     if not str(out.resolve()).startswith("/tmp/rriter-themes/"):
         raise ValueError("snapshot output must be under /tmp/rriter-themes/")
@@ -262,6 +527,10 @@ def capture(out: Path, theme_editor: str, theme_ui: str, linked: bool) -> list[s
     s.shot(out / "database-connection.png")
     s.close()
     shots.append("database-connection.png")
+
+    shots.extend(capture_api_screens(scratch, out, config))
+    shots.extend(capture_database_screens(scratch, out, config))
+    shots.append(capture_hover(scratch, out, config))
 
     settings = session("settings-probe", workspace)
     settings.command("key f1")
