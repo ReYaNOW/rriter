@@ -17,6 +17,9 @@ use winit::event_loop::ControlFlow;
 /// Pause after an idle `Wait` step, so background threads (highlighter, LSP, watcher) can
 /// deliver into the mpsc receivers that the next `about_to_wait` drains.
 const IDLE_WAIT_SLEEP: Duration = Duration::from_millis(5);
+/// Frame period of `wait`/`settle` while the app keeps redrawing, like a display would pace it:
+/// back-to-back frames kept a core busy in the driver's `glFinish`.
+pub(crate) const HEADLESS_FRAME_PACE: Duration = Duration::from_millis(8);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum StepState {
@@ -226,6 +229,7 @@ impl HeadlessSession {
 pub(crate) fn settle_loop(budget: Duration, mut step: impl FnMut() -> StepState) -> (u32, bool) {
     let start = Instant::now();
     let deadline = start.checked_add(budget).unwrap_or(start);
+    let mut frame_due = start;
     let mut frames = 0u32;
     let mut idle_waits = 0u8;
     while idle_waits < 2 {
@@ -236,6 +240,7 @@ pub(crate) fn settle_loop(budget: Duration, mut step: impl FnMut() -> StepState)
             StepState::Redrawn => {
                 frames = frames.saturating_add(1);
                 idle_waits = 0;
+                pace_drawn_frame(&mut frame_due, deadline);
             }
             StepState::Idle { flow: ControlFlow::Wait } => {
                 idle_waits += 1;
@@ -259,6 +264,13 @@ pub(crate) fn settle_loop(budget: Duration, mut step: impl FnMut() -> StepState)
         }
     }
     (frames, true)
+}
+
+/// After a drawn frame: waits out `HEADLESS_FRAME_PACE` since the frame due at `frame_due`
+/// (never past `deadline`) and moves `frame_due` on.
+pub(crate) fn pace_drawn_frame(frame_due: &mut Instant, deadline: Instant) {
+    *frame_due = next_frame_deadline(*frame_due, HEADLESS_FRAME_PACE, Instant::now());
+    sleep_until(*frame_due, deadline);
 }
 
 fn sleep_until(wake_at: Instant, deadline: Instant) {

@@ -711,10 +711,13 @@ impl HeadlessSession {
 
     fn wait(&mut self, duration: Duration) -> u32 {
         let started = Instant::now();
+        let deadline = started.checked_add(duration).unwrap_or(started);
+        let mut frame_due = started;
         let mut frames = 0u32;
-        while started.elapsed() < duration {
+        while Instant::now() < deadline {
             if self.step(false) {
                 frames = frames.saturating_add(1);
+                frame::pace_drawn_frame(&mut frame_due, deadline);
             } else {
                 std::thread::sleep(WAIT_IDLE_SLEEP);
             }

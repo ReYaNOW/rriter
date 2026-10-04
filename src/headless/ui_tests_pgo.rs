@@ -70,7 +70,7 @@ fn run_pgo_session_sized(
         session.app.preload_ide_session(saved, 0);
     }
     session.enter_pgo_scenario(&automation).expect("enter scenario start state");
-    let outcome = session.run_automation(None);
+    let outcome = session.run_automation(Some(crate::headless::frame::HEADLESS_FRAME_PACE));
     (outcome, session, automation.report_path)
 }
 
