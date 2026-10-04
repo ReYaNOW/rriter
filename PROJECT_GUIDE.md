@@ -1416,7 +1416,6 @@ Root:
 * `AGENTS.md` -> agent rules.
 * `PROJECT_AI_MAP.txt` -> fallback AI source index/call map; not exact source.
 * `PROJECT_GUIDE.md` -> broader architecture guide.
-* `src/theme.rs` -> theme IDs, syntax roles and palettes, editor theme construction.
 * `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
 * `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
 * `docs/superpowers/plans/2026-10-03-rust-support-release.md` -> rust-analyzer release tag and verified platform archive names, SHA-256 digests, sizes, and download URLs.
@@ -1724,6 +1723,7 @@ Editor/text:
 
 Rendering:
 
+* `src/theme.rs` -> theme IDs, syntax roles and palettes, editor theme construction.
 * `src/renderer.rs` -> include shell for OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
 * `src/renderer/*` -> renderer chunks for types, init, glyph cache, primitives/tests; `geometry.rs` stays primitive geometry.
 * `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.

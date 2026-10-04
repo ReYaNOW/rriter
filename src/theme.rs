@@ -74,7 +74,7 @@ pub(crate) enum SyntaxRole {
 }
 
 impl SyntaxRole {
-    pub(crate) const COUNT: usize = 14;
+    pub(crate) const COUNT: usize = Self::Interpolation as usize + 1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,9 +93,9 @@ impl SyntaxPalette {
     pub(crate) fn for_id(id: ThemeId) -> Self {
         let theme = theme_values(id);
         let fg = theme.fg;
-        let comment = theme.line_num;
+        let comment = theme.comment;
         let keyword = theme.keyword;
-        let keyword_control = theme.modified_unsaved;
+        let keyword_control = theme.keyword_control;
         let function = theme.function;
         let string = theme.string;
         let constant = theme.constant;
@@ -178,7 +178,9 @@ struct ThemeValues {
     diag_error: [f32; 4],
     unused: [f32; 4],
     surface_bg: [f32; 4],
+    comment: [f32; 4],
     keyword: [f32; 4],
+    keyword_control: [f32; 4],
     function: [f32; 4],
     string: [f32; 4],
     constant: [f32; 4],
@@ -211,20 +213,31 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             diag_error: [1.0, 0.333, 0.333, 1.0],
             unused: [0.48, 0.48, 0.48, 0.6],
             surface_bg: [0.173, 0.180, 0.224, 1.0],
+            comment: [0.384, 0.447, 0.643, 1.0],
             keyword: [0.545, 0.913, 0.992, 1.0],
+            keyword_control: [1.0, 0.474, 0.776, 1.0],
             function: [0.313, 0.980, 0.482, 1.0],
             string: [0.945, 0.980, 0.549, 1.0],
             constant: [0.741, 0.576, 0.976, 1.0],
             parameter: [0.973, 0.584, 0.502, 1.0],
             class: [0.45, 0.85, 0.90, 1.0],
             md_code: [0.902, 0.714, 0.451, 1.0],
-            terminal: crate::app::terminal::ANSI_16_COLORS,
+            terminal: [
+                [0.10, 0.10, 0.10, 1.0], [0.95, 0.30, 0.30, 1.0],
+                [0.30, 0.85, 0.30, 1.0], [0.90, 0.85, 0.20, 1.0],
+                [0.30, 0.60, 1.00, 1.0], [0.90, 0.35, 0.90, 1.0],
+                [0.20, 0.85, 0.85, 1.0], [0.90, 0.90, 0.90, 1.0],
+                [0.45, 0.45, 0.45, 1.0], [1.00, 0.40, 0.40, 1.0],
+                [0.40, 1.00, 0.40, 1.0], [1.00, 1.00, 0.40, 1.0],
+                [0.50, 0.70, 1.00, 1.0], [1.00, 0.50, 1.00, 1.0],
+                [0.40, 1.00, 1.00, 1.0], [1.00, 1.00, 1.00, 1.0],
+            ],
         },
         ThemeId::OneDark => ThemeValues {
             bg: rgb(0x282c34), fg: rgb(0xabb2bf), minimap_bg: rgb(0x21252b),
             line_num: rgb(0x636d83), selection: rgb(0x3e4451), modified_unsaved: rgb(0xc678dd), modified_saved: rgb(0x98c379),
             diag_warn: rgb(0xe5c07b), diag_error: rgb(0xe06c75), unused: [0.48, 0.48, 0.48, 0.6],
-            surface_bg: rgb(0x2c313a), keyword: rgb(0xe5c07b), function: rgb(0x61afef),
+            surface_bg: rgb(0x2c313a), comment: rgb(0x7f848e), keyword: rgb(0xe5c07b), keyword_control: rgb(0xc678dd), function: rgb(0x61afef),
             string: rgb(0x98c379), constant: rgb(0xd19a66), parameter: rgb(0xe06c75),
             class: rgb(0xe5c07b), md_code: rgb(0xd19a66),
             terminal: [0x3f4451,0xe06c75,0x98c379,0xe5c07b,0x61afef,0xc678dd,0x56b6c2,0xd7dae0,0x5c6370,0xef7f88,0xa9d48a,0xf0cc8c,0x74bdf5,0xd38be6,0x6bc6d2,0xf0f2f5].map(rgb),
@@ -233,7 +246,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             bg: rgb(0x2d353b), fg: rgb(0xd3c6aa), minimap_bg: rgb(0x272e33),
             line_num: rgb(0x7a8478), selection: rgb(0x475258), modified_unsaved: rgb(0xd699b6), modified_saved: rgb(0xa7c080),
             diag_warn: rgb(0xdbbc7f), diag_error: rgb(0xe67e80), unused: [0.48, 0.48, 0.48, 0.6],
-            surface_bg: rgb(0x343f44), keyword: rgb(0x7fbbb3), function: rgb(0xa7c080),
+            surface_bg: rgb(0x343f44), comment: rgb(0x859289), keyword: rgb(0x7fbbb3), keyword_control: rgb(0xe67e80), function: rgb(0xa7c080),
             string: rgb(0xdbbc7f), constant: rgb(0xd699b6), parameter: rgb(0xe69875),
             class: rgb(0x83c092), md_code: rgb(0xdbbc7f),
             terminal: [0x475258,0xe67e80,0xa7c080,0xdbbc7f,0x7fbbb3,0xd699b6,0x83c092,0xd3c6aa,0x859289,0xf0959a,0xb8d08f,0xe6c98e,0x93c9c1,0xe2a9c4,0x96d0a4,0xe8dcc0].map(rgb),
@@ -242,7 +255,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             bg: rgb(0xf4ecd8), fg: rgb(0x5b4636), minimap_bg: rgb(0xebe1c8),
             line_num: rgb(0x9c8c74), selection: rgb(0xe3d3b0), modified_unsaved: rgb(0xa8467a), modified_saved: rgb(0x56701a),
             diag_warn: rgb(0x9a6a00), diag_error: rgb(0xb23a2a), unused: [0.45, 0.45, 0.45, 0.6],
-            surface_bg: rgb(0xede3cb), keyword: rgb(0x2f6f7e), function: rgb(0x56701a),
+            surface_bg: rgb(0xede3cb), comment: rgb(0x857560), keyword: rgb(0x2f6f7e), keyword_control: rgb(0xa0442c), function: rgb(0x56701a),
             string: rgb(0x86600c), constant: rgb(0x7a4e8c), parameter: rgb(0xa85a14),
             class: rgb(0x2e7562), md_code: rgb(0x86600c),
             terminal: [0x3b2e24,0xa0442c,0x56701a,0x86600c,0x2f6f7e,0x7a4e8c,0x2e7562,0x5b4636,0x8a7a62,0xb5512f,0x627f1f,0x9a6f10,0x2b7f92,0x8c5aa0,0x33856f,0x3b2e24].map(rgb),
@@ -251,7 +264,7 @@ fn theme_values(id: ThemeId) -> ThemeValues {
             bg: rgb(0xfafafa), fg: rgb(0x383a42), minimap_bg: rgb(0xeeeeef),
             line_num: rgb(0x9d9d9f), selection: rgb(0xdcdde3), modified_unsaved: rgb(0xa626a4), modified_saved: rgb(0x478f46),
             diag_warn: rgb(0xa96f00), diag_error: rgb(0xd84a3d), unused: [0.45, 0.45, 0.45, 0.6],
-            surface_bg: rgb(0xf0f0f1), keyword: rgb(0xa96f00), function: rgb(0x4078f2),
+            surface_bg: rgb(0xf0f0f1), comment: rgb(0x8a8b92), keyword: rgb(0xa96f00), keyword_control: rgb(0xa626a4), function: rgb(0x4078f2),
             string: rgb(0x478f46), constant: rgb(0x986801), parameter: rgb(0xd84a3d),
             class: rgb(0xa96f00), md_code: rgb(0x986801),
             terminal: [0x383a42,0xd84a3d,0x478f46,0xa96f00,0x4078f2,0xa626a4,0x0184bc,0x383a42,0x84858c,0xc4433a,0x3f7f3e,0x956200,0x3366d6,0x921f90,0x0172a3,0x202227].map(rgb),
@@ -355,6 +368,35 @@ mod tests {
         ];
         for (index, expected) in expected.into_iter().enumerate() { assert_eq!(syntax.colors[index], expected); }
         for id in ThemeId::ALL { assert_eq!(UiPalette::for_id(id), UiPalette::for_id(ThemeId::Dracula)); }
+    }
+
+    #[test]
+    fn editor_theme_values_match_spec_hex_literals() {
+        // bg, surface, minimap, fg, line_num, selection, modified, saved, warn, error,
+        // comment, keyword, keyword_control, function, string, constant, parameter, class, md_code.
+        let expected = [
+            [0x282c34, 0x2c313a, 0x21252b, 0xabb2bf, 0x636d83, 0x3e4451, 0xc678dd, 0x98c379, 0xe5c07b, 0xe06c75, 0x7f848e, 0xe5c07b, 0xc678dd, 0x61afef, 0x98c379, 0xd19a66, 0xe06c75, 0xe5c07b, 0xd19a66],
+            [0x2d353b, 0x343f44, 0x272e33, 0xd3c6aa, 0x7a8478, 0x475258, 0xd699b6, 0xa7c080, 0xdbbc7f, 0xe67e80, 0x859289, 0x7fbbb3, 0xe67e80, 0xa7c080, 0xdbbc7f, 0xd699b6, 0xe69875, 0x83c092, 0xdbbc7f],
+            [0xf4ecd8, 0xede3cb, 0xebe1c8, 0x5b4636, 0x9c8c74, 0xe3d3b0, 0xa8467a, 0x56701a, 0x9a6a00, 0xb23a2a, 0x857560, 0x2f6f7e, 0xa0442c, 0x56701a, 0x86600c, 0x7a4e8c, 0xa85a14, 0x2e7562, 0x86600c],
+            [0xfafafa, 0xf0f0f1, 0xeeeeef, 0x383a42, 0x9d9d9f, 0xdcdde3, 0xa626a4, 0x478f46, 0xa96f00, 0xd84a3d, 0x8a8b92, 0xa96f00, 0xa626a4, 0x4078f2, 0x478f46, 0x986801, 0xd84a3d, 0xa96f00, 0x986801],
+        ];
+        for (id, row) in ThemeId::ALL[1..].iter().copied().zip(expected) {
+            let theme = Theme::for_id(id, [0.0; 4]);
+            let theme_fields = [
+                theme.bg, theme.surface_bg, theme.minimap_bg, theme.fg, theme.line_num,
+                theme.sel, theme.modified_unsaved, theme.modified_saved, theme.diag_warn, theme.diag_error,
+            ];
+            for (actual, hex) in theme_fields.into_iter().zip(row[..10].iter().copied()) {
+                assert_eq!(actual, rgb(hex), "{:?} theme field #{hex:06x}", id);
+            }
+
+            let expected_roles = [
+                rgb(row[3]), rgb(row[10]), rgb(row[11]), rgb(row[12]), rgb(row[13]), rgb(row[14]),
+                rgb(row[15]), rgb(row[16]), rgb(row[17]), rgb(row[18]), rgb(row[10]), rgb(row[4]),
+                rgb(row[3]), rgb(row[3]),
+            ];
+            assert_eq!(theme.syntax.colors, expected_roles, "{:?} syntax roles", id);
+        }
     }
 
     #[test]
