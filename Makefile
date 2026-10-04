@@ -9,8 +9,9 @@ BUILD_STD = -Z build-std=core,alloc,std,panic_abort,test
 TARGET = x86_64-unknown-linux-gnu
 CODEX_ENV = HOME=/home/reyan RUSTUP_HOME=/home/reyan/.local/share/rustup CARGO_HOME=/home/reyan/.local/share/cargo
 
-# Настройки для быстрой сборки (DEBUG=2 дает трейсбеки, PANIC=abort работает с RUST_BACKTRACE)
-FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort
+# Настройки для быстрой сборки (DEBUG=line-tables-only дает трейсбеки с файлами и строками
+# без полного debuginfo — тестовые бинарники в разы меньше; PANIC=abort работает с RUST_BACKTRACE)
+FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only CARGO_PROFILE_RELEASE_PANIC=abort
 
 # Ультимативные флаги (Fat LTO, v0 mangling, Identical Code Folding, Linker O3)
 # Fat LTO задаётся профилем (MAX_PROFILE_OPTS), а не -C lto=fat в RUSTFLAGS: флаг в RUSTFLAGS
@@ -91,9 +92,13 @@ bloat-max:
 	--crates \
 	-n 40
 
+# lint_changed (clippy в target/debug) идёт параллельно тестам: каталоги сборки разные,
+# а прогон тестов в основном ждёт; вывод lint печатается после тестов.
 codex_test: pdfium
-	@python3 scripts/lint_changed.py
-	@$(CODEX_ENV) $(MAKE) test PDFIUM_READY=1
+	@python3 scripts/lint_changed.py > target/lint_changed.log 2>&1 & lint=$$!; \
+	$(CODEX_ENV) $(MAKE) test PDFIUM_READY=1; test_status=$$?; \
+	wait $$lint; lint_status=$$?; cat target/lint_changed.log; \
+	[ $$test_status -eq 0 ] && [ $$lint_status -eq 0 ]
 	@$(CODEX_ENV) $(MAKE) fast
 
 lint-baseline:
@@ -186,8 +191,9 @@ test-list:
 
 
 # Тесты с таймингами.
-test-time:
+test-time: $(if $(PDFIUM_READY),,pdfium)
 	@echo "⏱️ Запуск тестов с таймингами..."
+	RRITER_PDFIUM_PATH=$$(cat target/pdfium.path) \
 	$(FAST_PROFILE_OPTS) \
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \

@@ -246,7 +246,7 @@ impl App {
                 if self.show_search && self.search_anim_y > -10.0 {
                     let geometry =
                         crate::render_view::search::search_panel_geometry(scrollbar_x, s);
-                    let search_h = 52.0 * s;
+                    let search_h = crate::render_view::search::SEARCH_PANEL_H * s;
                     if mx >= geometry.x
                         && mx <= geometry.x + geometry.w
                         && my >= self.search_anim_y
@@ -876,7 +876,7 @@ impl App {
                         );
                         let geometry =
                             crate::render_view::search::search_panel_geometry(scrollbar_x, s);
-                        let search_h = 52.0 * s;
+                        let search_h = crate::render_view::search::SEARCH_PANEL_H * s;
                         let input_x = geometry.x + 10.0 * s;
                         let input_y = self.search_anim_y + 11.0 * s;
                         let input_w = geometry.input_w;
