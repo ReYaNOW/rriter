@@ -217,6 +217,9 @@ what `bench` measures.
 - RRiter state lives in the profile root, `--profile DIR` or a temp directory
   `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless-<pid>/` removed on exit unless
   `--keep-profile`. The live editor and other headless runs are untouched.
+  A reused `--profile DIR` restores the IDE panel layout (`panels.txt`,
+  `save_panel_state` in `src/state_persistence.rs`); sidebar clicks toggle, so
+  it inverts them. Use a fresh profile per run unless the scenario tests restore.
 - Opened files, file-tree mutations and Git are not written without
   `--allow-writes`; a blocked save shows the usual read-only notice. Saving a
   protected file never asks for elevation (`pkexec`) in headless mode.
@@ -264,9 +267,36 @@ skipped and listed in `skipped_groups`; the run still succeeds. The pipeline tre
 The pipeline runs `--scenarios full,startup,welcome` on Linux (`--install-binary PATH` copies the
 result); on other platforms it runs the GUI `full` scenario.
 
+## Writing UI tests
+
+Walk the scenario through the driver before writing assertions: one step at a
+time, `dump` after each (`tabs`, `overlays`, `ide_panel`, the element clicked
+next). Dumps validate setup, navigation and waits; expected values come from
+the task requirements, not from observed output. A test stops at its first
+failing assert and hides every broken step after it, so a scenario not walked
+first tends to cost a fix round per hidden step.
+
+Traps found the hard way:
+
+- A file opened without a workspace loads in editor mode with no tab
+  (`src/app/app_file_tab_methods.rs:364`); open a folder first if the scenario
+  needs tabs.
+- The active tab's state (spans, cursor, highlighter) lives in `App` fields;
+  `app.tabs[app.active_tab]` is stale until `sync_active_tab`
+  (`src/app/app_ide_tab_methods.rs`). Rust tests read the active tab from `App`.
+- `ctrl+tab` is not bound: tabs switch with `mod+pagedown` / `mod+pageup`
+  (`src/keymap/defaults.rs:35-36`) or a click on the tab.
+- A reused profile restores panels (see Isolation).
+- Closing settings keeps dimming the editor during the slide-out. Rust tests:
+  `wait_until` on `overlays.settings == false` and
+  `app.settings_anim_progress <= 0.0` (`src/headless/ui_tests_themes.rs:63-66`).
+  Driver: `dump` has no animation progress; after `overlays.settings` turns
+  false, `settle 2000` until `settled=true`, then `screenshot <png>` in the
+  same session.
+
 ## Limits
 
-- Animations run on the real clock; `wait` is the only way to let them pass.
+- Animations run on the real clock; `wait`/`settle` are the only ways to let them pass.
 - `type` cannot send leading spaces (the text starts at the first non-blank
   character); use `key space`.
 - The unsaved-changes dialog answers only to `dialog`/`key escape`.
