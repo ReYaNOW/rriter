@@ -21,18 +21,28 @@ DRIVER = ROOT / "scripts" / "rriter_headless.py"
 SIZE = "1280x720"
 SCALE = "1"
 THEMES = {"dracula", "one_dark", "forest", "sepia", "one_light"}
-# Status clock and transient caret area; fixed in framebuffer coordinates.
+# Wiped at the start of every capture. Paths inside it are shown on screen (Settings shows the
+# workspace path), so it must stay the same for every run and theme.
+FIXTURES = Path("/tmp/rriter-themes/fixtures")
+# Status clock, transient caret area and the API fixture URL (its port is ephemeral, the mask
+# must cover the whole text line); fixed in framebuffer coordinates.
 MASKS = {
     "status-bar.png": [(1170, 690, 1280, 720)],
-    "api-response.png": [(58, 470, 278, 500), (370, 568, 580, 592)],
-    "api-auth.png": [(58, 470, 278, 500), (58, 570, 278, 592)],
+    "api-response.png": [(58, 460, 278, 500), (370, 568, 580, 592)],
+    "api-auth.png": [(58, 460, 278, 500), (58, 570, 278, 592)],
     "db-query.png": [(295, 467, 660, 496)],
 }
 
 
 class Session:
     def __init__(self, profile: Path, workspace: Path | None, config: dict, extra_env: dict | None = None):
-        profile.mkdir(parents=True, exist_ok=True)
+        # The app persists open sidebar panels and tabs into the profile (`panels.txt`,
+        # `tabs_ide.txt`), and sidebar slots toggle: a reused profile restores e.g. the Git panel
+        # open, and the scripted click then closes it. Every session starts from an empty profile.
+        if not profile.resolve().is_relative_to(FIXTURES):
+            raise ValueError(f"profile must be under {FIXTURES}: {profile}")
+        shutil.rmtree(profile, ignore_errors=True)
+        profile.mkdir(parents=True)
         config_dir = profile / "config"
         config_dir.mkdir(exist_ok=True)
         (config_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
@@ -355,10 +365,11 @@ def capture_database_screens(scratch: Path, out: Path, config: dict) -> list[str
                 break
             s.command("wait 100")
         click_id(s, "DatabaseTableRow(0, 0, 0)", double=True)
-        for _ in range(100):
-            if s.dump().get("tabs") and any(t.get("kind") == "database_table" for t in s.dump()["tabs"]):
-                break
-            s.command("wait 100")
+        # The tab opens before its rows and row count arrive; wait for the first cell and for the
+        # panel's pending job to finish (DatabaseRefresh is only registered while none is pending).
+        s.wait_for_ui("DatabaseTableCell(0, 0)", timeout=15)
+        s.wait_for_ui("DatabaseRefresh", timeout=15)
+        s.command("settle 500")
         s.shot(out / "db-table.png")
         s.close()
         shots.append("db-table.png")
@@ -452,12 +463,12 @@ def capture(out: Path, theme_editor: str, theme_ui: str, linked: bool) -> list[s
     if not str(out.resolve()).startswith("/tmp/rriter-themes/"):
         raise ValueError("snapshot output must be under /tmp/rriter-themes/")
     out.mkdir(parents=True, exist_ok=True)
-    scratch = Path("/tmp/rriter-themes/fixtures")
-    scratch.mkdir(parents=True, exist_ok=True)
+    # Fresh fixtures every run, at fixed paths: the Git screens show the working tree state.
+    scratch = FIXTURES
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
     workspace = scratch / "sample-project"
-    if not (workspace / ".git").exists() or not (workspace / "main.rs").exists():
-        shutil.rmtree(workspace, ignore_errors=True)
-        git_fixture(workspace)
+    git_fixture(workspace)
     config = {"theme_linked": linked, "editor_theme": theme_editor, "ui_theme": theme_ui}
     shots: list[str] = []
 
