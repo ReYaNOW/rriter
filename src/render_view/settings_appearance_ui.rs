@@ -1,6 +1,6 @@
 use crate::renderer::Renderer;
 use crate::renderer::Theme;
-use crate::theme::{SyntaxRole, ThemeId};
+use crate::theme::{SyntaxPalette, SyntaxRole, ThemeId};
 use crate::ui_system::{ThemeTarget, UiId, UiRegistry};
 
 pub(super) fn draw(
@@ -24,7 +24,7 @@ pub(super) fn draw(
     let mut row_y = (y + (34.0 * s).round()).round();
 
     for theme_id in ThemeId::ALL {
-        let theme = Theme::for_id(theme_id, [0.0; 4]);
+        let syntax = SyntaxPalette::for_id(theme_id);
         let row_rect = (x, row_y, width, row_h);
         let hovered = ui.register_rect(
             UiId::SettingsThemePick(ThemeTarget::Both, theme_id),
@@ -40,12 +40,18 @@ pub(super) fn draw(
         }
 
         let sample_y = (row_y + ((row_h - sample_h) * 0.5).round()).round();
-        renderer.push_rect(x.round(), sample_y, sample_w, sample_h, theme.bg);
+        renderer.push_rect(
+            x.round(),
+            sample_y,
+            sample_w,
+            sample_h,
+            Theme::background_for_id(theme_id),
+        );
         let colors = [
-            theme.syntax.color(SyntaxRole::KeywordControl),
-            theme.syntax.color(SyntaxRole::Function),
-            theme.syntax.color(SyntaxRole::String),
-            theme.syntax.color(SyntaxRole::Constant),
+            syntax.color(SyntaxRole::KeywordControl),
+            syntax.color(SyntaxRole::Function),
+            syntax.color(SyntaxRole::String),
+            syntax.color(SyntaxRole::Constant),
         ];
         let mut swatch_x = (x + (7.0 * s).round()).round();
         for color in colors {
@@ -55,7 +61,7 @@ pub(super) fn draw(
         renderer.draw_string_scaled(
             theme_id.label(),
             (x + sample_w + 14.0 * s).round(),
-            (row_y + (row_h * 0.5).round() + (5.0 * s).round()).round(),
+            Renderer::tree_row_text_y(row_y, row_h, s),
             palette.text,
             1.0,
         );

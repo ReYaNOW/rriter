@@ -20,6 +20,11 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     std::fs::write(&inactive_file, "if False:\n    print('inactive')\n")
         .expect("write inactive Python fixture");
     let mut session = session_for_test(1280, 800);
+    let workspace = run_script(
+        &mut session,
+        format!("workspace {}\n", dir.display()).as_bytes(),
+    );
+    assert!(workspace.iter().all(|line| line.starts_with("ok")), "{workspace:?}");
     let opened = run_script(
         &mut session,
         format!("open {}\nsettle 2000\n", file.display()).as_bytes(),
@@ -33,7 +38,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         format!("open {}\nsettle 2000\n", inactive_file.display()).as_bytes(),
     );
     assert!(opened.iter().all(|line| line.starts_with("ok")), "{opened:?}");
-    wait_until(&mut session, 5000, "inactive Python highlight", |session| {
+    wait_until(&mut session, 5000, "second Python tab highlight", |session| {
         session.app.tabs.len() == 2 && session.app.tabs[1].is_highlight_complete
     });
     let highlight_version = session.app.highlighter.current_version;
@@ -51,6 +56,8 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         session.app.renderer.as_ref().expect("renderer").theme_gen,
         initial_theme_gen + 1,
     );
+    let closed_settings = run_script(&mut session, b"key escape\n");
+    assert!(closed_settings.iter().all(|line| line == "ok"), "{closed_settings:?}");
     let switched = run_script(&mut session, b"key ctrl+tab\n");
     assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
     assert_eq!(session.app.active_tab, 0);
@@ -58,15 +65,59 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         .spans
         .iter()
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
+    assert_keyword_pixel(
+        &mut session,
+        &dir.join("active-theme.png"),
+        crate::theme::SyntaxPalette::for_id(ThemeId::Sepia)
+            .color(crate::theme::SyntaxRole::KeywordControl),
+    );
 
-    session.app.pdf_dark_pages = true;
+    let switched = run_script(&mut session, b"key ctrl+tab\n");
+    assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
+    assert_eq!(session.app.active_tab, 1);
+    assert!(session.app.tabs[1]
+        .spans
+        .iter()
+        .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
+    assert_keyword_pixel(
+        &mut session,
+        &dir.join("inactive-theme.png"),
+        crate::theme::SyntaxPalette::for_id(ThemeId::Sepia)
+            .color(crate::theme::SyntaxRole::KeywordControl),
+    );
+
     let changed_theme_gen = session.app.renderer.as_ref().expect("renderer").theme_gen;
     session.app.apply_themes(ThemeId::Sepia, ThemeId::Sepia);
-    assert!(session.app.pdf_dark_pages);
     assert_eq!(session.app.renderer.as_ref().expect("renderer").theme_gen, changed_theme_gen);
+
+    session.app.pdf_dark_pages = true;
+    session.app.apply_themes(ThemeId::Sepia, ThemeId::OneDark);
+    assert!(session.app.pdf_dark_pages);
+    assert_eq!(session.app.renderer.as_ref().expect("renderer").theme_gen, changed_theme_gen + 1);
 
     drop(session);
     let session = session_for_test(1280, 800);
     assert_eq!(session.app.editor_theme_id, ThemeId::Sepia);
-    assert_eq!(session.app.ui_theme_id, ThemeId::Sepia);
+    assert_eq!(session.app.ui_theme_id, ThemeId::OneDark);
+}
+
+fn assert_keyword_pixel(
+    session: &mut crate::headless::HeadlessSession,
+    screenshot_path: &std::path::Path,
+    expected: [f32; 4],
+) {
+    let response = run_script(
+        session,
+        format!("screenshot {}\n", screenshot_path.display()).as_bytes(),
+    );
+    assert!(response.iter().all(|line| line.starts_with("ok")), "{response:?}");
+    let screenshot = image::open(screenshot_path).expect("read theme screenshot").to_rgba8();
+    let expected = expected.map(|channel| (channel * 255.0).round() as i16);
+    assert!(
+        screenshot.pixels().any(|pixel| {
+            (0..3).all(|channel| (i16::from(pixel.0[channel]) - expected[channel]).abs() <= 8)
+        }),
+        "keyword color {expected:?} missing from {}",
+        screenshot_path.display(),
+    );
 }

@@ -279,6 +279,10 @@ fn theme_values(id: ThemeId) -> ThemeValues {
 }
 
 impl Theme {
+    pub(crate) fn background_for_id(id: ThemeId) -> [f32; 4] {
+        theme_values(id).bg
+    }
+
     pub(crate) fn for_id(id: ThemeId, system_selection: [f32; 4]) -> Self {
         let values = theme_values(id);
         let (search_match, search_match_active, diff_added) = if id.is_dark() {

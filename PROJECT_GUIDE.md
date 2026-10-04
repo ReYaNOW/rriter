@@ -1446,6 +1446,7 @@ Root:
 * `src/render_view/pdf_view.rs` -> PDF loading/error states, textured pages, search/selection highlights, page hit targets, and the text-layer hit region.
 * `src/headless/ui_tests_pdf.rs` -> PDF tab lifecycle, rasterized pages, input, invalid documents, path deduplication, tab switching/closing, and missing-engine tests.
 * `src/headless/ui_tests_image_viewer.rs` -> image tab loading/errors, SVG decoding, reload after file changes, and wheel zoom input.
+* `src/headless/ui_tests_themes.rs` -> appearance theme selection, config persistence, PDF page mode, and syntax-color pixel regressions.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.
@@ -1522,6 +1523,7 @@ Entrypoints/state:
 * `src/startup_environment.rs` -> startup environment: theme/selection colors, KDE colors, EGL vendor preference, Rayon thread cap, project-search probe, and tests.
 * `src/headless_ty_mem_probe.rs` -> headless ty LSP memory probe (`--headless-ty-mem`): smaps/RSS sampling of LSP child processes.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/app_theme_methods.rs` -> theme selection state, render generation, PDF page mode, and persisted theme configuration.
 * `src/app/app_state_problems.rs` -> Problems panel row cache and its diagnostic source references.
 * `src/app/app_state_tests.rs` -> `app_state.rs` test chunk: panel group/visibility/focus state regressions.
 * `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
