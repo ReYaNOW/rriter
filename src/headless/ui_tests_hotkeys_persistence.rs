@@ -1,6 +1,6 @@
 //! Headless tests for configurable hotkey config loading and persistence.
 
-use crate::headless::tests_support::{click_ui, open_settings_tab, run_script, session_for_test};
+use crate::headless::tests_support::{click_ui, dump, open_settings_tab, run_script, session_for_test};
 use crate::headless::HeadlessSession;
 use crate::keymap::{Chord, Command};
 use serde_json::{json, Value};
@@ -76,7 +76,24 @@ fn headless_hotkeys_settings_persists_diff_remove_reset_and_skipped_values() {
     assert_eq!(saved["keymap"]["future.command"], unknown);
     assert_eq!(saved["keymap"].as_object().unwrap().len(), 2, "config should contain only explicit diffs and preserved unknown ids");
 
-    click_ui(&mut session, &format!("SettingsKeymapRemove({},1)", Command::FileSave as usize));
+    let state = dump(&mut session);
+    let remove_ids = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|element| element["id"].as_str())
+        .filter(|id| id.starts_with(&format!("SettingsKeymapRemove({},", Command::FileSave as usize)))
+        .collect::<Vec<_>>();
+    let second_chord_remove_id = remove_ids
+        .iter()
+        .copied()
+        .find(|id| {
+            id.strip_prefix(&format!("SettingsKeymapRemove({},", Command::FileSave as usize))
+                .and_then(|tail| tail.strip_suffix(')'))
+                .is_some_and(|index| index.trim() == "1")
+        })
+        .unwrap_or_else(|| panic!("file.save second chord remove button missing: {state}"));
+    click_ui(&mut session, second_chord_remove_id);
     let saved = read_config(&path);
     assert_eq!(saved["keymap"]["file.save"], json!(["mod+s", skipped]));
     assert_eq!(saved["keymap"]["future.command"], unknown);
