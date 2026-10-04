@@ -11,6 +11,7 @@ import struct
 import threading
 import subprocess
 import sys
+import time
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,11 +61,18 @@ class Session:
     def dump(self) -> dict:
         return json.loads(self.command("dump"))
 
+    def wait_for_ui(self, wanted: str, timeout: float = 10.0) -> dict:
+        deadline = time.monotonic() + timeout
+        while True:
+            element = next((e for e in self.dump().get("ui", []) if e.get("id") == wanted), None)
+            if element:
+                return element
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"UI element missing: {wanted} (waited {timeout:g}s)")
+            self.command("wait 100")
+
     def click(self, wanted: str) -> dict:
-        state = self.dump()
-        element = next((e for e in state.get("ui", []) if e.get("id") == wanted), None)
-        if not element:
-            raise RuntimeError(f"UI element missing: {wanted}")
+        element = self.wait_for_ui(wanted)
         x, y, width, height = element["rect"]
         self.command(f"mouse_move {x + width / 2:g} {y + height / 2:g}")
         self.command("click")
@@ -223,10 +231,7 @@ def click_at(s: Session, x: float, y: float, double: bool = False) -> None:
 
 
 def click_id(s: Session, wanted: str, double: bool = False) -> dict:
-    state = s.dump()
-    element = next((e for e in state.get("ui", []) if e.get("id") == wanted), None)
-    if not element:
-        raise RuntimeError(f"UI element missing: {wanted}")
+    element = s.wait_for_ui(wanted)
     x, y, width, height = element["rect"]
     click_at(s, x + width / 2, y + height / 2, double)
     return s.dump()
