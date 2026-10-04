@@ -77,6 +77,26 @@ fn markdown_toggle_consumes_chord_before_project_search_text_input() {
 }
 
 #[test]
+fn fps_toggle_chord_falls_through_while_terminal_has_keyboard_focus() {
+    let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+        panic!("test app must initialize");
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.ide_panel.open(crate::app::PanelId::Terminal);
+    app.ide_panel.terminal_focused = true;
+    bind_chord(&mut app, crate::keymap::Command::ViewToggleFps, "mod+f");
+    let show_fps = app.show_fps;
+
+    press_key(
+        &mut app,
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyF),
+    );
+
+    assert_eq!(app.show_fps, show_fps);
+}
+
+#[test]
 fn tabs_switch_next_chord_changes_active_editor_tab() {
     let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
         panic!("test app must initialize");

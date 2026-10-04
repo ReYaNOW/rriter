@@ -42,7 +42,6 @@ fn hover_popup() -> crate::app::mouse::HoverPopup {
 }
 
 #[test]
-#[ignore = "requires a Window; test_app() has none and this branch unwraps it for redraw"]
 fn escape_clears_hover_and_closes_git_commit_menu() {
     let mut app = test_app();
     app.hover.popup = Some(hover_popup());
@@ -55,7 +54,6 @@ fn escape_clears_hover_and_closes_git_commit_menu() {
 }
 
 #[test]
-#[ignore = "requires a Window; test_app() has none and this branch unwraps it for redraw"]
 fn escape_clears_hover_and_api_mock_constraint_menu() {
     let mut app = test_app();
     app.hover.popup = Some(hover_popup());
@@ -73,8 +71,7 @@ fn escape_clears_hover_and_api_mock_constraint_menu() {
 }
 
 #[test]
-#[ignore = "requires a Window; test_app() has none and this branch unwraps it for redraw"]
-fn escape_closes_inline_git_popup_before_hover_popup() {
+fn escape_closes_inline_git_popup_before_git_commit_menu() {
     let mut app = test_app();
     app.inline_git_popup = Some(crate::app::InlineGitPopup {
         hunk_idx: 0,
@@ -83,12 +80,12 @@ fn escape_closes_inline_git_popup_before_hover_popup() {
         spans: Vec::new(),
         diff_state: crate::app::git_diff::build_diff_view(String::new(), String::new()),
     });
-    app.hover.popup = Some(hover_popup());
+    app.ide_panel.git.commit_menu_opened_at = Some(std::time::Instant::now());
 
     press(&mut app, KeyCode::Escape, winit::keyboard::ModifiersState::empty());
 
     assert!(app.inline_git_popup.is_none());
-    assert!(app.hover.popup.is_some());
+    assert!(app.ide_panel.git.commit_menu_open());
 }
 
 #[test]
