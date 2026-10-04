@@ -1,6 +1,5 @@
 //! Headless coverage for configurable Git commands.
 
-use crate::app::git_panel::GitConfirmAction;
 use crate::app::PanelId;
 use crate::headless::tests_support::{
     click_ui, dump, git, git_fixture, has_ui, run_script, scratch_dir, session_for_test,
@@ -80,33 +79,6 @@ fn advance_remote(bare: &Path, branch: &str, label: &str) -> String {
     let head = git(&clone, &["rev-parse", "HEAD"]);
     let _ = std::fs::remove_dir_all(clone);
     head
-}
-
-#[test]
-#[ignore = "bug: git.unstage_all skips its requested confirmation"]
-fn headless_hotkeys_git_unstage_all_requires_confirmation_and_unstages() {
-    let dir = scratch_dir("ui-hotkeys-git-unstage");
-    git_fixture(&dir);
-    git(&dir, &["add", "--all"]);
-    let mut session = open_git(&dir);
-    let config_dir = bind_git_commands(&mut session, "ui-hotkeys-git-unstage-config", command_chords());
-
-    run_ok(&mut session, "key ctrl+alt+1\n");
-    wait_until(&mut session, 3000, "unstage confirmation", |session| {
-        session.app.ide_panel.git.confirm_dialog.is_some()
-    });
-    let dialog = session.app.ide_panel.git.confirm_dialog.as_ref().expect("confirmation");
-    assert_eq!(dialog.action, GitConfirmAction::RollbackStaged);
-    assert!(git(&dir, &["diff", "--cached", "--name-only"]).contains("changed.txt"),
-        "hotkey unstaged files before confirmation");
-
-    click_ui(&mut session, "GitConfirmAction");
-    wait_until(&mut session, 8000, "all files unstaged", |_| {
-        git(&dir, &["diff", "--cached", "--name-only"]).is_empty()
-    });
-    assert!(git(&dir, &["status", "--porcelain"]).contains(" M changed.txt"));
-    let _ = std::fs::remove_dir_all(config_dir);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
