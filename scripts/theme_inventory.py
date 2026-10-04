@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import struct
 from pathlib import Path
 
 
@@ -51,6 +52,8 @@ CHANNEL = re.compile(
 BYTE_CHANNEL = re.compile(r"(?:[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?)(?:\s*/\s*255\.0)")
 WHITE = re.compile(r"\[\s*1\.0\s*,\s*1\.0\s*,\s*1\.0\s*,\s*([^\]]+)\]")
 THEME_FIELD = re.compile(r"\btheme\.([A-Za-z_][A-Za-z_0-9]*)")
+DRACULA_FIELDS = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*):\s*(\[[^\]]*\]),?$", re.MULTILINE)
+EXCEPTIONS: dict[tuple[float, ...], str] = {}
 
 
 def is_test_file(path: Path) -> bool:
@@ -146,13 +149,83 @@ def group_for(rel: str) -> int:
     return 13
 
 
+def f32(value: float) -> float:
+    return struct.unpack("!f", struct.pack("!f", value))[0]
+
+
+def parse_color(value: str) -> tuple[float, ...] | None:
+    parts = [part.strip() for part in value.strip()[1:-1].split(",")]
+    if len(parts) != 4:
+        return None
+    result = []
+    for part in parts:
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)(?:f32)?(?:\s*/\s*255\.0)?", part)
+        if not match:
+            return None
+        channel = f32(float(match.group(1)))
+        if "/" in part:
+            channel = f32(channel / f32(255.0))
+        result.append(channel)
+    return tuple(result)
+
+
+def dracula_values() -> set[tuple[float, ...]]:
+    source = (ROOT / "src/theme.rs").read_text(encoding="utf-8")
+    constructor = source.split("let mut ui = Self {", 1)[1].split("\n        };", 1)[0]
+    values = set()
+    for match in DRACULA_FIELDS.finditer(constructor):
+        parsed = parse_color(match.group(2))
+        if parsed is not None:
+            values.add(parsed)
+    values.add((0.0, 0.0, 0.0, f32(1.0)))
+    return values
+
+
+def is_shadow_place(rel: str, line: int, context: str) -> bool:
+    if "shadow" in context.lower():
+        return True
+    source = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+    function = next(
+        (row for row in reversed(source[:line]) if re.search(r"\bfn\s+[A-Za-z_][A-Za-z_0-9]*", row)),
+        "",
+    )
+    return "shadow" in function.lower()
+
+
+def coverage(records: list[tuple[str, int, str, str, str]]) -> int:
+    roles = dracula_values()
+    grouped: dict[tuple[float, ...], list[tuple[str, int]]] = {}
+    for rel, line, value, context, kind in records:
+        if not is_ui_path(rel) or kind != "literal" or not 8 <= group_for(rel) <= 13:
+            continue
+        parsed = parse_color(value)
+        if parsed is None:
+            if value.startswith("[1.0, 1.0, 1.0,"):
+                continue
+            if value.startswith("[0.0, 0.0, 0.0,") and is_shadow_place(rel, line, context):
+                continue
+            continue
+        if parsed[:3] == (f32(1.0), f32(1.0), f32(1.0)):
+            continue
+        if parsed in roles or parsed in EXCEPTIONS:
+            continue
+        grouped.setdefault(parsed, []).append((rel, line))
+    for value, places in sorted(grouped.items()):
+        locations = ", ".join(f"{rel}:{line}" for rel, line in places[:3])
+        print(f"{value} | count={len(places)} | {locations}")
+    return 1 if grouped else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--coverage", action="store_true")
     parser.add_argument("--files", nargs="*")
     args = parser.parse_args()
     files = [ROOT / item for item in args.files] if args.files else sorted(SRC.rglob("*.rs"))
     records = [record for path in files if path.is_file() for record in scan_file(path)]
+    if args.coverage:
+        return coverage(records)
     if args.check:
         exceptions: set[tuple[str, str]] = set()
         remaining = [r for r in records if is_ui_path(r[0]) and r[4] == "literal" and (r[0], r[2]) not in exceptions]
