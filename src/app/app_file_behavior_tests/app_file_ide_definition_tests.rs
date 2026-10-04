@@ -57,7 +57,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         spans: vec![crate::highlighter::ColorSpan {
             start: 0,
             end: 5,
-            color: crate::highlighter::DRACULA_PINK,
+            role: crate::theme::SyntaxRole::KeywordControl,
         }],
         completions: Vec::new(),
         foldable_ranges: Vec::new(),
@@ -278,7 +278,7 @@ fn switch_to_highlighted_tab_reuses_cached_highlight_without_restart() {
     app.tabs[1].spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: 3,
-        color: crate::highlighter::DRACULA_PINK,
+        role: crate::theme::SyntaxRole::KeywordControl,
     }];
     app.tabs[1].foldable_ranges = vec![(0, 26, true, false)];
     app.tabs[1].is_highlighted_once = true;
@@ -326,7 +326,7 @@ fn switch_back_to_partial_large_tab_restarts_full_highlight_without_clearing_cac
     app.tabs[1].spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: 3,
-        color: crate::highlighter::DRACULA_PINK,
+        role: crate::theme::SyntaxRole::KeywordControl,
     }];
     app.tabs[1].is_highlighted_once = true;
     app.tabs[1].is_highlight_complete = false;
@@ -340,8 +340,8 @@ fn switch_back_to_partial_large_tab_restarts_full_highlight_without_clearing_cac
     assert_eq!(app.highlighter.current_version, 42);
     assert_eq!(app.highlighter.spans.len(), 1);
     assert_eq!(
-        app.highlighter.spans[0].color,
-        crate::highlighter::DRACULA_PINK
+        app.highlighter.spans[0].color(),
+        [1.0, 0.474, 0.776, 1.0]
     );
 }
 

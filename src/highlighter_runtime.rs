@@ -577,11 +577,11 @@ impl Highlighter {
     /// editor's `SyncEdit`s in `apply_document_edits` only.
     pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>) {
         let prev_offset = offset.saturating_sub(1);
-        let mut predicted_color = DRACULA_FG;
+        let mut predicted_role = SyntaxRole::Fg;
 
         for span in &self.spans {
             if span.start <= prev_offset && span.end > prev_offset {
-                predicted_color = span.color;
+                predicted_role = span.role;
                 break;
             }
         }
@@ -589,20 +589,20 @@ impl Highlighter {
         if let Some(t) = text_opt {
             match t.trim() {
                 "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&"
-                | "|" | "^" | "~" | ":" => predicted_color = DRACULA_PINK,
+                | "|" | "^" | "~" | ":" => predicted_role = SyntaxRole::KeywordControl,
                 "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                    predicted_color = DRACULA_PURPLE
+                    predicted_role = SyntaxRole::Constant
                 }
-                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_color = DRACULA_FG,
+                "." | "," | "(" | ")" | "[" | "]" | "{" | "}" => predicted_role = SyntaxRole::Fg,
                 "import" | "from" | "if" | "else" | "elif" | "for" | "while" | "return" | "def"
                 | "class" | "let" | "const" | "fn" | "mut" | "pub" | "struct" | "impl"
                 | "match" | "break" | "continue" | "in" | "as" | "await" | "async" | "yield"
-                | "try" | "except" | "finally" | "raise" | "with" => predicted_color = DRACULA_PINK,
+                | "try" | "except" | "finally" | "raise" | "with" => predicted_role = SyntaxRole::KeywordControl,
                 "True" | "False" | "None" | "true" | "false" | "null" => {
-                    predicted_color = DRACULA_PINK
+                    predicted_role = SyntaxRole::KeywordControl
                 }
-                "int" | "float" | "str" | "bool" | "String" => predicted_color = DRACULA_CYAN,
-                "self" | "cls" => predicted_color = DRACULA_PURPLE,
+                "int" | "float" | "str" | "bool" | "String" => predicted_role = SyntaxRole::Keyword,
+                "self" | "cls" => predicted_role = SyntaxRole::Constant,
                 _ => {}
             }
         }
@@ -619,19 +619,19 @@ impl Highlighter {
                 new_spans.push(ColorSpan {
                     start: offset,
                     end: offset + len,
-                    color: predicted_color,
+                    role: predicted_role,
                 });
 
                 new_spans.push(ColorSpan {
                     start: offset + len,
                     end: old_end + len,
-                    color: span.color,
+                    role: span.role,
                 });
             } else if span.end == offset {
                 new_spans.push(ColorSpan {
                     start: offset,
                     end: offset + len,
-                    color: predicted_color,
+                    role: predicted_role,
                 });
             }
         }
@@ -645,7 +645,7 @@ impl Highlighter {
                 for i in 1..self.spans.len() {
                     let next = &self.spans[i];
                     if next.start <= current.end {
-                        if next.color == current.color {
+                        if next.role == current.role {
                             current.end = current.end.max(next.end);
                         } else if next.end > current.end {
                             merged.push(current.clone());
@@ -667,7 +667,7 @@ impl Highlighter {
             self.spans.push(ColorSpan {
                 start: offset,
                 end: offset + len,
-                color: predicted_color,
+                role: predicted_role,
             });
         }
     }
@@ -875,17 +875,17 @@ impl Highlighter {
         true
     }
 }
-pub(super) fn get_bracket_color(depth: usize) -> [f32; 4] {
+pub(super) fn get_bracket_role(depth: usize) -> SyntaxRole {
     if depth == 0 {
-        return DRACULA_FG;
+        return SyntaxRole::Fg;
     }
     match 1 + (depth - 1) % 5 {
-        1 => DRACULA_GREEN,
-        2 => DRACULA_CYAN,
-        3 => DRACULA_ORANGE,
-        4 => DRACULA_YELLOW,
-        5 => DRACULA_PURPLE,
-        _ => DRACULA_FG,
+        1 => SyntaxRole::Function,
+        2 => SyntaxRole::Keyword,
+        3 => SyntaxRole::Parameter,
+        4 => SyntaxRole::String,
+        5 => SyntaxRole::Constant,
+        _ => SyntaxRole::Fg,
     }
 }
 
@@ -893,7 +893,7 @@ pub(super) fn flatten_spans(
     mut spans: Vec<ColorSpan>,
     len: usize,
     text: &str,
-    byte_colors: &mut Vec<[f32; 4]>,
+    byte_colors: &mut Vec<SyntaxRole>,
     error_ranges: &[(usize, usize)],
     apply_rainbow_brackets: bool,
     is_log_or_huge: bool,
@@ -902,18 +902,18 @@ pub(super) fn flatten_spans(
         return vec![ColorSpan {
             start: 0,
             end: len,
-            color: DRACULA_FG,
+            role: SyntaxRole::Fg,
         }];
     }
 
     spans.sort_by_key(|s| std::cmp::Reverse(s.end - s.start));
 
     byte_colors.clear();
-    byte_colors.resize(len, DRACULA_FG);
+    byte_colors.resize(len, SyntaxRole::Fg);
 
     for span in spans {
         for i in span.start..span.end.min(len) {
-            byte_colors[i] = span.color;
+            byte_colors[i] = span.role;
         }
     }
 
@@ -921,11 +921,11 @@ pub(super) fn flatten_spans(
 
     for i in 0..len {
         let b = text_bytes[i];
-        if byte_colors[i] == MARKER_INTERPOLATION {
+        if byte_colors[i] == SyntaxRole::Interpolation {
             if b == b'{' || b == b'}' {
-                byte_colors[i] = DRACULA_ORANGE;
+                byte_colors[i] = SyntaxRole::Parameter;
             } else {
-                byte_colors[i] = DRACULA_FG;
+                byte_colors[i] = SyntaxRole::Fg;
             }
         }
     }
@@ -936,44 +936,47 @@ pub(super) fn flatten_spans(
         let mut depth_curly = 0usize;
 
         for i in 0..len {
-            if byte_colors[i] != DRACULA_COMMENT
-                && (byte_colors[i] == DRACULA_FG
-                    || byte_colors[i] == DRACULA_GREEN
-                    || byte_colors[i] == DRACULA_CYAN
-                    || byte_colors[i] == DRACULA_ORANGE
-                    || byte_colors[i] == DRACULA_YELLOW
-                    || byte_colors[i] == DRACULA_PURPLE)
+            if byte_colors[i] != SyntaxRole::Comment
+                && matches!(
+                    byte_colors[i],
+                    SyntaxRole::Fg
+                        | SyntaxRole::Function
+                        | SyntaxRole::Keyword
+                        | SyntaxRole::Parameter
+                        | SyntaxRole::String
+                        | SyntaxRole::Constant
+                )
             {
                 match text_bytes[i] {
                     b'(' => {
-                        byte_colors[i] = get_bracket_color(depth_round);
+                        byte_colors[i] = get_bracket_role(depth_round);
                         depth_round += 1;
                     }
                     b')' => {
                         if depth_round > 0 {
                             depth_round -= 1;
                         }
-                        byte_colors[i] = get_bracket_color(depth_round);
+                        byte_colors[i] = get_bracket_role(depth_round);
                     }
                     b'[' => {
-                        byte_colors[i] = get_bracket_color(depth_square);
+                        byte_colors[i] = get_bracket_role(depth_square);
                         depth_square += 1;
                     }
                     b']' => {
                         if depth_square > 0 {
                             depth_square -= 1;
                         }
-                        byte_colors[i] = get_bracket_color(depth_square);
+                        byte_colors[i] = get_bracket_role(depth_square);
                     }
                     b'{' => {
-                        byte_colors[i] = get_bracket_color(depth_curly);
+                        byte_colors[i] = get_bracket_role(depth_curly);
                         depth_curly += 1;
                     }
                     b'}' => {
                         if depth_curly > 0 {
                             depth_curly -= 1;
                         }
-                        byte_colors[i] = get_bracket_color(depth_curly);
+                        byte_colors[i] = get_bracket_role(depth_curly);
                     }
                     _ => {}
                 }
@@ -990,23 +993,23 @@ pub(super) fn flatten_spans(
         return flat;
     }
 
-    let mut current_color = byte_colors[0];
+    let mut current_role = byte_colors[0];
     let mut start = 0;
     for i in 1..len {
-        if byte_colors[i] != current_color {
+        if byte_colors[i] != current_role {
             flat.push(ColorSpan {
                 start,
                 end: i,
-                color: current_color,
+                role: current_role,
             });
             start = i;
-            current_color = byte_colors[i];
+            current_role = byte_colors[i];
         }
     }
     flat.push(ColorSpan {
         start,
         end: len,
-        color: current_color,
+        role: current_role,
     });
     flat
 }

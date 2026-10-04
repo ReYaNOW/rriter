@@ -1403,11 +1403,11 @@ fn lsp_format_json_pretty_prints_spans_and_folds_multiline_payloads() {
     assert!(text.starts_with("[LSP RECV]\n{"));
     assert!(text.contains("\"outer\""));
     assert!(text.contains("\"deep\": false"));
-    assert!(spans.iter().any(|s| s.color == [0.313, 0.980, 0.482, 1.0]));
-    assert!(spans.iter().any(|s| s.color == [0.545, 0.913, 0.992, 1.0]));
-    assert!(spans.iter().any(|s| s.color == [0.945, 0.980, 0.549, 1.0]));
-    assert!(spans.iter().any(|s| s.color == [0.741, 0.576, 0.976, 1.0]));
-    assert!(spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::Function));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::Keyword));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::String));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::Constant));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::KeywordControl));
     assert!(folds.iter().any(|(start, end, _)| *start < *end));
     assert!(folds.iter().any(|(_, _, depth)| *depth == 1));
     assert!(folds.iter().any(|(_, _, depth)| *depth == 2));

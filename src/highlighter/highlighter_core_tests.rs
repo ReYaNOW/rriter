@@ -1,6 +1,46 @@
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
+#[test]
+fn same_color_roles_stay_distinct_during_merge_and_rainbow_brackets() {
+    let one_dark = SyntaxPalette::for_id(ThemeId::OneDark);
+    assert_eq!(
+        one_dark.color(SyntaxRole::Keyword),
+        one_dark.color(SyntaxRole::Class)
+    );
+
+    let merged = merge_partial_highlight_spans(
+        vec![ColorSpan {
+            start: 0,
+            end: 2,
+            role: SyntaxRole::Keyword,
+        }],
+        vec![ColorSpan {
+            start: 2,
+            end: 4,
+            role: SyntaxRole::Class,
+        }],
+        4..5,
+    );
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0].role, SyntaxRole::Keyword);
+    assert_eq!(merged[1].role, SyntaxRole::Class);
+
+    let mut byte_roles = Vec::new();
+    let bracketed = flatten_spans_for_range(
+        vec![ColorSpan {
+            start: 0,
+            end: 3,
+            role: SyntaxRole::Class,
+        }],
+        0..3,
+        "(x)",
+        &mut byte_roles,
+        true,
+    );
+    assert!(bracketed.iter().all(|span| span.role == SyntaxRole::Class));
+}
+
 #[cfg(test)]
 static ACTIVE_HIGHLIGHTER_WORKERS: AtomicUsize = AtomicUsize::new(0);
 

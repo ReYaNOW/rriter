@@ -594,8 +594,8 @@ fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
 #[test]
 fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
     let spans = highlight_diagnostic_message("`NameError` ├─ branch │ tail");
-    assert!(spans.iter().any(|s| s.color == [0.6, 0.6, 0.65, 1.0]));
-    assert!(spans.iter().any(|s| s.color == [0.45, 0.45, 0.50, 1.0]));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::Delimiter));
+    assert!(spans.iter().any(|s| s.role == crate::theme::SyntaxRole::TreeGuide));
 
     let diag_json = serde_json::json!({
         "range": {

@@ -1780,6 +1780,7 @@ Syntax/languages:
 
 * `src/highlighter.rs` -> include shell for Tree-sitter thread, parser/query setup, spans/completions/folds.
 * `src/highlighter/*` -> highlighter core and worker/test chunks.
+* `src/highlighter/highlighter_roles.rs` -> Tree-sitter capture to syntax-role resolution.
 * `src/highlighter_tests.rs` -> highlighter unit tests.
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
 * `src/highlighter_runtime_tests.rs` -> runtime highlighter regression tests.

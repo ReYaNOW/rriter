@@ -122,15 +122,15 @@ fn format_lsp_log_entry(
             .find('\n')
             .or_else(|| compact_message.find(']').map(|idx| idx + 1))
             .unwrap_or(compact_message.len());
-        let color = if compact_message.contains("[LSP RECV]") {
-            [0.313, 0.980, 0.482, 1.0]
+        let role = if compact_message.contains("[LSP RECV]") {
+            crate::theme::SyntaxRole::Function
         } else {
-            [0.545, 0.913, 0.992, 1.0]
+            crate::theme::SyntaxRole::Keyword
         };
         spans.push(crate::highlighter::ColorSpan {
             start: 0,
             end: prefix_end,
-            color,
+            role,
         });
     }
     (compact_message, spans, Vec::new())

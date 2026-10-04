@@ -25,13 +25,13 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
             spans.push(crate::highlighter::ColorSpan {
                 start: offset,
                 end: offset + c.len_utf8(),
-                color: [0.6, 0.6, 0.65, 1.0],
+                role: crate::theme::SyntaxRole::Delimiter,
             });
         } else if c == '├' || c == '─' || c == '│' || c == '└' {
             spans.push(crate::highlighter::ColorSpan {
                 start: offset,
                 end: offset + c.len_utf8(),
-                color: [0.45, 0.45, 0.50, 1.0],
+                role: crate::theme::SyntaxRole::TreeGuide,
             });
         }
     }
@@ -56,25 +56,25 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
                                 while let Some(m) = matches.next() {
                                     for cap in m.captures {
                                         let name = query.capture_names()[cap.index as usize];
-                                        let color = match name {
-                                            "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
-                                            "string" => [0.945, 0.980, 0.549, 1.0],
-                                            "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
+                                        let role = match name {
+                                            "property" | "variable" => crate::theme::SyntaxRole::Fg,
+                                            "string" => crate::theme::SyntaxRole::String,
+                                            "type" | "class_name" => crate::theme::SyntaxRole::Keyword,
                                             "keyword.control" | "keyword" | "operator" => {
-                                                [1.0, 0.474, 0.776, 1.0]
+                                                crate::theme::SyntaxRole::KeywordControl
                                             }
                                             "function" | "py_function" | "py_builtin_or_func" => {
-                                                [0.313, 0.980, 0.482, 1.0]
+                                                crate::theme::SyntaxRole::Function
                                             }
-                                            "number" => [0.741, 0.576, 0.976, 1.0],
-                                            "comment" => [0.384, 0.447, 0.643, 1.0],
-                                            _ => [0.972, 0.972, 0.949, 1.0],
+                                            "number" => crate::theme::SyntaxRole::Constant,
+                                            "comment" => crate::theme::SyntaxRole::Comment,
+                                            _ => crate::theme::SyntaxRole::Fg,
                                         };
-                                        if color != [0.972, 0.972, 0.949, 1.0] {
+                                        if role != crate::theme::SyntaxRole::Fg {
                                             spans.push(crate::highlighter::ColorSpan {
                                                 start: start + cap.node.start_byte(),
                                                 end: start + cap.node.end_byte(),
-                                                color,
+                                                role,
                                             });
                                         }
                                     }

@@ -103,12 +103,12 @@ pub(crate) fn push_hover_highlight_spans(
                             let Some(node_text) = parse_source.get(start..end) else {
                                 continue;
                             };
-                            let color = crate::highlighter::hover_capture_color(name, node_text);
-                            if color != crate::highlighter::DRACULA_FG {
+                            let role = crate::highlighter::hover_capture_role(name, node_text);
+                            if role != crate::theme::SyntaxRole::Fg {
                                 spans.push(crate::highlighter::ColorSpan {
                                     start: offset + start - source_start,
                                     end: offset + end - source_start,
-                                    color,
+                                    role,
                                 });
                             }
                         }
@@ -1168,12 +1168,12 @@ mod tests {
         );
 
         for color in [
-            crate::highlighter::DRACULA_PINK,
-            crate::highlighter::DRACULA_CYAN,
-            crate::highlighter::DRACULA_YELLOW,
+            [1.0, 0.474, 0.776, 1.0],
+            [0.545, 0.913, 0.992, 1.0],
+            [0.945, 0.980, 0.549, 1.0],
         ] {
             assert!(
-                spans.iter().any(|span| span.color == color),
+                spans.iter().any(|span| span.color() == color),
                 "missing Dart hover syntax color {color:?}: {spans:?}"
             );
         }
@@ -1183,7 +1183,7 @@ mod tests {
         spans
             .iter()
             .find(|span| span.start <= byte && byte < span.end)
-            .map_or(crate::highlighter::DRACULA_FG, |span| span.color)
+            .map_or([0.972, 0.972, 0.949, 1.0], |span| span.color())
     }
 
     #[test]
@@ -1218,7 +1218,7 @@ mod tests {
 
         assert_eq!(text, "Dio dio");
         assert_eq!(kinds, vec![crate::lsp::HoverLineKindPublic::Code]);
-        assert_eq!(hover_color_at(&spans, 0), crate::highlighter::DRACULA_CYAN);
+        assert_eq!(hover_color_at(&spans, 0), [0.545, 0.913, 0.992, 1.0]);
     }
 
     #[test]
@@ -1278,7 +1278,7 @@ mod tests {
         assert_eq!(inline, vec![(string_start, string_start + "String".len())]);
         assert_eq!(
             hover_color_at(&spans, string_start),
-            crate::highlighter::DRACULA_CYAN
+            [0.545, 0.913, 0.992, 1.0]
         );
     }
 
@@ -1290,13 +1290,13 @@ mod tests {
 
             assert_eq!(
                 hover_color_at(&spans, 0),
-                crate::highlighter::DRACULA_CYAN,
+                [0.545, 0.913, 0.992, 1.0],
                 "type fragment must keep Dart type semantics: {source:?}"
             );
             if let Some(inner) = source.find("String").filter(|&offset| offset > 0) {
                 assert_eq!(
                     hover_color_at(&spans, inner),
-                    crate::highlighter::DRACULA_CYAN
+                    [0.545, 0.913, 0.992, 1.0]
                 );
             }
         }
@@ -1319,26 +1319,26 @@ mod tests {
         for offset in offsets("dio") {
             assert_eq!(
                 hover_color_at(&spans, offset),
-                crate::highlighter::DRACULA_FG
+                [0.972, 0.972, 0.949, 1.0]
             );
         }
         for member in ["baseUrl", "connectTimeout", "receiveTimeout"] {
             assert_eq!(
                 hover_color_at(&spans, offsets(member)[0]),
-                crate::highlighter::DRACULA_FG
+                [0.972, 0.972, 0.949, 1.0]
             );
         }
         assert_eq!(
             hover_color_at(&spans, offsets("Duration")[0]),
-            crate::highlighter::DRACULA_CYAN
+            [0.545, 0.913, 0.992, 1.0]
         );
         assert_eq!(
             hover_color_at(&spans, offsets("https://pub.dev")[0]),
-            crate::highlighter::DRACULA_YELLOW
+            [0.945, 0.980, 0.549, 1.0]
         );
         assert_eq!(
             hover_color_at(&spans, offsets("const")[0]),
-            crate::highlighter::DRACULA_PINK
+            [1.0, 0.474, 0.776, 1.0]
         );
     }
 
@@ -1379,15 +1379,15 @@ mod tests {
         );
         assert_eq!(
             hover_color_at(&spans, token_offsets("Duration")[0]),
-            crate::highlighter::DRACULA_CYAN
+            [0.545, 0.913, 0.992, 1.0]
         );
         assert_eq!(
             hover_color_at(&spans, token_offsets("https://pub.dev")[0]),
-            crate::highlighter::DRACULA_YELLOW
+            [0.945, 0.980, 0.549, 1.0]
         );
         assert_eq!(
             hover_color_at(&spans, token_offsets("const")[0]),
-            crate::highlighter::DRACULA_PINK
+            [1.0, 0.474, 0.776, 1.0]
         );
     }
 

@@ -1,15 +1,14 @@
-pub fn ts_capture_color(name: &str) -> Option<[f32; 4]> {
+pub fn ts_capture_role(name: &str) -> Option<crate::theme::SyntaxRole> {
     match name {
-        "fg" | "property" | "py_assign" | "variable" => Some([0.972, 0.972, 0.949, 1.0]),
-        "string" => Some([0.945, 0.980, 0.549, 1.0]),
-        "comment" => Some([0.384, 0.447, 0.643, 1.0]),
-        "function" | "py_function" => Some([0.313, 0.980, 0.482, 1.0]),
-        "keyword.control" | "operator" | "boolean" => Some([1.0, 0.474, 0.776, 1.0]),
-        "keyword" | "subst" | "type" | "function.builtin" => Some([0.545, 0.913, 0.992, 1.0]),
-        "class_name" => Some([0.45, 0.85, 0.90, 1.0]),
-        "constant" | "number" => Some([0.741, 0.576, 0.976, 1.0]),
-        "parameter" => Some([0.973, 0.584, 0.502, 1.0]),
-        "py_builtin_or_func" => Some([0.313, 0.980, 0.482, 1.0]),
+        "fg" | "property" | "py_assign" | "variable" => Some(crate::theme::SyntaxRole::Fg),
+        "string" => Some(crate::theme::SyntaxRole::String),
+        "comment" => Some(crate::theme::SyntaxRole::Comment),
+        "function" | "py_function" | "py_builtin_or_func" => Some(crate::theme::SyntaxRole::Function),
+        "keyword.control" | "operator" | "boolean" => Some(crate::theme::SyntaxRole::KeywordControl),
+        "keyword" | "subst" | "type" | "function.builtin" => Some(crate::theme::SyntaxRole::Keyword),
+        "class_name" => Some(crate::theme::SyntaxRole::Class),
+        "constant" | "number" => Some(crate::theme::SyntaxRole::Constant),
+        "parameter" => Some(crate::theme::SyntaxRole::Parameter),
         _ => None,
     }
 }
@@ -19,7 +18,7 @@ pub fn push_python_ts_spans(
     global_start: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
 ) {
-    let mut best_spans: HashMap<(usize, usize), (u8, [f32; 4])> = HashMap::new();
+    let mut best_spans: HashMap<(usize, usize), (u8, crate::theme::SyntaxRole)> = HashMap::new();
 
     TS_DIAG_PARSER.with(|p_cell| {
         TS_DIAG_QUERY.with(|q_cell| {
@@ -34,7 +33,7 @@ pub fn push_python_ts_spans(
                         while let Some(m) = matches.next() {
                             for cap in m.captures {
                                 let name = query.capture_names()[cap.index as usize];
-                                let Some(color) = ts_capture_color(name) else {
+                                let Some(role) = ts_capture_role(name) else {
                                     continue;
                                 };
                                 let prio = match name {
@@ -50,9 +49,9 @@ pub fn push_python_ts_spans(
                                     global_start + cap.node.start_byte(),
                                     global_start + cap.node.end_byte(),
                                 );
-                                let entry = best_spans.entry(key).or_insert((prio, color));
+                                let entry = best_spans.entry(key).or_insert((prio, role));
                                 if prio >= entry.0 {
-                                    *entry = (prio, color);
+                                    *entry = (prio, role);
                                 }
                             }
                         }
@@ -67,14 +66,14 @@ pub fn push_python_ts_spans(
         best_spans.remove(&(global_start + *start, global_start + *end));
     }
 
-    for ((start, end), (_, color)) in best_spans {
-        spans.push(crate::highlighter::ColorSpan { start, end, color });
+    for ((start, end), (_, role)) in best_spans {
+        spans.push(crate::highlighter::ColorSpan { start, end, role });
     }
     for (start, end) in class_attr_ranges {
         spans.push(crate::highlighter::ColorSpan {
             start: global_start + start,
             end: global_start + end,
-            color: crate::highlighter::DRACULA_FG,
+            role: crate::theme::SyntaxRole::Fg,
         });
     }
 }
@@ -150,10 +149,10 @@ pub fn highlight_python_hover_doc(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    let text_light = crate::highlighter::DRACULA_FG;
-    let ty = crate::highlighter::DRACULA_CYAN;
-    let neutral = crate::highlighter::DRACULA_FG;
-    let param = crate::highlighter::DRACULA_ORANGE;
+    let text_light = crate::theme::SyntaxRole::Fg;
+    let ty = crate::theme::SyntaxRole::Keyword;
+    let neutral = crate::theme::SyntaxRole::Fg;
+    let param = crate::theme::SyntaxRole::Parameter;
 
     let (msg, mut line_kinds, inline_code_ranges) = normalize_python_hover_doc(raw_msg);
     let lines: Vec<&str> = msg.split('\n').collect();
@@ -206,7 +205,7 @@ pub fn highlight_python_hover_doc(
             spans.push(crate::highlighter::ColorSpan {
                 start: at_pos,
                 end: at_pos + 1,
-                color: crate::highlighter::DRACULA_PINK,
+                role: crate::theme::SyntaxRole::KeywordControl,
             });
             let name = trimmed[1..]
                 .split(|c: char| c == '(' || c.is_whitespace())
@@ -218,7 +217,7 @@ pub fn highlight_python_hover_doc(
                 spans.push(crate::highlighter::ColorSpan {
                     start: name_start,
                     end: name_start + name.len(),
-                    color: crate::highlighter::DRACULA_GREEN,
+                    role: crate::theme::SyntaxRole::Function,
                 });
             }
         }
@@ -278,7 +277,7 @@ pub fn highlight_python_hover_doc(
                 spans.push(crate::highlighter::ColorSpan {
                     start,
                     end: start + 5,
-                    color: crate::highlighter::DRACULA_PINK,
+                    role: crate::theme::SyntaxRole::KeywordControl,
                 });
                 let name_range = 6..open_paren;
                 let class_name = sig_code[name_range.clone()].trim();
@@ -289,7 +288,7 @@ pub fn highlight_python_hover_doc(
                     spans.push(crate::highlighter::ColorSpan {
                         start: name_start,
                         end: name_start + class_name.len(),
-                        color: crate::highlighter::DRACULA_CYAN,
+                        role: crate::theme::SyntaxRole::Keyword,
                     });
                 }
             }
@@ -364,10 +363,10 @@ pub fn highlight_python_hover_doc(
     }
 
     if !signature_brackets.is_empty() {
-        force_color_on_ranges(&mut spans, &signature_brackets, neutral);
+        force_role_on_ranges(&mut spans, &signature_brackets, neutral);
     }
     if !signature_type_tokens.is_empty() {
-        force_color_on_ranges(&mut spans, &signature_type_tokens, ty);
+        force_role_on_ranges(&mut spans, &signature_type_tokens, ty);
     }
 
     // light text lines after separator
@@ -393,7 +392,7 @@ pub fn highlight_python_hover_doc(
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start,
                 end: line_end,
-                color: text_light,
+                role: text_light,
             });
         }
 
@@ -428,18 +427,18 @@ pub fn highlight_python_hover_doc(
                     spans.push(crate::highlighter::ColorSpan {
                         start: line_start + prefix_len,
                         end: line_start + of_idx,
-                        color: crate::highlighter::DRACULA_PINK,
+                        role: crate::theme::SyntaxRole::KeywordControl,
                     });
                     spans.push(crate::highlighter::ColorSpan {
                         start: line_start + of_idx + separator.len(),
                         end: line_end,
-                        color: ty,
+                        role: ty,
                     });
                 } else {
                     spans.push(crate::highlighter::ColorSpan {
                         start: line_start + prefix_len,
                         end: line_end,
-                        color: crate::highlighter::DRACULA_PINK,
+                        role: crate::theme::SyntaxRole::KeywordControl,
                     });
                 }
             }
@@ -463,7 +462,7 @@ pub fn highlight_python_hover_doc(
                     spans.push(crate::highlighter::ColorSpan {
                         start: lhs_start,
                         end: lhs_end,
-                        color: param,
+                        role: param,
                     });
                 }
             }
@@ -492,10 +491,10 @@ pub fn highlight_python_hover_doc(
     (msg, spans, public_kinds, inline_code_ranges)
 }
 
-fn force_color_on_ranges(
+fn force_role_on_ranges(
     spans: &mut Vec<crate::highlighter::ColorSpan>,
     ranges: &[(usize, usize)],
-    color: [f32; 4],
+    role: crate::theme::SyntaxRole,
 ) {
     let mut out = Vec::with_capacity(spans.len() + ranges.len());
     for span in spans.drain(..) {
@@ -511,14 +510,14 @@ fn force_color_on_ranges(
                     next.push(crate::highlighter::ColorSpan {
                         start: piece.start,
                         end: force_start,
-                        color: piece.color,
+                        role: piece.role,
                     });
                 }
                 if piece.end > force_end {
                     next.push(crate::highlighter::ColorSpan {
                         start: force_end,
                         end: piece.end,
-                        color: piece.color,
+                        role: piece.role,
                     });
                 }
             }
@@ -529,7 +528,7 @@ fn force_color_on_ranges(
     out.extend(
         ranges
             .iter()
-            .map(|&(start, end)| crate::highlighter::ColorSpan { start, end, color }),
+            .map(|&(start, end)| crate::highlighter::ColorSpan { start, end, role }),
     );
     *spans = out;
 }
@@ -685,7 +684,7 @@ fn color_keyword_args_orange(
                         spans.push(crate::highlighter::ColorSpan {
                             start: span_start,
                             end: span_end,
-                            color: crate::highlighter::DRACULA_ORANGE,
+                            role: crate::theme::SyntaxRole::Parameter,
                         });
                     }
                 }
@@ -694,4 +693,3 @@ fn color_keyword_args_orange(
         i += 1;
     }
 }
-

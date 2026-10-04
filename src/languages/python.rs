@@ -113,7 +113,7 @@ pub fn push_docstring_highlight_spans(
     spans.push(crate::highlighter::ColorSpan {
         start,
         end,
-        color: DOCSTRING_TEXT,
+        role: crate::theme::SyntaxRole::Comment,
     });
 
     let bytes = source.as_bytes();
@@ -141,13 +141,13 @@ pub fn push_docstring_highlight_spans(
     spans.push(crate::highlighter::ColorSpan {
         start: quote_start,
         end: content_start,
-        color: crate::highlighter::DRACULA_COMMENT,
+        role: crate::theme::SyntaxRole::Comment,
     });
     if content_end < end {
         spans.push(crate::highlighter::ColorSpan {
             start: content_end,
             end,
-            color: crate::highlighter::DRACULA_COMMENT,
+            role: crate::theme::SyntaxRole::Comment,
         });
     }
 
@@ -299,7 +299,7 @@ fn push_docstring_line_spans(
         spans.push(crate::highlighter::ColorSpan {
             start: line_start + leading,
             end: line_start + leading + trimmed.len(),
-            color: crate::highlighter::DRACULA_CYAN,
+            role: crate::theme::SyntaxRole::Keyword,
         });
     }
 
@@ -309,14 +309,14 @@ fn push_docstring_line_spans(
         spans.push(crate::highlighter::ColorSpan {
             start: role_start,
             end: role_end,
-            color: crate::highlighter::DRACULA_CYAN,
+            role: crate::theme::SyntaxRole::Keyword,
         });
         if let Some(colon) = rest.find(':') {
             let name_start = role_start + ":param ".len();
             spans.push(crate::highlighter::ColorSpan {
                 start: name_start,
                 end: name_start + colon,
-                color: crate::highlighter::DRACULA_ORANGE,
+                role: crate::theme::SyntaxRole::Parameter,
             });
         }
     } else if trimmed.starts_with(":return") || trimmed.starts_with(":raises ") {
@@ -327,7 +327,7 @@ fn push_docstring_line_spans(
         spans.push(crate::highlighter::ColorSpan {
             start: line_start + leading,
             end: line_start + leading + role_len,
-            color: crate::highlighter::DRACULA_CYAN,
+            role: crate::theme::SyntaxRole::Keyword,
         });
     }
 
@@ -343,7 +343,7 @@ fn push_docstring_line_spans(
             spans.push(crate::highlighter::ColorSpan {
                 start: line_start + body_start,
                 end: line_start + close,
-                color: crate::highlighter::DRACULA_CYAN,
+                role: crate::theme::SyntaxRole::Keyword,
             });
         }
         search_from = close + 2;

@@ -1083,7 +1083,7 @@ mod tests {
             spans: vec![crate::highlighter::ColorSpan {
                 start: 0,
                 end: 5,
-                color: [1.0, 0.0, 0.0, 1.0],
+                role: crate::theme::SyntaxRole::Keyword,
             }],
             line_kinds: vec![
                 crate::lsp::HoverLineKindPublic::Code,

@@ -4,8 +4,8 @@ fn rendered_color_at(spans: &[crate::highlighter::ColorSpan], offset: usize) -> 
     spans
         .iter()
         .find(|span| offset >= span.start && offset < span.end)
-        .map(|span| span.color)
-        .unwrap_or(crate::highlighter::DRACULA_FG)
+        .map(|span| span.color())
+        .unwrap_or([0.972, 0.972, 0.949, 1.0])
 }
 
 #[test]
@@ -16,7 +16,7 @@ fn variable_header_highlights_name_pink() {
     assert!(
         spans.iter().any(|s| s.start == handlers_idx
             && s.end == handlers_idx + 8
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "Header variable name should be pink"
     );
     assert_eq!(
@@ -60,19 +60,19 @@ Return a shallow copy of the dict.";
     assert!(
         spans.iter().any(|s| s.start <= def_start
             && s.end >= def_start + 3
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "`def` should be highlighted as keyword (pink)",
     );
     assert!(
         spans.iter().any(|s| s.start <= self_start
             && s.end >= self_start + 4
-            && s.color == [0.741, 0.576, 0.976, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Constant),
         "`self` should be highlighted in violet",
     );
     assert!(
         spans.iter().any(|s| s.start <= bracket_start
             && s.end >= bracket_start + 1
-            && s.color == [0.972, 0.972, 0.949, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Fg),
         "type brackets should be white",
     );
     let first_line_len = text.lines().next().unwrap_or("").len();
@@ -153,7 +153,7 @@ fn coroutine_return_signature_becomes_async_def() {
     assert!(
         spans.iter().any(|s| s.start <= async_start
             && s.end >= async_start + 5
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "`async` keyword should be pink in normalized coroutine signatures",
     );
 }
@@ -174,13 +174,13 @@ fn long_bound_method_signature_is_normalized_and_highlighted() {
     assert!(
         spans.iter().any(|s| s.start <= self_start
             && s.end >= self_start + 4
-            && s.color == [0.741, 0.576, 0.976, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Constant),
         "`self` should stay violet in long normalized signatures",
     );
     assert!(
         spans.iter().any(|s| s.start <= object_start
             && s.end >= object_start + 6
-            && s.color == [0.973, 0.584, 0.502, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Parameter),
         "argument names should be orange",
     );
 }
@@ -196,13 +196,13 @@ fn class_object_repr_is_normalized_and_highlighted() {
     assert!(
         spans.iter().any(|s| s.start <= class_kw
             && s.end >= class_kw + 5
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "`class` keyword should be pink",
     );
     assert!(
         spans.iter().any(|s| s.start <= class_name
             && s.end >= class_name + "CoreMiddleware".len()
-            && s.color == [0.545, 0.913, 0.992, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Keyword),
         "class name should be cyan",
     );
 }
@@ -220,7 +220,7 @@ fn qualified_class_object_repr_prepends_module_path() {
     assert!(
         spans.iter().any(|s| s.start <= class_line_offset
             && s.end >= class_line_offset + 5
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "class keyword should remain highlighted on normalized second line",
     );
 }
@@ -246,32 +246,29 @@ fn generic_type_line_gets_cyan_types_and_white_brackets() {
     let provide_start = text.find("Provide").unwrap_or(0);
     let l_bracket = text.find('[').unwrap_or(0);
     let r_bracket = text.find(']').unwrap_or(0);
-    let cyan = [0.545, 0.913, 0.992, 1.0];
-    let class_cyan = crate::highlighter::DRACULA_DARK_CYAN;
-    let white = [0.972, 0.972, 0.949, 1.0];
 
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= dict_start && s.end >= dict_start + 4 && s.color == cyan)
+            .any(|s| s.start <= dict_start && s.end >= dict_start + 4 && s.role == crate::theme::SyntaxRole::Keyword)
     );
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.color == cyan)
+            .any(|s| s.start <= str_start && s.end >= str_start + 3 && s.role == crate::theme::SyntaxRole::Keyword)
     );
     assert!(spans.iter().any(|s| s.start <= provide_start
         && s.end >= provide_start + "Provide".len()
-        && s.color == class_cyan));
+        && s.role == crate::theme::SyntaxRole::Class));
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white)
+            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.role == crate::theme::SyntaxRole::Fg)
     );
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white)
+            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.role == crate::theme::SyntaxRole::Fg)
     );
 }
 
@@ -283,21 +280,19 @@ fn literal_type_line_is_highlighted() {
     let literal_start = text.find("Literal").unwrap_or(0);
     let l_bracket = text.find('[').unwrap_or(0);
     let r_bracket = text.rfind(']').unwrap_or(0);
-    let cyan = [0.545, 0.913, 0.992, 1.0];
-    let white = [0.972, 0.972, 0.949, 1.0];
 
     assert!(spans.iter().any(|s| s.start <= literal_start
         && s.end >= literal_start + "Literal".len()
-        && s.color == cyan));
+        && s.role == crate::theme::SyntaxRole::Keyword));
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.color == white)
+            .any(|s| s.start <= l_bracket && s.end >= l_bracket + 1 && s.role == crate::theme::SyntaxRole::Fg)
     );
     assert!(
         spans
             .iter()
-            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.color == white)
+            .any(|s| s.start <= r_bracket && s.end >= r_bracket + 1 && s.role == crate::theme::SyntaxRole::Fg)
     );
 }
 
@@ -308,16 +303,15 @@ fn callable_type_expr_line_gets_type_highlighting() {
     assert_eq!(text, "list[(...) -> Unknown]");
     let list_start = text.find("list").unwrap_or(0);
     let unknown_start = text.find("Unknown").unwrap_or(0);
-    let cyan = [0.545, 0.913, 0.992, 1.0];
 
     assert!(
         spans.iter().any(|s| s.start <= list_start
             && s.end >= list_start + "list".len()
-            && s.color == cyan)
+            && s.role == crate::theme::SyntaxRole::Keyword)
     );
     assert!(spans.iter().any(|s| s.start <= unknown_start
         && s.end >= unknown_start + "Unknown".len()
-        && s.color == cyan));
+        && s.role == crate::theme::SyntaxRole::Keyword));
 }
 
 #[test]
@@ -330,10 +324,10 @@ fn special_form_annotated_hover_is_normalized_and_highlighted() {
 
     assert!(spans.iter().any(|s| s.start <= annotated_start
         && s.end >= annotated_start + "Annotated".len()
-        && s.color == crate::highlighter::DRACULA_DARK_CYAN));
+        && s.role == crate::theme::SyntaxRole::Class));
     assert!(spans.iter().any(|s| s.start <= db_start
         && s.end >= db_start + "DatabaseSession".len()
-        && s.color == crate::highlighter::DRACULA_DARK_CYAN));
+        && s.role == crate::theme::SyntaxRole::Class));
 }
 
 #[test]
@@ -343,8 +337,7 @@ fn simple_type_expr_lines_get_type_highlighting() {
         assert!(
             spans
                 .iter()
-                .any(|s| s.color == crate::highlighter::DRACULA_CYAN
-                    || s.color == crate::highlighter::DRACULA_DARK_CYAN),
+                .any(|s| matches!(s.role, crate::theme::SyntaxRole::Keyword | crate::theme::SyntaxRole::Class)),
             "{text} should have type highlight"
         );
     }
@@ -353,13 +346,13 @@ fn simple_type_expr_lines_get_type_highlighting() {
     let none_start = text.find("None").unwrap();
     assert!(spans.iter().any(|s| s.start <= none_start
         && s.end >= none_start + "None".len()
-        && s.color == crate::highlighter::DRACULA_PINK));
+        && s.role == crate::theme::SyntaxRole::KeywordControl));
 
     let (text, spans, _kinds, _inline) = highlight_hover_text("bool & AlwaysFalsy");
     let always_start = text.find("AlwaysFalsy").unwrap();
     assert!(spans.iter().any(|s| s.start <= always_start
         && s.end >= always_start + "AlwaysFalsy".len()
-        && s.color == crate::highlighter::DRACULA_DARK_CYAN));
+        && s.role == crate::theme::SyntaxRole::Class));
 }
 
 #[test]
@@ -370,7 +363,7 @@ client = AsyncFirebaseClient(\n\
     )";
     let (_text, spans, _kinds, _inline) = highlight_hover_text(raw);
     assert!(
-        spans.iter().any(|s| s.color != [0.972, 0.972, 0.949, 1.0]),
+        spans.iter().any(|s| s.role != crate::theme::SyntaxRole::Fg),
         "assignment hover should not stay fully white",
     );
 }
@@ -401,7 +394,7 @@ dict() -> new empty dictionary";
     assert!(text.starts_with("class dict"));
     assert!(!text.contains("<class"));
     assert!(
-        spans.iter().any(|s| s.color == [1.0, 0.474, 0.776, 1.0]),
+        spans.iter().any(|s| s.role == crate::theme::SyntaxRole::KeywordControl),
         "keyword highlight should exist for normalized class heading",
     );
 }
@@ -416,7 +409,7 @@ str(object='') -> str";
     assert!(
         spans.iter().any(|s| s.start <= str_start
             && s.end >= str_start + 3
-            && s.color == [0.545, 0.913, 0.992, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Keyword),
         "standalone builtin type heading must be cyan",
     );
 }
@@ -431,7 +424,7 @@ Special type indicating an unconstrained type.";
     assert!(
         spans.iter().any(|s| s.start <= any_start
             && s.end >= any_start + 3
-            && s.color == [0.545, 0.913, 0.992, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Keyword),
         "standalone typing.Any heading must be cyan",
     );
 }
@@ -457,22 +450,22 @@ client = AsyncFirebaseClient(\n\
     let client_offset = text.find("Class attribute ").unwrap() + 16;
     assert!(spans.iter().any(|s| s.start == client_offset
         && s.end == client_offset + 6
-        && s.color == [1.0, 0.474, 0.776, 1.0]));
+        && s.role == crate::theme::SyntaxRole::KeywordControl));
 
     let fcm_offset = text.find("FcmSenderService").unwrap();
     assert!(spans.iter().any(|s| s.start == fcm_offset
         && s.end == fcm_offset + "FcmSenderService".len()
-        && s.color == [0.545, 0.913, 0.992, 1.0]));
+        && s.role == crate::theme::SyntaxRole::Keyword));
 
     let req_timeout_offset = text.find("request_timeout").unwrap();
     assert!(spans.iter().any(|s| s.start == req_timeout_offset
         && s.end == req_timeout_offset + "request_timeout".len()
-        && s.color == [0.973, 0.584, 0.502, 1.0]));
+        && s.role == crate::theme::SyntaxRole::Parameter));
 
     let timeout_offset = text.find("(timeout=").unwrap() + 1;
     assert!(spans.iter().any(|s| s.start == timeout_offset
         && s.end == timeout_offset + "timeout".len()
-        && s.color == [0.973, 0.584, 0.502, 1.0]));
+        && s.role == crate::theme::SyntaxRole::Parameter));
 }
 
 #[test]
@@ -486,7 +479,7 @@ fn class_signature_is_highlighted() {
     assert!(
         spans.iter().any(|s| s.start <= class_kw
             && s.end >= class_kw + 5
-            && (s.color == [0.545, 0.913, 0.992, 1.0] || s.color == [1.0, 0.474, 0.776, 1.0])),
+            && matches!(s.role, crate::theme::SyntaxRole::Keyword | crate::theme::SyntaxRole::KeywordControl)),
         "`class` keyword should be highlighted in signatures",
     );
 }
@@ -668,14 +661,14 @@ Args:
     assert!(spans.iter().any(|s| {
         s.start == class_idx
             && s.end == class_idx + "class".len()
-            && s.color == [1.0, 0.474, 0.776, 1.0]
+            && s.role == crate::theme::SyntaxRole::KeywordControl
     }));
 
     let litestar_idx = text.find("Litestar").unwrap();
     assert!(spans.iter().any(|s| {
         s.start == litestar_idx
             && s.end == litestar_idx + "Litestar".len()
-            && s.color == [0.545, 0.913, 0.992, 1.0]
+            && s.role == crate::theme::SyntaxRole::Keyword
     }));
 
     let args_idx = text.find("Parameters").unwrap();
@@ -699,7 +692,7 @@ Args:
         );
         assert!(
             spans.iter().any(|s| {
-                s.start == idx && s.end == idx + name.len() && s.color == [0.973, 0.584, 0.502, 1.0]
+                s.start == idx && s.end == idx + name.len() && s.role == crate::theme::SyntaxRole::Parameter
             }),
             "doc argument `{name}` should be highlighted orange"
         );
@@ -780,21 +773,21 @@ fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
     assert!(
         spans.iter().any(|s| s.start <= litestar
             && s.end >= litestar + "Litestar".len()
-            && s.color == [0.545, 0.913, 0.992, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Keyword),
         "type names in signature should be cyan",
     );
     let decorator_at = text.find('@').unwrap_or(0);
     assert!(
         spans.iter().any(|s| s.start <= decorator_at
             && s.end >= decorator_at + 1
-            && s.color == [1.0, 0.474, 0.776, 1.0]),
+            && s.role == crate::theme::SyntaxRole::KeywordControl),
         "decorator @ should be pink",
     );
     let decorator_name = text.find("asynccontextmanager").unwrap_or(0);
     assert!(
         spans.iter().any(|s| s.start <= decorator_name
             && s.end >= decorator_name + "asynccontextmanager".len()
-            && s.color == [0.313, 0.980, 0.482, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Function),
         "decorator name should be green",
     );
     let l_bracket = text.find('[').unwrap_or(0);
@@ -802,13 +795,13 @@ fn asynccontextmanager_one_line_signature_is_wrapped_and_highlighted() {
     assert!(
         spans.iter().any(|s| s.start <= l_bracket
             && s.end >= l_bracket + 1
-            && s.color == [0.972, 0.972, 0.949, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Fg),
         "left bracket in return type should be neutral white",
     );
     assert!(
         spans.iter().any(|s| s.start <= r_bracket
             && s.end >= r_bracket + 1
-            && s.color == [0.972, 0.972, 0.949, 1.0]),
+            && s.role == crate::theme::SyntaxRole::Fg),
         "right bracket in return type should be neutral white",
     );
 }
@@ -822,7 +815,7 @@ fn rust_fenced_hover_uses_rust_highlighting_despite_python_doc_tags() {
     assert!(spans.iter().any(|span| {
         span.start <= fn_start
             && span.end >= fn_start + 2
-            && span.color == [1.0, 0.474, 0.776, 1.0]
+            && span.role == crate::theme::SyntaxRole::KeywordControl
     }));
 }
 
@@ -834,7 +827,7 @@ fn rust_fenced_hover_at_end_keeps_spans_after_trimming() {
     assert!(spans.iter().any(|span| {
         span.start <= fn_start
             && span.end >= fn_start + 2
-            && span.color == [1.0, 0.474, 0.776, 1.0]
+            && span.role == crate::theme::SyntaxRole::KeywordControl
     }));
 }
 
@@ -854,6 +847,6 @@ fn dart_fenced_hover_uses_dart_tree_sitter_config() {
     assert!(spans.iter().any(|span| {
         span.start <= type_start
             && span.end >= type_start + "Dio".len()
-            && span.color == crate::highlighter::DRACULA_CYAN
+            && span.role == crate::theme::SyntaxRole::Keyword
     }));
 }

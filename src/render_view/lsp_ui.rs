@@ -1051,7 +1051,7 @@ impl Renderer {
                                                             if rel_offset >= span.start
                                                                 && rel_offset < span.end
                                                             {
-                                                                color = span.color;
+                                                                color = span.color();
                                                                 break;
                                                             }
                                                         }

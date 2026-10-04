@@ -61,7 +61,7 @@ fn for_each_spanned_ui_char(
                 && spans[span_index].start <= current_offset
                 && current_offset < spans[span_index].end
             {
-                spans[span_index].color
+                spans[span_index].color()
             } else {
                 [f32::NAN; 4]
             }

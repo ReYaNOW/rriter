@@ -118,34 +118,34 @@ fn highlight_trace_should_log(text_len: usize, priority: bool, elapsed_ms: f64) 
             || elapsed_ms >= HIGHLIGHT_TRACE_SLOW_MS)
 }
 
-fn resolve_injected_capture_color(
+fn resolve_injected_capture_role(
     parent_lang_name: &str,
     injected_lang_name: &str,
     name: &str,
     node: tree_sitter::Node<'_>,
     node_text: &str,
-) -> [f32; 4] {
+) -> SyntaxRole {
     if parent_lang_name == "md" && injected_lang_name == "bash" {
         if name == "command_word"
             || (name == "any_word"
                 && node.parent().is_some_and(|parent| parent.kind() == "command_name"))
         {
-            return DRACULA_GREEN;
+            return SyntaxRole::Function;
         }
         if name == "any_word" {
             return if node_text.starts_with('-') && node_text.len() > 1 {
-                DRACULA_PURPLE
+                SyntaxRole::Constant
             } else {
-                DRACULA_FG
+                SyntaxRole::Fg
             };
         }
     }
-    let color = capture_color_override(injected_lang_name, name, node)
-        .unwrap_or_else(|| resolve_color(name, node_text, node.start_byte(), &[]));
-    if parent_lang_name == "md" && color == DRACULA_YELLOW {
-        MARKDOWN_GOLD
+    let role = capture_color_override(injected_lang_name, name, node)
+        .unwrap_or_else(|| resolve_role(name, node_text, node.start_byte(), &[]));
+    if parent_lang_name == "md" && role == SyntaxRole::String {
+        SyntaxRole::MdCode
     } else {
-        color
+        role
     }
 }
 
@@ -509,7 +509,7 @@ impl Highlighter {
                                     priority_spans.push(ColorSpan {
                                         start: priority_range.start,
                                         end: priority_range.end,
-                                        color: DRACULA_FG,
+                                        role: SyntaxRole::Fg,
                                     });
                                 }
                                 if !priority_spans.is_empty() {
@@ -1068,14 +1068,14 @@ impl Highlighter {
                                                                         )
                                                                         .unwrap_or("");
 
-                                                                    let color = resolve_injected_capture_color(
+                                                                    let role = resolve_injected_capture_role(
                                                                         lang_name,
                                                                         mapped_lang,
                                                                         name,
                                                                         cap.node,
                                                                         node_text,
                                                                     );
-                                                                    if color != DRACULA_FG {
+                                                                    if role != SyntaxRole::Fg {
                                                                         spans.push(ColorSpan {
                                                                             start: cap
                                                                                 .node
@@ -1083,7 +1083,7 @@ impl Highlighter {
                                                                             end: cap
                                                                                 .node
                                                                                 .end_byte(),
-                                                                            color,
+                                                                            role,
                                                                         });
                                                                     }
                                                                 }
@@ -1108,7 +1108,7 @@ impl Highlighter {
                     vec![ColorSpan {
                         start: 0,
                         end: text.len(),
-                        color: DRACULA_FG,
+                        role: SyntaxRole::Fg,
                     }]
                 } else {
                     let apply_rainbow_brackets = should_apply_rainbow_brackets(lang_name);

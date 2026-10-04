@@ -155,10 +155,10 @@ pub fn format_and_highlight_json(
     let mut spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: prefix.len(),
-        color: if prefix.contains("RECV") {
-            [0.313, 0.980, 0.482, 1.0]
+        role: if prefix.contains("RECV") {
+            crate::theme::SyntaxRole::Function
         } else {
-            [0.545, 0.913, 0.992, 1.0]
+            crate::theme::SyntaxRole::Keyword
         },
     }];
     let mut folds = Vec::new();
@@ -193,19 +193,18 @@ pub fn format_and_highlight_json(
                     while let Some(m) = matches.next() {
                         for cap in m.captures {
                             let name = query.capture_names()[cap.index as usize];
-                            let color = match name {
-                                "property" => [0.545, 0.913, 0.992, 1.0],
-                                "string" => [0.945, 0.980, 0.549, 1.0],
-                                "number" => [0.741, 0.576, 0.976, 1.0],
-                                "boolean" => [1.0, 0.474, 0.776, 1.0],
-                                "keyword.control" => [1.0, 0.474, 0.776, 1.0],
-                                "comment" => [0.384, 0.447, 0.643, 1.0],
+                            let role = match name {
+                                "property" => crate::theme::SyntaxRole::Keyword,
+                                "string" => crate::theme::SyntaxRole::String,
+                                "number" => crate::theme::SyntaxRole::Constant,
+                                "boolean" | "keyword.control" => crate::theme::SyntaxRole::KeywordControl,
+                                "comment" => crate::theme::SyntaxRole::Comment,
                                 _ => continue,
                             };
                             spans.push(crate::highlighter::ColorSpan {
                                 start: cap.node.start_byte() + prefix.len(),
                                 end: cap.node.end_byte() + prefix.len(),
-                                color,
+                                role,
                             });
                         }
                     }
@@ -218,7 +217,7 @@ pub fn format_and_highlight_json(
         spans.push(crate::highlighter::ColorSpan {
             start: prefix.len(),
             end: final_string.len(),
-            color: [0.875, 0.882, 0.902, 1.0],
+            role: crate::theme::SyntaxRole::LogText,
         });
     }
 

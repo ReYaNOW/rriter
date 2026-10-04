@@ -60,24 +60,24 @@ pub fn highlight_hover_text(msg: &str) -> HoverHighlight {
                                 while let Some(m) = matches.next() {
                                     for cap in m.captures {
                                         let name = query.capture_names()[cap.index as usize];
-                                        let color = match name {
-                                            "property" | "variable" => [0.972, 0.972, 0.949, 1.0],
-                                            "string" => [0.945, 0.980, 0.549, 1.0],
-                                            "type" | "class_name" => [0.545, 0.913, 0.992, 1.0],
+                                        let role = match name {
+                                            "property" | "variable" => crate::theme::SyntaxRole::Fg,
+                                            "string" => crate::theme::SyntaxRole::String,
+                                            "type" | "class_name" => crate::theme::SyntaxRole::Keyword,
                                             "keyword.control" | "keyword" | "operator" => {
-                                                [1.0, 0.474, 0.776, 1.0]
+                                                crate::theme::SyntaxRole::KeywordControl
                                             }
                                             "function" | "py_function" | "py_builtin_or_func" => {
-                                                [0.313, 0.980, 0.482, 1.0]
+                                                crate::theme::SyntaxRole::Function
                                             }
-                                            "number" => [0.741, 0.576, 0.976, 1.0],
-                                            "comment" => [0.384, 0.447, 0.643, 1.0],
+                                            "number" => crate::theme::SyntaxRole::Constant,
+                                            "comment" => crate::theme::SyntaxRole::Comment,
                                             _ => continue,
                                         };
                                         spans.push(crate::highlighter::ColorSpan {
                                             start: offset + cap.node.start_byte(),
                                             end: offset + cap.node.end_byte(),
-                                            color,
+                                            role,
                                         });
                                     }
                                 }
@@ -202,13 +202,13 @@ fn push_ts_spans_for(
     while let Some(found) = matches.next() {
         for capture in found.captures {
             let name = query.capture_names()[capture.index as usize];
-            let Some(color) = crate::languages::python::ts_capture_color(name) else {
+            let Some(role) = crate::languages::python::ts_capture_role(name) else {
                 continue;
             };
             spans.push(crate::highlighter::ColorSpan {
                 start: global_start + capture.node.start_byte(),
                 end: global_start + capture.node.end_byte(),
-                color,
+                role,
             });
         }
     }
@@ -825,7 +825,7 @@ fn add_doc_arg_name_spans(text: &str, spans: &mut Vec<crate::highlighter::ColorS
                     spans.push(crate::highlighter::ColorSpan {
                         start: offset + name_start_in_line,
                         end: offset + name_start_in_line + name.len(),
-                        color: crate::highlighter::DRACULA_ORANGE,
+                        role: crate::theme::SyntaxRole::Parameter,
                     });
                 }
             }
@@ -971,9 +971,9 @@ fn add_bound_method_signature_spans(
         return false;
     }
 
-    let function_color = [0.313, 0.980, 0.482, 1.0];
-    let type_color = [0.545, 0.913, 0.992, 1.0];
-    let param_color = [0.973, 0.584, 0.502, 1.0];
+    let function_role = crate::theme::SyntaxRole::Function;
+    let type_role = crate::theme::SyntaxRole::Keyword;
+    let param_role = crate::theme::SyntaxRole::Parameter;
 
     if let Some(open_paren) = line.find('(') {
         if let Some(dot_pos) = line[..open_paren].rfind('.') {
@@ -982,7 +982,7 @@ fn add_bound_method_signature_spans(
                 spans.push(crate::highlighter::ColorSpan {
                     start: line_offset + name_start,
                     end: line_offset + open_paren,
-                    color: function_color,
+                    role: function_role,
                 });
             }
         }
@@ -1003,7 +1003,7 @@ fn add_bound_method_signature_spans(
                 spans.push(crate::highlighter::ColorSpan {
                     start: line_offset + ty_start,
                     end: line_offset + ty_start + ty_len,
-                    color: type_color,
+                    role: type_role,
                 });
             }
         }
@@ -1020,7 +1020,7 @@ fn add_bound_method_signature_spans(
                         spans.push(crate::highlighter::ColorSpan {
                             start: line_offset + start,
                             end: line_offset + start + lhs.len(),
-                            color: param_color,
+                            role: param_role,
                         });
                     }
                 }
@@ -1048,7 +1048,7 @@ fn add_self_param_span_for_signature(
                 spans.push(crate::highlighter::ColorSpan {
                     start: line_offset + open + 1,
                     end: line_offset + open + 1 + 4,
-                    color: [0.741, 0.576, 0.976, 1.0],
+                    role: crate::theme::SyntaxRole::Constant,
                 });
             }
         }
@@ -1088,7 +1088,7 @@ fn add_param_name_spans_for_signature(
             spans.push(crate::highlighter::ColorSpan {
                 start,
                 end: start + name.len(),
-                color: [0.973, 0.584, 0.502, 1.0],
+                role: crate::theme::SyntaxRole::Parameter,
             });
         }
         local += raw.len() + 1;
@@ -1109,7 +1109,7 @@ fn add_class_keyword_spans_for_signature(
     spans.push(crate::highlighter::ColorSpan {
         start: line_offset + class_kw_start,
         end: line_offset + class_kw_start + "class".len(),
-        color: [1.0, 0.474, 0.776, 1.0],
+        role: crate::theme::SyntaxRole::KeywordControl,
     });
 
     let class_name = after_class
@@ -1126,7 +1126,7 @@ fn add_class_keyword_spans_for_signature(
     spans.push(crate::highlighter::ColorSpan {
         start: line_offset + class_name_start,
         end: line_offset + class_name_start + class_name.len(),
-        color: [0.545, 0.913, 0.992, 1.0],
+        role: crate::theme::SyntaxRole::Keyword,
     });
 }
 
@@ -1144,7 +1144,7 @@ fn add_type_bracket_neutral_spans_for_signature(
             spans.push(crate::highlighter::ColorSpan {
                 start: line_offset + idx,
                 end: line_offset + idx + ch.len_utf8(),
-                color: [0.972, 0.972, 0.949, 1.0],
+                role: crate::theme::SyntaxRole::Fg,
             });
         }
     }
@@ -1155,7 +1155,7 @@ fn add_type_expr_spans_for_line(
     line_offset: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
 ) {
-    let neutral_color = crate::highlighter::DRACULA_FG;
+    let neutral_role = crate::theme::SyntaxRole::Fg;
     let mut run_start: Option<usize> = None;
     for (idx, ch) in line.char_indices() {
         let is_type_char = ch.is_alphanumeric() || ch == '_' || ch == '.';
@@ -1170,14 +1170,14 @@ fn add_type_expr_spans_for_line(
             spans.push(crate::highlighter::ColorSpan {
                 start: line_offset + start,
                 end: line_offset + idx,
-                color: type_expr_token_color(token),
+                role: type_expr_token_role(token),
             });
         }
         if matches!(ch, '[' | ']') {
             spans.push(crate::highlighter::ColorSpan {
                 start: line_offset + idx,
                 end: line_offset + idx + ch.len_utf8(),
-                color: neutral_color,
+                role: neutral_role,
             });
         }
     }
@@ -1186,17 +1186,17 @@ fn add_type_expr_spans_for_line(
         spans.push(crate::highlighter::ColorSpan {
             start: line_offset + start,
             end: line_offset + line.len(),
-            color: type_expr_token_color(token),
+            role: type_expr_token_role(token),
         });
     }
 }
 
-fn type_expr_token_color(token: &str) -> [f32; 4] {
+fn type_expr_token_role(token: &str) -> crate::theme::SyntaxRole {
     match token {
-        "None" | "True" | "False" => crate::highlighter::DRACULA_PINK,
-        token if is_simple_type_token(token) => crate::highlighter::DRACULA_CYAN,
-        token if is_simple_class_type_token(token) => crate::highlighter::DRACULA_DARK_CYAN,
-        _ => crate::highlighter::DRACULA_CYAN,
+        "None" | "True" | "False" => crate::theme::SyntaxRole::KeywordControl,
+        token if is_simple_type_token(token) => crate::theme::SyntaxRole::Keyword,
+        token if is_simple_class_type_token(token) => crate::theme::SyntaxRole::Class,
+        _ => crate::theme::SyntaxRole::Keyword,
     }
 }
 

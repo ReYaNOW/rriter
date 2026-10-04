@@ -161,11 +161,12 @@
 
     #[test]
     fn spanned_ui_chars_keep_utf8_offsets_and_exact_span_colors() {
-        let expected = [0.1, 0.2, 0.3, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::Keyword);
         let spans = vec![crate::highlighter::ColorSpan {
             start: 2,
             end: 6,
-            color: expected,
+            role: crate::theme::SyntaxRole::Keyword,
         }];
         let mut seen = Vec::new();
         for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {
@@ -181,11 +182,12 @@
     fn spanned_ui_chars_skip_joiner_and_variation_without_losing_utf8_span_offsets() {
         let text = "a\u{200D}\u{FE0F}Ж";
         let zhe_start = text.find('Ж').expect("cyrillic glyph");
-        let expected = [0.2, 0.7, 0.4, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::String);
         let spans = [crate::highlighter::ColorSpan {
             start: zhe_start,
             end: zhe_start + 'Ж'.len_utf8(),
-            color: expected,
+            role: crate::theme::SyntaxRole::String,
         }];
         let mut emitted = Vec::new();
         let mut emitted_width = 0.0;
@@ -208,11 +210,12 @@
 
     #[test]
     fn bug_1_database_sql_renderer_uses_shared_spanned_utf8_walk() {
-        let expected = [0.1, 0.2, 0.3, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::Function);
         let spans = [crate::highlighter::ColorSpan {
             start: 7,
             end: 9,
-            color: expected,
+            role: crate::theme::SyntaxRole::Function,
         }];
         let mut seen = Vec::new();
         for_each_spanned_ui_char("SELECT Ж", &spans, Some(0), |ch, color| seen.push((ch, color)));
@@ -221,11 +224,10 @@
 
     #[test]
     fn bug_2_api_python_renderer_uses_shared_utf8_byte_offsets() {
-        let expected = [0.9, 0.4, 0.2, 1.0];
         let spans = [crate::highlighter::ColorSpan {
             start: 2,
             end: 6,
-            color: expected,
+            role: crate::theme::SyntaxRole::Constant,
         }];
         let mut colored = Vec::new();
         for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {

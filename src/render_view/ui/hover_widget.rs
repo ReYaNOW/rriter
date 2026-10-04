@@ -132,7 +132,7 @@ fn diagnostic_visual_char(
     let color = spans
         .iter()
         .find(|span| offset >= span.start && offset < span.end)
-        .map(|span| span.color)
+        .map(|span| span.color())
         .unwrap_or([0.972, 0.972, 0.949, 1.0]);
     DiagnosticVisualChar {
         ch,
@@ -911,7 +911,7 @@ impl Renderer {
                 .spans
                 .get(span_idx)
                 .filter(|span| offset >= span.start && offset < span.end)
-                .map(|span| span.color)
+                .map(|span| span.color())
                 .unwrap_or([0.972, 0.972, 0.949, 1.0]);
 
             cur_line.push((c, color, offset));

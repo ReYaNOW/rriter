@@ -1321,7 +1321,7 @@ mod tests {
         spans.push(crate::highlighter::ColorSpan {
             start: 0,
             end: 1,
-            color: [1.0, 1.0, 1.0, 1.0],
+            role: crate::theme::SyntaxRole::Fg,
         });
         EditorTab {
             editor: crate::editor::Editor::new(16),
