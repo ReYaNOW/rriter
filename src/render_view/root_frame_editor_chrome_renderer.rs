@@ -266,7 +266,7 @@ impl Renderer {
                             3.0 * s,
                             mark_h,
                             1.5 * s,
-                            [0.76, 0.78, 0.84, 0.90],
+                            self.theme.diff_deleted_gutter,
                         );
                     }
                     if has_new {
@@ -276,7 +276,7 @@ impl Renderer {
                             3.0 * s,
                             mark_h,
                             1.5 * s,
-                            [0.18, 0.82, 0.34, 0.95],
+                            self.theme.diff_added_gutter,
                         );
                     }
                 }

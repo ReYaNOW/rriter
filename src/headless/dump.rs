@@ -175,6 +175,11 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         "scale": scale,
         "cursor_icon": format!("{:?}", app.current_cursor),
         "mode": mode,
+        "themes": {
+            "editor": app.editor_theme_id.key(),
+            "ui": app.ui_theme_id.key(),
+            "linked": app.theme_linked,
+        },
         "tabs": tabs_json(app),
         "markdown_media_stats": {
             "media_gen": app.markdown_media.media_gen(),

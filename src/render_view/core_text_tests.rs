@@ -161,14 +161,16 @@
 
     #[test]
     fn spanned_ui_chars_keep_utf8_offsets_and_exact_span_colors() {
-        let expected = [0.1, 0.2, 0.3, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::Keyword);
         let spans = vec![crate::highlighter::ColorSpan {
             start: 2,
             end: 6,
-            color: expected,
+            role: crate::theme::SyntaxRole::Keyword,
         }];
         let mut seen = Vec::new();
-        for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char("xабy", &spans, Some(1), &palette, |ch, color| {
             seen.push((ch, color));
         });
         assert!(seen[0].1[0].is_nan());
@@ -178,18 +180,38 @@
     }
 
     #[test]
+    fn spanned_ui_chars_resolve_role_from_supplied_surface_palette() {
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::OneDark);
+        assert_ne!(
+            palette.color(crate::theme::SyntaxRole::KeywordControl),
+            crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+                .color(crate::theme::SyntaxRole::KeywordControl)
+        );
+        let spans = [crate::highlighter::ColorSpan {
+            start: 0,
+            end: 1,
+            role: crate::theme::SyntaxRole::KeywordControl,
+        }];
+        let mut seen = Vec::new();
+        for_each_spanned_ui_char("x", &spans, Some(0), &palette, |_, color| seen.push(color));
+        assert_eq!(seen, vec![palette.color(crate::theme::SyntaxRole::KeywordControl)]);
+    }
+
+    #[test]
     fn spanned_ui_chars_skip_joiner_and_variation_without_losing_utf8_span_offsets() {
         let text = "a\u{200D}\u{FE0F}Ж";
         let zhe_start = text.find('Ж').expect("cyrillic glyph");
-        let expected = [0.2, 0.7, 0.4, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::String);
         let spans = [crate::highlighter::ColorSpan {
             start: zhe_start,
             end: zhe_start + 'Ж'.len_utf8(),
-            color: expected,
+            role: crate::theme::SyntaxRole::String,
         }];
         let mut emitted = Vec::new();
         let mut emitted_width = 0.0;
-        for_each_spanned_ui_char(text, &spans, Some(0), |ch, color| {
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char(text, &spans, Some(0), &palette, |ch, color| {
             let advance = match ch {
                 'a' => 8.0,
                 'Ж' => 11.0,
@@ -208,27 +230,29 @@
 
     #[test]
     fn bug_1_database_sql_renderer_uses_shared_spanned_utf8_walk() {
-        let expected = [0.1, 0.2, 0.3, 1.0];
+        let expected = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)
+            .color(crate::theme::SyntaxRole::Function);
         let spans = [crate::highlighter::ColorSpan {
             start: 7,
             end: 9,
-            color: expected,
+            role: crate::theme::SyntaxRole::Function,
         }];
         let mut seen = Vec::new();
-        for_each_spanned_ui_char("SELECT Ж", &spans, Some(0), |ch, color| seen.push((ch, color)));
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char("SELECT Ж", &spans, Some(0), &palette, |ch, color| seen.push((ch, color)));
         assert_eq!(seen.last(), Some(&('Ж', expected)));
     }
 
     #[test]
     fn bug_2_api_python_renderer_uses_shared_utf8_byte_offsets() {
-        let expected = [0.9, 0.4, 0.2, 1.0];
         let spans = [crate::highlighter::ColorSpan {
             start: 2,
             end: 6,
-            color: expected,
+            role: crate::theme::SyntaxRole::Constant,
         }];
         let mut colored = Vec::new();
-        for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char("xабy", &spans, Some(1), &palette, |ch, color| {
             if !color[0].is_nan() {
                 colored.push(ch);
             }
@@ -240,14 +264,16 @@
     fn bug_3_inline_git_renderer_emits_one_callback_per_character() {
         let text = "a.Ж:b";
         let mut visited = String::new();
-        for_each_spanned_ui_char(text, &[], None, |ch, _| visited.push(ch));
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char(text, &[], None, &palette, |ch, _| visited.push(ch));
         assert_eq!(visited, text);
     }
 
     #[test]
     fn bug_4_punctuation_is_visited_once_without_duplicate_quad_workaround() {
         let mut chars = Vec::new();
-        for_each_spanned_ui_char("a.:b", &[], None, |ch, _| chars.push(ch));
+        let palette = crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula);
+        for_each_spanned_ui_char("a.:b", &[], None, &palette, |ch, _| chars.push(ch));
         assert_eq!(chars, vec!['a', '.', ':', 'b']);
         assert_eq!(chars.iter().filter(|&&ch| ch == '.').count(), 1);
         assert_eq!(chars.iter().filter(|&&ch| ch == ':').count(), 1);

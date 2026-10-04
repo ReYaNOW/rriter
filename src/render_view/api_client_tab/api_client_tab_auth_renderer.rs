@@ -60,7 +60,7 @@ impl Renderer {
             let color = if part.contains('/') {
                 [0.35, 0.75, 1.0, 1.0]
             } else if part.contains("required") {
-                crate::highlighter::DRACULA_PINK
+                self.ui.syntax.color(crate::theme::SyntaxRole::KeywordControl)
             } else if idx == 0 {
                 [0.74, 0.76, 0.84, 1.0]
             } else {

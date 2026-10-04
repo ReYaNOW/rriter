@@ -141,7 +141,7 @@ fn api_mock_contract_focus_switch_keeps_python_highlight_cache() {
         vec![crate::highlighter::ColorSpan {
             start: 0,
             end: 5,
-            color: crate::highlighter::DRACULA_CYAN,
+            role: crate::theme::SyntaxRole::Keyword,
         }],
     );
     app.ide_panel.api.mock_highlight_target = target;
@@ -597,4 +597,3 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
     );
     assert!(app.ide_panel.api.mock_ty_diagnostics.is_empty());
 }
-

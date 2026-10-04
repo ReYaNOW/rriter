@@ -11,6 +11,7 @@ pub(crate) use markdown::{
 };
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
+mod app_theme_methods;
 pub(crate) mod keymap_settings;
 pub(crate) mod pdf_tab;
 pub(crate) mod image_tab;

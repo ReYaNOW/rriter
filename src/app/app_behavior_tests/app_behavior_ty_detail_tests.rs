@@ -607,7 +607,7 @@ fn autocomplete_detail_popup_formats_python_overload_docs() {
     assert!(popup.spans.iter().any(|span| {
         span.start <= paramspec_pos
             && paramspec_pos < span.end
-            && span.color == crate::highlighter::DRACULA_CYAN
+            && span.role == crate::theme::SyntaxRole::Keyword
     }));
 
     app.autocomplete_options[0].0 = AutocompleteItem {

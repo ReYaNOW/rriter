@@ -24,6 +24,7 @@ pub struct Config {
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
     pub pdf_dark_pages: bool,
+    pub theme: crate::theme::ThemeSelection,
     pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
@@ -41,6 +42,7 @@ impl Default for Config {
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
             pdf_dark_pages: true,
+            theme: crate::theme::ThemeSelection::default(),
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
@@ -617,6 +619,9 @@ fn format_config_content(config: &Config) -> String {
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
         "pdf_dark_pages": config.pdf_dark_pages,
+        "theme_linked": config.theme.linked,
+        "editor_theme": config.theme.editor.key(),
+        "ui_theme": config.theme.ui.key(),
         "ctrl_wheel_multiplier": normalize_ctrl_wheel_multiplier(config.ctrl_wheel_multiplier),
         "tool_paths": tool_paths,
         "dart": {
@@ -733,6 +738,15 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
     }
     if let Some(value) = value.get("pdf_dark_pages").and_then(serde_json::Value::as_bool) {
         config.pdf_dark_pages = value;
+    }
+    if let Some(value) = value.get("theme_linked").and_then(serde_json::Value::as_bool) {
+        config.theme.linked = value;
+    }
+    if let Some(value) = value.get("editor_theme").and_then(serde_json::Value::as_str) {
+        config.theme.editor = crate::theme::ThemeId::from_key(value);
+    }
+    if let Some(value) = value.get("ui_theme").and_then(serde_json::Value::as_str) {
+        config.theme.ui = crate::theme::ThemeId::from_key(value);
     }
     if let Some(value) = value
         .get("ctrl_wheel_multiplier")
@@ -1212,6 +1226,36 @@ mod tests {
 
         let invalid_json = parse_config_content("not json", Config::default());
         assert_eq!(invalid_json.window_width, Config::default().window_width);
+    }
+
+    #[test]
+    fn theme_config_roundtrips_and_invalid_external_values_keep_defaults() {
+        let config = Config {
+            theme: crate::theme::ThemeSelection {
+                linked: false,
+                editor: crate::theme::ThemeId::OneDark,
+                ui: crate::theme::ThemeId::Sepia,
+            },
+            ..Config::default()
+        };
+        let parsed = parse_config_content(&format_config_content(&config), Config::default());
+        assert!(!parsed.theme.linked);
+        assert_eq!(parsed.theme.editor, crate::theme::ThemeId::OneDark);
+        assert_eq!(parsed.theme.ui, crate::theme::ThemeId::Sepia);
+
+        let invalid = parse_config_content(
+            r#"{"window_width": 1234, "theme_linked": "yes", "editor_theme": "neon", "ui_theme": 5}"#,
+            Config::default(),
+        );
+        assert!(invalid.theme.linked);
+        assert_eq!(invalid.theme.editor, crate::theme::ThemeId::Dracula);
+        assert_eq!(invalid.theme.ui, crate::theme::ThemeId::Dracula);
+        assert_eq!(invalid.window_width, 1234.0);
+
+        let old = parse_config_content(r#"{"window_width": 900}"#, Config::default());
+        assert!(old.theme.linked);
+        assert_eq!(old.theme.editor, crate::theme::ThemeId::Dracula);
+        assert_eq!(old.theme.ui, crate::theme::ThemeId::Dracula);
     }
 
     #[test]

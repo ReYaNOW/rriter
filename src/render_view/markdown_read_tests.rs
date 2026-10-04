@@ -210,7 +210,7 @@
         let second = styled_char_advance(&styled, 1, 'b', BODY_SCALE, 1.0, false, &mut advance);
         assert_eq!(first + second, 28.0);
         assert_eq!(inline_code_padding_x(1.0), 4.0);
-        assert_eq!(markdown_text_color(code_style, [0.0; 4]), MARKDOWN_GOLD);
+        assert_eq!(markdown_text_color(code_style, [0.0; 4], &crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula)), [0.902, 0.714, 0.451, 1.0]);
 
         let bg = [0.156, 0.164, 0.211, 1.0];
         let fg = [0.972, 0.972, 0.949, 1.0];

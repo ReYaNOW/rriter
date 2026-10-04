@@ -8,11 +8,11 @@ fn has_color_span(
     spans: &[crate::highlighter::ColorSpan],
     start: usize,
     end: usize,
-    color: [f32; 4],
+    role: crate::theme::SyntaxRole,
 ) -> bool {
     spans
         .iter()
-        .any(|span| span.start <= start && span.end >= end && span.color == color)
+        .any(|span| span.start <= start && span.end >= end && span.role == role)
 }
 
 #[test]
@@ -124,7 +124,7 @@ Inline ``call(name=1)`` text\n";
         &spans,
         class_start,
         class_start + "class".len(),
-        crate::highlighter::DRACULA_PINK,
+        crate::theme::SyntaxRole::KeywordControl,
     ));
 
     let box_start = msg.find("Box").unwrap();
@@ -132,7 +132,7 @@ Inline ``call(name=1)`` text\n";
         &spans,
         box_start,
         box_start + "Box".len(),
-        crate::highlighter::DRACULA_CYAN,
+        crate::theme::SyntaxRole::Keyword,
     ));
 
     let attr_name_start = msg.find("field of").unwrap();
@@ -140,7 +140,7 @@ Inline ``call(name=1)`` text\n";
         &spans,
         attr_name_start,
         attr_name_start + "field".len(),
-        crate::highlighter::DRACULA_PINK,
+        crate::theme::SyntaxRole::KeywordControl,
     ));
 
     let attr_type_start = msg.find("of Mod").unwrap() + "of ".len();
@@ -148,7 +148,7 @@ Inline ``call(name=1)`` text\n";
         &spans,
         attr_type_start,
         attr_type_start + "Mod".len(),
-        crate::highlighter::DRACULA_CYAN,
+        crate::theme::SyntaxRole::Keyword,
     ));
 
     let param_start = msg.find("field: int").unwrap();
@@ -156,7 +156,7 @@ Inline ``call(name=1)`` text\n";
         &spans,
         param_start,
         param_start + "field".len(),
-        crate::highlighter::DRACULA_ORANGE,
+        crate::theme::SyntaxRole::Parameter,
     ));
 
     let inline_arg_start = msg.find("name=1").unwrap();
@@ -164,31 +164,31 @@ Inline ``call(name=1)`` text\n";
         &spans,
         inline_arg_start,
         inline_arg_start + "name".len(),
-        crate::highlighter::DRACULA_ORANGE,
+        crate::theme::SyntaxRole::Parameter,
     ));
 }
 
 #[test]
 fn color_helpers_cover_capture_map_span_forcing_and_keyword_arg_edges() {
     assert_eq!(
-        ts_capture_color("keyword.control"),
-        Some([1.0, 0.474, 0.776, 1.0])
+        ts_capture_role("keyword.control"),
+        Some(crate::theme::SyntaxRole::KeywordControl)
     );
     assert_eq!(
-        ts_capture_color("py_builtin_or_func"),
-        Some([0.313, 0.980, 0.482, 1.0])
+        ts_capture_role("py_builtin_or_func"),
+        Some(crate::theme::SyntaxRole::Function)
     );
-    assert_eq!(ts_capture_color("missing.capture"), None);
+    assert_eq!(ts_capture_role("missing.capture"), None);
 
     let mut forced = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: 10,
-        color: [1.0, 0.0, 0.0, 1.0],
+        role: crate::theme::SyntaxRole::Keyword,
     }];
-    force_color_on_ranges(&mut forced, &[(3, 6)], [0.0, 1.0, 0.0, 1.0]);
-    assert!(has_color_span(&forced, 0, 3, [1.0, 0.0, 0.0, 1.0]));
-    assert!(has_color_span(&forced, 6, 10, [1.0, 0.0, 0.0, 1.0]));
-    assert!(has_color_span(&forced, 3, 6, [0.0, 1.0, 0.0, 1.0]));
+    force_role_on_ranges(&mut forced, &[(3, 6)], crate::theme::SyntaxRole::String);
+    assert!(has_color_span(&forced, 0, 3, crate::theme::SyntaxRole::Keyword));
+    assert!(has_color_span(&forced, 6, 10, crate::theme::SyntaxRole::Keyword));
+    assert!(has_color_span(&forced, 3, 6, crate::theme::SyntaxRole::String));
 
     let code = "call(alpha=1, beta == 2, gamma!=3, delta='x=y', ε=3)";
     let mut spans = Vec::new();
@@ -200,7 +200,7 @@ fn color_helpers_cover_capture_map_span_forcing_and_keyword_arg_edges() {
             &spans,
             start,
             start + name.len(),
-            crate::highlighter::DRACULA_ORANGE,
+            crate::theme::SyntaxRole::Parameter,
         ));
     }
 
@@ -210,7 +210,7 @@ fn color_helpers_cover_capture_map_span_forcing_and_keyword_arg_edges() {
             &spans,
             start,
             start + name.len(),
-            crate::highlighter::DRACULA_ORANGE,
+            crate::theme::SyntaxRole::Parameter,
         ));
     }
 
@@ -236,13 +236,13 @@ fn color_helpers_cover_capture_map_span_forcing_and_keyword_arg_edges() {
             &class_attr_spans,
             start,
             start + name.len(),
-            crate::highlighter::DRACULA_FG,
+            crate::theme::SyntaxRole::Fg,
         ));
         assert!(!has_color_span(
             &class_attr_spans,
             start,
             start + name.len(),
-            crate::highlighter::DRACULA_ORANGE,
+            crate::theme::SyntaxRole::Parameter,
         ));
     }
 }
@@ -305,16 +305,16 @@ fn python_docstring_spans_color_text_header_and_inline_code() {
     assert!(
         spans
             .iter()
-            .any(|s| s.color == DOCSTRING_TEXT && s.start <= doc_text && s.end > doc_text)
+            .any(|s| s.role == crate::theme::SyntaxRole::Comment && s.start <= doc_text && s.end > doc_text)
     );
     assert!(
         spans
             .iter()
-            .any(|s| s.color == crate::highlighter::DRACULA_CYAN)
+            .any(|s| s.role == crate::theme::SyntaxRole::Keyword)
     );
     let inline_code = text.find("int").unwrap();
     assert!(spans.iter().any(|s| {
-        s.color == crate::highlighter::DRACULA_CYAN
+        s.role == crate::theme::SyntaxRole::Keyword
             && s.start <= inline_code
             && s.end >= inline_code + "int".len()
     }));

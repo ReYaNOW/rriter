@@ -1189,7 +1189,7 @@ mod session_cases {
             [
                 "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "hover",
                 "ide_panel", "markdown_media_stats", "markdown_toc", "mode",
-                "overlays", "scale", "size", "tabs", "ui", "writes_allowed"
+                "overlays", "scale", "size", "tabs", "themes", "ui", "writes_allowed"
             ]
         );
         assert_eq!(dump["mode"], "welcome");

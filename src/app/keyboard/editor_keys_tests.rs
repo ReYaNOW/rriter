@@ -291,7 +291,7 @@ mod tests {
 
         assert_eq!(editor.get_full_text(), "//fn main() {}\n");
         assert!(highlighter.spans.iter().any(|span| {
-            span.start == 0 && span.end >= 2 && span.color == crate::highlighter::DRACULA_COMMENT
+            span.start == 0 && span.end >= 2 && span.role == crate::theme::SyntaxRole::Comment
         }));
     }
 

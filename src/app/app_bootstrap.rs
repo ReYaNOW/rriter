@@ -143,6 +143,7 @@ impl App {
 
         let highlighter = Highlighter::new();
         highlighter.bind_ui_waker(&options.ui_waker);
+        let system_selection = crate::startup_environment::system_selection_color();
         let show_welcome = !options.has_file_arg && !options.run_ide_on_startup;
         let file_key = options
             .file_path
@@ -175,7 +176,11 @@ impl App {
             } else {
                 Some(crate::platform::Clipboard::deferred_system())
             },
-            theme: crate::load_dracula(),
+            theme: crate::renderer::Theme::for_id(config.theme.editor, system_selection),
+            system_selection,
+            editor_theme_id: config.theme.editor,
+            ui_theme_id: config.theme.ui,
+            theme_linked: config.theme.linked,
             base_title: title,
             file_path: options.file_path,
             file_key,

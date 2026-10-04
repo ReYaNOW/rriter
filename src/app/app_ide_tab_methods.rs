@@ -413,6 +413,7 @@ impl App {
             enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                 .load(std::sync::atomic::Ordering::Relaxed),
             pdf_dark_pages: self.pdf_dark_pages,
+            theme: self.theme_selection(),
             ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),
@@ -1321,7 +1322,7 @@ mod tests {
         spans.push(crate::highlighter::ColorSpan {
             start: 0,
             end: 1,
-            color: [1.0, 1.0, 1.0, 1.0],
+            role: crate::theme::SyntaxRole::Fg,
         });
         EditorTab {
             editor: crate::editor::Editor::new(16),

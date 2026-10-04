@@ -648,6 +648,8 @@ impl Renderer {
                 font_size: 18.0 * scale_factor,
                 scale_factor,
                 theme,
+                ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                theme_gen: 0,
                 width: 1000.0,
                 height: 800.0,
                 minimap_width: 110.0,

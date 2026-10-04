@@ -44,17 +44,18 @@ impl Renderer {
         y: f32,
         max_x: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x;
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }
             let advance = self.char_advance(ch);
             if !matches!(ch, ' ' | '\t') {
                 let mut color = if span_color[0].is_nan() {
-                    self.theme.fg
+                    palette.color(crate::theme::SyntaxRole::Fg)
                 } else {
                     span_color
                 };
@@ -76,11 +77,12 @@ impl Renderer {
         y: f32,
         max_x: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x.round();
         let baseline_y = y.round();
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }
@@ -90,7 +92,7 @@ impl Renderer {
                 && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, 1.0)
             {
                 let mut color = if span_color[0].is_nan() {
-                    self.theme.fg
+                    palette.color(crate::theme::SyntaxRole::Fg)
                 } else {
                     span_color
                 };
@@ -1173,9 +1175,10 @@ impl Renderer {
         y: f32,
         max_x: f32,
         scale: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) {
         let _ = self.draw_spanned_ui_line_pixel_snapped_alpha(
-            text, spans, base_offset, x, y, max_x, scale, 1.0,
+            text, spans, base_offset, x, y, max_x, scale, 1.0, palette,
         );
     }
 
@@ -1190,16 +1193,21 @@ impl Renderer {
         max_x: f32,
         scale: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x.round();
         let baseline_y = y.round();
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }
             if let Some(glyph) = self.get_ui_glyph(ch) {
-                let mut color = if span_color[0].is_nan() { self.theme.fg } else { span_color };
+                let mut color = if span_color[0].is_nan() {
+                    palette.color(crate::theme::SyntaxRole::Fg)
+                } else {
+                    span_color
+                };
                 color[3] *= alpha;
                 if ch != ' ' && ch != '\t'
                     && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, scale)

@@ -1128,9 +1128,9 @@ impl Renderer {
             if b == b'"' {
                 let end = json_string_end(main, idx);
                 let color = if schema_string_is_key(main, end) {
-                    crate::highlighter::DRACULA_CYAN
+                    self.ui.syntax.color(crate::theme::SyntaxRole::Keyword)
                 } else {
-                    crate::highlighter::DRACULA_YELLOW
+                    self.ui.syntax.color(crate::theme::SyntaxRole::String)
                 };
                 self.draw_json_colored_segment(&main[idx..end], color, x, y, w, &mut draw_x);
                 idx = end;
@@ -1139,7 +1139,7 @@ impl Renderer {
             if b == b'*' {
                 self.draw_json_colored_segment(
                     &main[idx..idx + 1],
-                    crate::highlighter::DRACULA_PINK,
+                    self.ui.syntax.color(crate::theme::SyntaxRole::KeywordControl),
                     x,
                     y,
                     w,
@@ -1152,7 +1152,7 @@ impl Renderer {
                 let end = json_number_end(main, idx);
                 self.draw_json_colored_segment(
                     &main[idx..end],
-                    crate::highlighter::DRACULA_PURPLE,
+                    self.ui.syntax.color(crate::theme::SyntaxRole::Constant),
                     x,
                     y,
                     w,
@@ -1164,7 +1164,7 @@ impl Renderer {
             if let Some(end) = json_keyword_end(main, idx) {
                 self.draw_json_colored_segment(
                     &main[idx..end],
-                    crate::highlighter::DRACULA_PINK,
+                    self.ui.syntax.color(crate::theme::SyntaxRole::KeywordControl),
                     x,
                     y,
                     w,

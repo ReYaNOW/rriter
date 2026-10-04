@@ -10,7 +10,6 @@ pub(crate) use geometry::{
 };
 
 pub const MAX_VERTICES: usize = 32_768;
-pub(crate) const EDITOR_SURFACE_BG: [f32; 4] = [0.173, 0.180, 0.224, 1.0];
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
 pub(crate) const COLOR_ATLAS_SIZE_W: i32 = 512;
@@ -128,6 +127,30 @@ pub struct Theme {
     pub diag_warn: [f32; 4],
     pub diag_error: [f32; 4],
     pub unused: [f32; 4],
+    pub surface_bg: [f32; 4],
+    pub syntax: crate::theme::SyntaxPalette,
+    pub terminal: [[f32; 4]; 16],
+    pub search_match: [f32; 4],
+    pub search_match_active: [f32; 4],
+    pub diff_added: [f32; 4],
+    pub terminal_bg: [f32; 4],
+    pub diff_deleted: [f32; 4],
+    pub diff_added_gutter: [f32; 4],
+    pub diff_deleted_gutter: [f32; 4],
+    pub cursor_line: [f32; 4],
+    pub bracket_match: [f32; 4],
+    pub definition_underline: [f32; 4],
+    pub folded_keyword: [f32; 4],
+    pub markdown_code_bg: [f32; 4],
+    pub markdown_quote_guide: [f32; 4],
+    pub markdown_check: [f32; 4],
+    pub sticky_shadow: [f32; 4],
+    pub terminal_search_bg: [f32; 4],
+    pub terminal_text_dim: [f32; 4],
+    pub terminal_cursor: [f32; 4],
+    pub terminal_close_hover: [f32; 4],
+    pub rollback_hover: [f32; 4],
+    pub markdown_copy_success: [f32; 4],
 }
 
 #[derive(Copy, Clone)]
@@ -404,6 +427,8 @@ pub struct Renderer {
     pub scale_factor: f32,
 
     pub theme: Theme,
+    pub ui: crate::theme::UiPalette,
+    pub theme_gen: u64,
     pub width: f32,
     pub height: f32,
     pub minimap_width: f32,

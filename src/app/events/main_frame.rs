@@ -524,6 +524,7 @@ impl App {
                     settings_cursor_mode =self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
+                        self.editor_theme_id,
                         &self.faq_editor,
                         self.settings_scroll.current,
                         self.settings_general_scroll.current,

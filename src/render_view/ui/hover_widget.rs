@@ -15,7 +15,7 @@ pub struct DiagChar {
 #[derive(Clone, Copy, Debug)]
 struct DiagnosticVisualChar {
     ch: char,
-    color: [f32; 4],
+    role: crate::theme::SyntaxRole,
     byte_offset: usize,
     byte_len: usize,
     selectable: bool,
@@ -129,14 +129,14 @@ fn diagnostic_visual_char(
     spans: &[crate::highlighter::ColorSpan],
     base_offset: usize,
 ) -> DiagnosticVisualChar {
-    let color = spans
+    let role = spans
         .iter()
         .find(|span| offset >= span.start && offset < span.end)
-        .map(|span| span.color)
-        .unwrap_or([0.972, 0.972, 0.949, 1.0]);
+        .map(|span| span.role)
+        .unwrap_or(crate::theme::SyntaxRole::Fg);
     DiagnosticVisualChar {
         ch,
-        color,
+        role,
         byte_offset: base_offset.saturating_add(offset),
         byte_len: ch.len_utf8(),
         selectable: true,
@@ -197,7 +197,7 @@ where
             if ch == ' ' || ch == '│' || ch == '├' || ch == '└' || ch == '─' {
                 current_indent.push(DiagnosticVisualChar {
                     ch: ' ',
-                    color: [0.0, 0.0, 0.0, 0.0],
+                    role: crate::theme::SyntaxRole::Fg,
                     byte_offset: 0,
                     byte_len: 0,
                     selectable: false,
@@ -679,7 +679,7 @@ impl Renderer {
                         s_str,
                         draw_x,
                         text_y.round(),
-                        item.color,
+                        self.ui.syntax.color(item.role),
                         1.0,
                     );
                     draw_x += adv;
@@ -829,7 +829,7 @@ impl Renderer {
         let s = self.scale_factor;
         let mut lines: Vec<crate::app::mouse::HoverVisualLine> = Vec::new();
         let mut cur_line_w = 0.0;
-        let mut cur_line: Vec<(char, [f32; 4], usize)> = Vec::new();
+        let mut cur_line: Vec<(char, crate::theme::SyntaxRole, usize)> = Vec::new();
         let mut last_space_idx = None;
         let mut raw_line_no = 0usize;
         let mut leading_spaces = 0;
@@ -880,7 +880,7 @@ impl Renderer {
                     let hanging_spaces = (leading_spaces + 4).min(20);
                     let mut new_remainder = Vec::with_capacity(hanging_spaces + remainder.len());
                     for _ in 0..hanging_spaces {
-                        new_remainder.push((' ', [0.0, 0.0, 0.0, 0.0], offset));
+                        new_remainder.push((' ', crate::theme::SyntaxRole::Fg, offset));
                     }
                     new_remainder.extend(remainder);
                     remainder = new_remainder;
@@ -911,8 +911,8 @@ impl Renderer {
                 .spans
                 .get(span_idx)
                 .filter(|span| offset >= span.start && offset < span.end)
-                .map(|span| span.color)
-                .unwrap_or([0.972, 0.972, 0.949, 1.0]);
+                .map(|span| span.role)
+                .unwrap_or(crate::theme::SyntaxRole::Fg);
 
             cur_line.push((c, color, offset));
             cur_line_w += adv;
@@ -1282,7 +1282,8 @@ impl Renderer {
                 );
 
                 if is_header {
-                    for &(c, color, offset) in line.iter().skip(glyph_start) {
+                    for &(c, role, offset) in line.iter().skip(glyph_start) {
+                        let color = self.ui.syntax.color(role);
                         let mut adv = 0.0;
                         if let Some(g) = self.get_ui_glyph(c) {
                             adv = g.advance * scale_mul;
@@ -1365,7 +1366,8 @@ impl Renderer {
                     }
 
                     draw_x = start_x;
-                    for &(c, color, offset) in line.iter().skip(glyph_start) {
+                    for &(c, role, offset) in line.iter().skip(glyph_start) {
+                        let color = self.ui.syntax.color(role);
                         let adv = self.char_advance(c);
                         if let Some((sel_start, sel_end)) = selected {
                             if offset >= sel_start && offset < sel_end {

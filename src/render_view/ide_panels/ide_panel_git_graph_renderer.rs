@@ -824,7 +824,7 @@ impl Renderer {
                 if let Some(slice) = piece.get(local_start..local_end) {
                     let color = ansi_fg
                         .and_then(|index| {
-                            crate::app::terminal::ANSI_16_COLORS.get(index as usize).copied()
+                            self.theme.terminal.get(index as usize).copied()
                         })
                         .unwrap_or(semantic);
                     self.draw_string_scaled(slice, draw_x, baseline, color, text_scale);

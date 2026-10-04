@@ -198,7 +198,7 @@ impl ApiClientState {
                         out.push(ColorSpan {
                             start,
                             end,
-                            color: span.color,
+                            role: span.role,
                         });
                     }
                 }
@@ -209,7 +209,7 @@ impl ApiClientState {
                         out.push(ColorSpan {
                             start: start - virtual_source.prelude_start,
                             end: end - virtual_source.prelude_start,
-                            color: span.color,
+                            role: span.role,
                         });
                     }
                 }
@@ -220,7 +220,7 @@ impl ApiClientState {
                         out.push(ColorSpan {
                             start: start - virtual_source.signature_start,
                             end: end - virtual_source.signature_start,
-                            color: span.color,
+                            role: span.role,
                         });
                     }
                 }
@@ -232,7 +232,7 @@ impl ApiClientState {
                             out.push(ColorSpan {
                                 start: line.edit_start + start - line.source_start,
                                 end: line.edit_start + end - line.source_start,
-                                color: span.color,
+                                role: span.role,
                             });
                         }
                     }

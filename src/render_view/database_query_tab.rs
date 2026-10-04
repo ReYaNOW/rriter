@@ -956,6 +956,7 @@ impl Renderer {
         y: f32,
         max_x: f32,
     ) {
+        let syntax = self.ui.syntax;
         self.draw_spanned_ui_line_pixel_snapped(
             line,
             spans,
@@ -964,6 +965,7 @@ impl Renderer {
             y,
             max_x,
             1.0,
+            &syntax,
         );
     }
 

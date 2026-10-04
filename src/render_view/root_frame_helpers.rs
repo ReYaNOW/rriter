@@ -64,8 +64,8 @@ impl Renderer {
         y: f32,
         max_x: f32,
     ) {
-        let _ =
-            self.draw_spanned_editor_line_alpha(text, spans, base_offset, x, y, max_x, 1.0);
+        let syntax = self.theme.syntax;
+        let _ = self.draw_spanned_editor_line_alpha(text, spans, base_offset, x, y, max_x, 1.0, &syntax);
     }
 
     fn draw_inline_git_popup_panel(
@@ -220,11 +220,11 @@ impl Renderer {
             let color = match line.kind {
                 crate::app::git_diff::DiffLineKind::Added
                 | crate::app::git_diff::DiffLineKind::ModifiedNew => {
-                    Some([0.18, 0.82, 0.34, 0.26])
+                    Some(self.theme.diff_added)
                 }
                 crate::app::git_diff::DiffLineKind::Deleted
                 | crate::app::git_diff::DiffLineKind::ModifiedOld => {
-                    Some([0.76, 0.78, 0.84, 0.24])
+                    Some(self.theme.diff_deleted)
                 }
                 crate::app::git_diff::DiffLineKind::Context => None,
             };

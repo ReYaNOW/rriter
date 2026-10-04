@@ -14,8 +14,8 @@ fn color_at(highlighter: &Highlighter, offset: usize) -> [f32; 4] {
         .spans
         .iter()
         .find(|span| span.start <= offset && offset < span.end)
-        .map(|span| span.color)
-        .unwrap_or(DRACULA_FG)
+        .map(|span| crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(span.role))
+        .unwrap_or([0.972, 0.972, 0.949, 1.0])
 }
 
 #[test]
@@ -138,19 +138,19 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
     let python_name = source.find("answer()").unwrap();
     let unknown = source.find("plain_code").unwrap();
 
-    assert_eq!(color_at(&highlighter, h1), DRACULA_PURPLE);
-    assert_eq!(color_at(&highlighter, em), DRACULA_ORANGE);
-    assert_eq!(color_at(&highlighter, strong), DRACULA_PINK);
-    assert_eq!(color_at(&highlighter, inline), MARKDOWN_GOLD);
-    assert_eq!(color_at(&highlighter, link), DRACULA_GREEN);
-    assert_eq!(color_at(&highlighter, uri), DRACULA_CYAN);
-    assert_eq!(color_at(&highlighter, link_title), MARKDOWN_GOLD);
-    assert_eq!(color_at(&highlighter, rust_fn), DRACULA_PINK);
-    assert_eq!(color_at(&highlighter, rust_name), DRACULA_GREEN);
-    assert_eq!(color_at(&highlighter, rust_string), MARKDOWN_GOLD);
-    assert_eq!(color_at(&highlighter, python_def), DRACULA_PINK);
-    assert_eq!(color_at(&highlighter, python_name), DRACULA_GREEN);
-    assert_eq!(color_at(&highlighter, unknown), DRACULA_FG);
+    assert_eq!(color_at(&highlighter, h1), [0.741, 0.576, 0.976, 1.0]);
+    assert_eq!(color_at(&highlighter, em), [0.973, 0.584, 0.502, 1.0]);
+    assert_eq!(color_at(&highlighter, strong), [1.0, 0.474, 0.776, 1.0]);
+    assert_eq!(color_at(&highlighter, inline), [0.902, 0.714, 0.451, 1.0]);
+    assert_eq!(color_at(&highlighter, link), [0.313, 0.980, 0.482, 1.0]);
+    assert_eq!(color_at(&highlighter, uri), [0.545, 0.913, 0.992, 1.0]);
+    assert_eq!(color_at(&highlighter, link_title), [0.902, 0.714, 0.451, 1.0]);
+    assert_eq!(color_at(&highlighter, rust_fn), [1.0, 0.474, 0.776, 1.0]);
+    assert_eq!(color_at(&highlighter, rust_name), [0.313, 0.980, 0.482, 1.0]);
+    assert_eq!(color_at(&highlighter, rust_string), [0.902, 0.714, 0.451, 1.0]);
+    assert_eq!(color_at(&highlighter, python_def), [1.0, 0.474, 0.776, 1.0]);
+    assert_eq!(color_at(&highlighter, python_name), [0.313, 0.980, 0.482, 1.0]);
+    assert_eq!(color_at(&highlighter, unknown), [0.972, 0.972, 0.949, 1.0]);
 }
 
 #[test]
@@ -175,42 +175,42 @@ fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
     for inline in ["handle_main_mouse_input", "src/render_view/editor_text_layer.rs"] {
         assert_eq!(
             color_at(&highlighter, source.find(inline).unwrap()),
-            MARKDOWN_GOLD,
+            [0.902, 0.714, 0.451, 1.0],
             "inline code should use markdown gold: {inline}"
         );
     }
 
     assert_eq!(
         color_at(&highlighter, source.find('`').unwrap()),
-        DRACULA_COMMENT
+        [0.384, 0.447, 0.643, 1.0]
     );
     assert_eq!(
         color_at(&highlighter, source.find("code-review-graph").unwrap()),
-        DRACULA_GREEN
+        [0.313, 0.980, 0.482, 1.0]
     );
     for arg in ["build project", "project --", "/tmp/путь"] {
         assert_eq!(
             color_at(&highlighter, source.find(arg).unwrap()),
-            DRACULA_FG,
+            [0.972, 0.972, 0.949, 1.0],
             "plain markdown-fenced bash argument should be foreground: {arg}"
         );
     }
     for option in ["--skip-postprocess", "-v", "--output=path"] {
         assert_eq!(
             color_at(&highlighter, source.find(option).unwrap()),
-            DRACULA_PURPLE,
+            [0.741, 0.576, 0.976, 1.0],
             "markdown-fenced bash option should remain purple: {option}"
         );
     }
     assert_eq!(
         color_at(&highlighter, source.find("quoted value").unwrap()),
-        MARKDOWN_GOLD,
+        [0.902, 0.714, 0.451, 1.0],
         "quoted bash strings keep string semantics but use markdown gold"
     );
     for alias_path in ["/tmp/sh-path", "/tmp/shell-path"] {
         assert_eq!(
             color_at(&highlighter, source.find(alias_path).unwrap()),
-            DRACULA_FG,
+            [0.972, 0.972, 0.949, 1.0],
             "bash aliases should share markdown argument colors: {alias_path}"
         );
     }
@@ -225,19 +225,19 @@ fn standalone_bash_keeps_existing_palette_outside_markdown_injection() {
 
     assert_eq!(
         color_at(&highlighter, source.find("code-review-graph").unwrap()),
-        DRACULA_CYAN
+        [0.545, 0.913, 0.992, 1.0]
     );
     assert_eq!(
         color_at(&highlighter, source.find("build").unwrap()),
-        DRACULA_FG
+        [0.972, 0.972, 0.949, 1.0]
     );
     assert_eq!(
         color_at(&highlighter, source.find("--skip-postprocess").unwrap()),
-        DRACULA_PURPLE
+        [0.741, 0.576, 0.976, 1.0]
     );
     assert_eq!(
         color_at(&highlighter, source.find("quoted value").unwrap()),
-        DRACULA_YELLOW
+        [0.945, 0.980, 0.549, 1.0]
     );
 }
 
@@ -247,7 +247,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
     let mut inline_highlighter = Highlighter::new();
     inline_highlighter.reset(1, inline_source.to_string(), "md".to_string(), 0);
     wait(&mut inline_highlighter, 1);
-    assert_eq!(color_at(&inline_highlighter, 1), MARKDOWN_GOLD);
+    assert_eq!(color_at(&inline_highlighter, 1), [0.902, 0.714, 0.451, 1.0]);
 
     inline_highlighter.apply_edits(
         2,
@@ -256,14 +256,14 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
         Some(0),
     );
     wait(&mut inline_highlighter, 2);
-    assert_ne!(color_at(&inline_highlighter, 0), MARKDOWN_GOLD);
+    assert_ne!(color_at(&inline_highlighter, 0), [0.902, 0.714, 0.451, 1.0]);
 
     let fenced_source = "```bash\ncode-review-graph build --skip-postprocess\n```\n";
     let mut fenced_highlighter = Highlighter::new();
     fenced_highlighter.reset(1, fenced_source.to_string(), "md".to_string(), 0);
     wait(&mut fenced_highlighter, 1);
     let command = fenced_source.find("code-review-graph").unwrap();
-    assert_eq!(color_at(&fenced_highlighter, command), DRACULA_GREEN);
+    assert_eq!(color_at(&fenced_highlighter, command), [0.313, 0.980, 0.482, 1.0]);
 
     let language = fenced_source.find("bash").unwrap();
     fenced_highlighter.apply_edits(
@@ -278,7 +278,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
     wait(&mut fenced_highlighter, 2);
     assert_ne!(
         color_at(&fenced_highlighter, command - "bash".len()),
-        DRACULA_GREEN
+        [0.313, 0.980, 0.482, 1.0]
     );
 }
 
@@ -287,7 +287,7 @@ fn markdown_highlighter_incremental_edit_reparses_new_structure() {
     let mut highlighter = Highlighter::new();
     highlighter.reset(1, "plain\n".to_string(), "md".to_string(), 0);
     wait(&mut highlighter, 1);
-    assert_eq!(color_at(&highlighter, 0), DRACULA_FG);
+    assert_eq!(color_at(&highlighter, 0), [0.972, 0.972, 0.949, 1.0]);
 
     highlighter.apply_edits(
         2,
@@ -299,7 +299,7 @@ fn markdown_highlighter_incremental_edit_reparses_new_structure() {
         Some(2),
     );
     wait(&mut highlighter, 2);
-    assert_eq!(color_at(&highlighter, 2), DRACULA_PURPLE);
+    assert_eq!(color_at(&highlighter, 2), [0.741, 0.576, 0.976, 1.0]);
 }
 
 #[test]
@@ -312,8 +312,8 @@ fn markdown_link_punctuation_is_not_recolored_by_rainbow_brackets() {
     let mut highlighter = Highlighter::new();
     highlighter.reset(1, source.to_string(), "md".to_string(), 0);
     wait(&mut highlighter, 1);
-    assert_eq!(color_at(&highlighter, source.find('[').unwrap()), DRACULA_COMMENT);
-    assert_eq!(color_at(&highlighter, source.find('(').unwrap()), DRACULA_COMMENT);
+    assert_eq!(color_at(&highlighter, source.find('[').unwrap()), [0.384, 0.447, 0.643, 1.0]);
+    assert_eq!(color_at(&highlighter, source.find('(').unwrap()), [0.384, 0.447, 0.643, 1.0]);
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn sql_highlighter_colors_postgresql_and_injects_core_completions() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.color == DRACULA_CYAN || span.color == DRACULA_PINK)
+            .any(|span| matches!(span.role, SyntaxRole::Keyword | SyntaxRole::KeywordControl))
     );
     assert!(
         highlighter
@@ -362,7 +362,7 @@ fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.color == DRACULA_PINK)
+            .any(|span| span.role == SyntaxRole::KeywordControl)
     );
     assert!(
         highlighter
@@ -399,7 +399,7 @@ fn highlighter_thread_resets_parses_edits_and_injects_language_builtins() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.color == DRACULA_COMMENT)
+            .any(|span| span.role == SyntaxRole::Comment)
     );
 
     let cases = [
@@ -449,7 +449,7 @@ fn highlighter_keeps_python_class_fields_plain_fg() {
         let end = start + name.len();
         assert!(
             !highlighter.spans.iter().any(|span| {
-                span.start < end && span.end > start && span.color == DRACULA_ORANGE
+                span.start < end && span.end > start && span.role == SyntaxRole::Parameter
             }),
             "{name} must not be parameter-orange in class body"
         );
@@ -544,7 +544,7 @@ fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
     let attr_end = attr_start + "msg".len();
     assert!(
         !highlighter.spans.iter().any(|span| {
-            span.start < attr_end && span.end > attr_start && span.color == DRACULA_ORANGE
+            span.start < attr_end && span.end > attr_start && span.role == SyntaxRole::Parameter
         }),
         "self.msg attribute name must stay plain"
     );
@@ -553,7 +553,7 @@ fn highlighter_keeps_self_attribute_plain_but_parameter_orange() {
     let param_end = param_start + "msg".len();
     assert!(
         highlighter.spans.iter().any(|span| {
-            span.start <= param_start && span.end >= param_end && span.color == DRACULA_ORANGE
+            span.start <= param_start && span.end >= param_end && span.role == SyntaxRole::Parameter
         }),
         "bare parameter msg must stay orange"
     );
@@ -616,7 +616,7 @@ fn highlighter_thread_handles_shebang_log_and_invalid_incremental_edit() {
     highlighter.reset(2, "plain log text\n".to_string(), "log".to_string(), 0);
     wait(&mut highlighter, 2);
     assert_eq!(highlighter.spans.len(), 1);
-    assert_eq!(highlighter.spans[0].color, DRACULA_FG);
+    assert_eq!(highlighter.spans[0].role, SyntaxRole::Fg);
 
     highlighter.apply_edits(
         3,

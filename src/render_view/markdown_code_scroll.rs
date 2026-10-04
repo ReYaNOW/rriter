@@ -234,6 +234,7 @@ impl Renderer {
             self.scale_factor,
         );
         if g.max_scroll <= 0.0 {
+            let syntax = self.theme.syntax;
             for idx in lines {
                 let line = &code.lines[idx];
                 let slice = source.get(line.source_range.clone()).unwrap_or("");
@@ -254,6 +255,7 @@ impl Renderer {
                     line.y + offset_y,
                     right - pad,
                     1.0,
+                    &syntax,
                 );
             }
             return;
@@ -266,6 +268,7 @@ impl Renderer {
         self.flush();
         self.set_markdown_read_scissor(inner_x, clip_y, inner_w, clip_h);
         let origin_x = left + pad - sx;
+        let syntax = self.theme.syntax;
         for idx in lines {
             let line = &code.lines[idx];
             let slice = source.get(line.source_range.clone()).unwrap_or("");
@@ -290,6 +293,7 @@ impl Renderer {
                 line.y + offset_y,
                 right - pad,
                 1.0,
+                &syntax,
             );
         }
         self.flush();

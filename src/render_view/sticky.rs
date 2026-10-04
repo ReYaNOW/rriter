@@ -168,8 +168,8 @@ impl Renderer {
                     self.theme.minimap_bg[2],
                     alpha,
                 ];
-                let shadow_top = [0.0, 0.0, 0.0, 0.4 * alpha];
-                let shadow_bottom = [0.0, 0.0, 0.0, 0.0];
+                let shadow_top = [self.theme.sticky_shadow[0], self.theme.sticky_shadow[1], self.theme.sticky_shadow[2], 0.4 * alpha];
+                let shadow_bottom = [self.theme.sticky_shadow[0], self.theme.sticky_shadow[1], self.theme.sticky_shadow[2], 0.0];
 
                 let sticky_x = gutter_x + 2.0;
                 let sticky_w = rect_w - sticky_x;
@@ -233,6 +233,7 @@ impl Renderer {
                 }
 
                 let mut current_offset = start_byte;
+                let syntax = self.theme.syntax;
                 while current_offset < end_byte {
                     let chunk = if current_offset < first_len {
                         let chunk_end = end_byte.min(first_len);
@@ -253,6 +254,7 @@ impl Renderer {
                         rect_y + self.baseline_offset,
                         self.width - minimap_w - 20.0,
                         alpha,
+                        &syntax,
                     );
                     current_offset = current_offset.saturating_add(chunk.len());
                     if x > self.width - minimap_w - 20.0 {

@@ -2,6 +2,10 @@
 
 #[path = "../highlighter_runtime.rs"]
 mod runtime;
+#[path = "highlighter_roles.rs"]
+mod roles;
+use roles::{capture_color_override, resolve_role};
+pub(crate) use roles::hover_capture_role;
 use runtime::{apply_sync_edit_to_replica, flatten_spans};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -12,12 +16,13 @@ use std::thread;
 use tree_sitter::StreamingIterator;
 
 use crate::queries::{get_folding_query, get_injection_query, get_params_query, get_ts_config};
+use crate::theme::SyntaxRole;
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
     pub start: usize,
     pub end: usize,
-    pub color: [f32; 4],
+    pub role: SyntaxRole,
 }
 
 pub fn flatten_color_spans_prefer_specific(
@@ -30,39 +35,39 @@ pub fn flatten_color_spans_prefer_specific(
 
     spans.sort_by_key(|s| std::cmp::Reverse(s.end.saturating_sub(s.start)));
 
-    let mut byte_colors = vec![None; len];
+    let mut byte_roles = vec![None; len];
     for span in spans {
         let start = span.start.min(len);
         let end = span.end.min(len);
         if start >= end {
             continue;
         }
-        for color in &mut byte_colors[start..end] {
-            *color = Some(span.color);
+        for role in &mut byte_roles[start..end] {
+            *role = Some(span.role);
         }
     }
 
     let mut out = Vec::new();
-    let mut current = byte_colors[0];
+    let mut current = byte_roles[0];
     let mut start = 0usize;
-    for (i, color) in byte_colors.iter().copied().enumerate().skip(1) {
-        if color != current {
-            if let Some(color) = current {
+    for (i, role) in byte_roles.iter().copied().enumerate().skip(1) {
+        if role != current {
+            if let Some(role) = current {
                 out.push(ColorSpan {
                     start,
                     end: i,
-                    color,
+                    role,
                 });
             }
             start = i;
-            current = color;
+            current = role;
         }
     }
-    if let Some(color) = current {
+    if let Some(role) = current {
         out.push(ColorSpan {
             start,
             end: len,
-            color,
+            role,
         });
     }
     out
@@ -195,7 +200,7 @@ pub struct Highlighter {
     sync_tree: Option<tree_sitter::Tree>,
     /// Shared with the worker thread and prewarm threads (see `QueryCache`).
     query_cache: Arc<QueryCache>,
-    sync_byte_colors_buf: Vec<[f32; 4]>,
+    sync_byte_colors_buf: Vec<SyntaxRole>,
     pending_priority_anchor: Option<usize>,
 }
 
@@ -217,18 +222,6 @@ mod tests;
 #[cfg(test)]
 use tests::{active_highlighter_worker_count, ActiveHighlighterWorkerGuard};
 
-pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
-pub(crate) const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
-pub(crate) const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
-pub(crate) const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
-pub(crate) const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
-pub(crate) const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
-pub(crate) const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
-pub(crate) const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
-pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
-pub(crate) const MARKDOWN_GOLD: [f32; 4] = [0.902, 0.714, 0.451, 1.0];
-
-const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_LINES: usize = 800;
 pub(crate) const TREE_SITTER_FULL_HIGHLIGHT_MAX_BYTES: usize = 512 * 1024;
@@ -239,10 +232,10 @@ const PRIORITY_HIGHLIGHT_TAIL_LINES: usize = 1_024;
 const PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES: usize = 48 * 1024;
 
 #[derive(Debug)]
-struct Scope {
-    start: usize,
-    end: usize,
-    params: HashSet<String>,
+pub(super) struct Scope {
+    pub(super) start: usize,
+    pub(super) end: usize,
+    pub(super) params: HashSet<String>,
 }
 
 fn get_point(text: &str, byte_offset: usize) -> tree_sitter::Point {
@@ -256,117 +249,6 @@ fn get_point(text: &str, byte_offset: usize) -> tree_sitter::Point {
         byte_offset
     };
     tree_sitter::Point::new(row, column)
-}
-
-fn resolve_color(
-    name: &str,
-    node_text: &str,
-    start_byte: usize,
-    param_scopes: &[Scope],
-) -> [f32; 4] {
-    let mut color = match name {
-        "fg" | "property" | "field" | "py_assign" => DRACULA_FG,
-        "interpolation" => MARKER_INTERPOLATION,
-        "text.title" => DRACULA_PURPLE,
-        "text.literal" => DRACULA_YELLOW,
-        "text.uri" => DRACULA_CYAN,
-        "text.reference" => DRACULA_GREEN,
-        "text.emphasis" => DRACULA_ORANGE,
-        "text.strong" => DRACULA_PINK,
-        "punctuation.special" | "punctuation.delimiter" => DRACULA_COMMENT,
-        "string.escape" => DRACULA_PINK,
-        "none" => DRACULA_FG,
-        "string" => DRACULA_YELLOW,
-        "comment" => DRACULA_COMMENT,
-        "function" | "function.call" | "py_function" => DRACULA_GREEN,
-        "keyword.control" | "keyword.operator" | "operator" | "boolean" | "conditional" => {
-            DRACULA_PINK
-        }
-        "keyword"
-        | "subst"
-        | "type"
-        | "type.builtin"
-        | "type.qualifier"
-        | "storageclass"
-        | "attribute"
-        | "function.builtin" => DRACULA_CYAN,
-        "class_name" => DRACULA_DARK_CYAN,
-        "constant" => DRACULA_PURPLE,
-        "parameter" => match node_text {
-            "self" | "cls" => DRACULA_PURPLE,
-            _ => DRACULA_ORANGE,
-        },
-        "py_builtin_or_func" => match node_text {
-            "print" | "input" | "id" | "dict" | "str" | "int" | "float" | "list" | "set"
-            | "tuple" | "bool" | "super" | "len" | "type" | "dir" | "vars" | "hasattr"
-            | "getattr" | "setattr" | "delattr" | "isinstance" | "issubclass" | "enumerate"
-            | "zip" | "map" | "filter" | "sum" | "any" | "all" | "min" | "max" | "abs"
-            | "round" | "open" => DRACULA_CYAN,
-            _ => DRACULA_GREEN,
-        },
-        "py_ident" => match node_text {
-            "Exception" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
-            | "AttributeError" | "RuntimeError" | "KeyboardInterrupt" | "int" | "float" | "str"
-            | "bool" | "list" | "dict" | "set" | "tuple" | "bytes" | "Any" | "Optional"
-            | "Union" | "Callable" | "Type" | "Dict" | "List" | "Set" | "Tuple" | "print"
-            | "len" | "range" | "enumerate" | "sum" | "min" | "max" => DRACULA_CYAN,
-            "self" | "cls" => DRACULA_PURPLE,
-            _ => DRACULA_FG,
-        },
-        "command_word" => match node_text {
-            "sudo" | "sleep" | "ps" | "date" | "grep" | "awk" | "sed" | "cat" | "renice"
-            | "ionice" | "systemctl" | "tee" | "tr" | "head" | "taskset" => DRACULA_GREEN,
-            _ => DRACULA_CYAN,
-        },
-        "any_word" => {
-            if node_text.starts_with('-') && node_text.len() > 1 {
-                DRACULA_PINK
-            } else {
-                DRACULA_FG
-            }
-        }
-        "variable" => DRACULA_FG,
-        "number" | "float" => DRACULA_PURPLE,
-        _ => DRACULA_FG,
-    };
-
-    if node_text == "None" {
-        color = DRACULA_PINK;
-    }
-
-    if node_text != "self" && node_text != "cls" {
-        if matches!(
-            name,
-            "py_ident" | "py_builtin_or_func" | "py_assign" | "parameter" | "variable" | "fg"
-        ) {
-            let mut is_param = false;
-            for scope in param_scopes {
-                if start_byte >= scope.start && start_byte < scope.end {
-                    if scope.params.contains(node_text) {
-                        is_param = true;
-                        break;
-                    }
-                }
-            }
-            if is_param {
-                color = DRACULA_ORANGE;
-            }
-        }
-    }
-    color
-}
-
-fn capture_color_override(
-    lang_name: &str,
-    name: &str,
-    node: tree_sitter::Node<'_>,
-) -> Option<[f32; 4]> {
-    (lang_name == "markdown_inline" && name == "text.literal" && node.kind() == "code_span")
-        .then_some(MARKDOWN_GOLD)
-}
-
-pub(crate) fn hover_capture_color(name: &str, node_text: &str) -> [f32; 4] {
-    resolve_color(name, node_text, 0, &[])
 }
 
 fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
@@ -509,8 +391,8 @@ fn collect_query_highlight_spans(
                     continue;
                 }
 
-                let color = capture_color_override(lang_name, name, cap.node).unwrap_or_else(|| {
-                    resolve_color(name, node_text, cap.node.start_byte(), &param_scopes)
+                let role = capture_color_override(lang_name, name, cap.node).unwrap_or_else(|| {
+                    resolve_role(name, node_text, cap.node.start_byte(), &param_scopes)
                 });
                 if lang_name == "py" && name == "docstring" {
                     crate::languages::python::push_docstring_highlight_spans(
@@ -522,11 +404,11 @@ fn collect_query_highlight_spans(
                     continue;
                 }
 
-                if color != DRACULA_FG || name == "none" {
+                if role != SyntaxRole::Fg || name == "none" {
                     spans.push(ColorSpan {
                         start: cap.node.start_byte(),
                         end: cap.node.end_byte(),
-                        color,
+                        role,
                     });
                 }
             }
@@ -565,7 +447,7 @@ fn cut_spans_by_ranges(base: &mut Vec<ColorSpan>, ranges: &mut Vec<(usize, usize
                 retained.push(ColorSpan {
                     start: pos,
                     end: cut_start.min(span.end),
-                    color: span.color,
+                    role: span.role,
                 });
             }
             pos = pos.max(cut_end);
@@ -577,7 +459,7 @@ fn cut_spans_by_ranges(base: &mut Vec<ColorSpan>, ranges: &mut Vec<(usize, usize
             retained.push(ColorSpan {
                 start: pos,
                 end: span.end,
-                color: span.color,
+                role: span.role,
             });
         }
     }
@@ -1058,7 +940,7 @@ fn priority_highlight_spans_from_slice(
     text: &str,
     range: Range<usize>,
     query_cache: &QueryCache,
-    byte_colors_buf: &mut Vec<[f32; 4]>,
+    byte_colors_buf: &mut Vec<SyntaxRole>,
     worker_control: &HighlighterWorkerControl,
 ) -> Vec<ColorSpan> {
     if range.start >= range.end || range.end > text.len() {
@@ -1091,7 +973,7 @@ fn priority_highlight_spans_from_slice(
             shifted.push(ColorSpan {
                 start: start.max(range.start),
                 end: end.min(range.end),
-                color: span.color,
+                role: span.role,
             });
         }
     }
@@ -1219,7 +1101,7 @@ fn merge_partial_highlight_spans(
     let mut merged = Vec::with_capacity(base.len());
     let mut current = base[0].clone();
     for span in base.into_iter().skip(1) {
-        if span.start <= current.end && span.color == current.color {
+        if span.start <= current.end && span.role == current.role {
             current.end = current.end.max(span.end);
         } else {
             if current.start < current.end {
@@ -1238,7 +1120,7 @@ fn flatten_spans_for_range(
     mut spans: Vec<ColorSpan>,
     range: Range<usize>,
     text: &str,
-    byte_colors: &mut Vec<[f32; 4]>,
+    byte_colors: &mut Vec<SyntaxRole>,
     apply_rainbow_brackets: bool,
 ) -> Vec<ColorSpan> {
     if range.start >= range.end {
@@ -1249,7 +1131,7 @@ fn flatten_spans_for_range(
     spans.sort_by_key(|s| std::cmp::Reverse(s.end.saturating_sub(s.start)));
 
     byte_colors.clear();
-    byte_colors.resize(len, DRACULA_FG);
+    byte_colors.resize(len, SyntaxRole::Fg);
 
     for span in spans {
         let start = span.start.max(range.start);
@@ -1257,19 +1139,19 @@ fn flatten_spans_for_range(
         if start >= end {
             continue;
         }
-        for color in &mut byte_colors[start - range.start..end - range.start] {
-            *color = span.color;
+        for role in &mut byte_colors[start - range.start..end - range.start] {
+            *role = span.role;
         }
     }
 
     let text_bytes = text.as_bytes();
     for (local_idx, byte_idx) in (range.start..range.end).enumerate() {
         let b = text_bytes[byte_idx];
-        if byte_colors[local_idx] == MARKER_INTERPOLATION {
+        if byte_colors[local_idx] == SyntaxRole::Interpolation {
             if b == b'{' || b == b'}' {
-                byte_colors[local_idx] = DRACULA_ORANGE;
+                byte_colors[local_idx] = SyntaxRole::Parameter;
             } else {
-                byte_colors[local_idx] = DRACULA_FG;
+                byte_colors[local_idx] = SyntaxRole::Fg;
             }
         }
     }
@@ -1292,38 +1174,41 @@ fn flatten_spans_for_range(
         }
 
         for (local_idx, byte_idx) in (range.start..range.end).enumerate() {
-            if byte_colors[local_idx] != DRACULA_COMMENT
-                && (byte_colors[local_idx] == DRACULA_FG
-                    || byte_colors[local_idx] == DRACULA_GREEN
-                    || byte_colors[local_idx] == DRACULA_CYAN
-                    || byte_colors[local_idx] == DRACULA_ORANGE
-                    || byte_colors[local_idx] == DRACULA_YELLOW
-                    || byte_colors[local_idx] == DRACULA_PURPLE)
+            if byte_colors[local_idx] != SyntaxRole::Comment
+                && matches!(
+                    byte_colors[local_idx],
+                    SyntaxRole::Fg
+                        | SyntaxRole::Function
+                        | SyntaxRole::Keyword
+                        | SyntaxRole::Parameter
+                        | SyntaxRole::String
+                        | SyntaxRole::Constant
+                )
             {
                 match text_bytes[byte_idx] {
                     b'(' => {
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_round);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_round);
                         depth_round += 1;
                     }
                     b')' => {
                         depth_round = depth_round.saturating_sub(1);
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_round);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_round);
                     }
                     b'[' => {
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_square);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_square);
                         depth_square += 1;
                     }
                     b']' => {
                         depth_square = depth_square.saturating_sub(1);
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_square);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_square);
                     }
                     b'{' => {
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_curly);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_curly);
                         depth_curly += 1;
                     }
                     b'}' => {
                         depth_curly = depth_curly.saturating_sub(1);
-                        byte_colors[local_idx] = runtime::get_bracket_color(depth_curly);
+                        byte_colors[local_idx] = runtime::get_bracket_role(depth_curly);
                     }
                     _ => {}
                 }
@@ -1332,24 +1217,24 @@ fn flatten_spans_for_range(
     }
 
     let mut flat = Vec::new();
-    let mut current_color = byte_colors[0];
+    let mut current_role = byte_colors[0];
     let mut start = range.start;
     for (local_idx, byte_idx) in (range.start + 1..range.end).enumerate() {
-        let color = byte_colors[local_idx + 1];
-        if color != current_color {
+        let role = byte_colors[local_idx + 1];
+        if role != current_role {
             flat.push(ColorSpan {
                 start,
                 end: byte_idx,
-                color: current_color,
+                role: current_role,
             });
             start = byte_idx;
-            current_color = color;
+            current_role = role;
         }
     }
     flat.push(ColorSpan {
         start,
         end: range.end,
-        color: current_color,
+        role: current_role,
     });
     flat
 }

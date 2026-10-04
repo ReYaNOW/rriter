@@ -51,6 +51,16 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::SettingsThemePick(target, theme) => match target {
+                crate::ui_system::ThemeTarget::Both => self.apply_themes(theme, theme),
+                crate::ui_system::ThemeTarget::Editor => {
+                    self.apply_themes(theme, self.ui_theme_id)
+                }
+                crate::ui_system::ThemeTarget::Ui => {
+                    self.apply_themes(self.editor_theme_id, theme)
+                }
+            },
+            UiId::SettingsThemeLinked => self.set_theme_linked(!self.theme_linked),
             UiId::SettingsDatabaseAdjust(setting, delta) => {
                 self.adjust_database_setting(setting, delta as i32);
                 self.window.as_ref().unwrap().request_redraw();

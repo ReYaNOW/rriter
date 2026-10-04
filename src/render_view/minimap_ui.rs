@@ -333,7 +333,7 @@ impl Renderer {
                     let (span_end, raw_color) = if span_idx_mini < spans.len() {
                         let sp = &spans[span_idx_mini];
                         if sp.start <= cur_byte_abs {
-                            (sp.end.min(end_byte), sp.color)
+                            (sp.end.min(end_byte), self.theme.syntax.color(sp.role))
                         } else {
                             (sp.start.min(end_byte), self.theme.fg)
                         }

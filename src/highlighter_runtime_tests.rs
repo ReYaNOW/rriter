@@ -83,17 +83,17 @@ fn highlighter_flatten_spans_overlays_colors_and_brackets_end_to_end() {
     let spans = vec![ColorSpan {
         start: 0,
         end: 2,
-        color: DRACULA_PINK,
+        role: SyntaxRole::KeywordControl,
     }];
 
     let flat = flatten_spans(spans, text.len(), text, &mut byte_colors, &[], true, false);
 
-    assert_eq!(flat.first().map(|span| span.color), Some(DRACULA_PINK));
-    assert_eq!(byte_colors[0], DRACULA_PINK);
+    assert_eq!(flat.first().map(|span| span.role), Some(SyntaxRole::KeywordControl));
+    assert_eq!(byte_colors[0], SyntaxRole::KeywordControl);
     let nested_open = text.find("((").unwrap() + 1;
     let nested_close = text.find("))").unwrap();
-    assert_ne!(byte_colors[nested_open], DRACULA_FG);
-    assert_ne!(byte_colors[nested_close], DRACULA_FG);
+    assert_ne!(byte_colors[nested_open], SyntaxRole::Fg);
+    assert_ne!(byte_colors[nested_close], SyntaxRole::Fg);
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn highlighter_flatten_spans_returns_plain_span_for_logs_without_input_spans() {
     assert_eq!(flat.len(), 1);
     assert_eq!(flat[0].start, 0);
     assert_eq!(flat[0].end, 4);
-    assert_eq!(flat[0].color, DRACULA_FG);
+    assert_eq!(flat[0].role, SyntaxRole::Fg);
 }
 
 #[test]
@@ -113,12 +113,12 @@ fn highlighter_poll_ignores_non_current_versions_without_advancing_watermark() {
     let future_span = ColorSpan {
         start: 0,
         end: 6,
-        color: DRACULA_GREEN,
+        role: SyntaxRole::Function,
     };
     let current_span = ColorSpan {
         start: 0,
         end: 6,
-        color: DRACULA_PINK,
+        role: SyntaxRole::KeywordControl,
     };
     highlighter.current_request_id = 1;
 
@@ -150,7 +150,7 @@ fn highlighter_poll_ignores_non_current_versions_without_advancing_watermark() {
     );
     assert!(current_applied);
     assert_eq!(highlighter.current_version, 2);
-    assert_eq!(highlighter.spans[0].color, DRACULA_PINK);
+    assert_eq!(highlighter.spans[0].role, SyntaxRole::KeywordControl);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn highlighter_sync_parse_after_seed_colors_python_constant_immediately() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 0 && span.end >= 2 && span.color == DRACULA_PURPLE)
+            .any(|span| span.start == 0 && span.end >= 2 && span.role == SyntaxRole::Constant)
     );
 }
 
@@ -202,7 +202,7 @@ fn highlighter_sync_parse_keeps_python_parameters_colored() {
     let session_start = text.rfind("session").unwrap();
     let session_end = session_start + "session".len();
     assert!(highlighter.spans.iter().any(|span| {
-        span.start <= session_start && span.end >= session_end && span.color == DRACULA_ORANGE
+        span.start <= session_start && span.end >= session_end && span.role == SyntaxRole::Parameter
     }));
 }
 
@@ -226,7 +226,7 @@ fn highlighter_sync_parse_clears_stale_python_self_color_after_delete() {
         !highlighter
             .spans
             .iter()
-            .any(|span| span.start == 0 && span.end >= 3 && span.color == DRACULA_PURPLE)
+            .any(|span| span.start == 0 && span.end >= 3 && span.role == SyntaxRole::Constant)
     );
 }
 
@@ -237,12 +237,12 @@ fn highlighter_shift_insert_predicts_colors_splits_and_merges_spans() {
         ColorSpan {
             start: 0,
             end: 4,
-            color: DRACULA_GREEN,
+            role: SyntaxRole::Function,
         },
         ColorSpan {
             start: 8,
             end: 12,
-            color: DRACULA_CYAN,
+            role: SyntaxRole::Keyword,
         },
     ];
 
@@ -251,38 +251,38 @@ fn highlighter_shift_insert_predicts_colors_splits_and_merges_spans() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 4 && span.end == 6 && span.color == DRACULA_PINK)
+            .any(|span| span.start == 4 && span.end == 6 && span.role == SyntaxRole::KeywordControl)
     );
     assert!(
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 10 && span.end == 14 && span.color == DRACULA_CYAN)
+            .any(|span| span.start == 10 && span.end == 14 && span.role == SyntaxRole::Keyword)
     );
 
     highlighter.spans = vec![ColorSpan {
         start: 0,
         end: 6,
-        color: DRACULA_GREEN,
+        role: SyntaxRole::Function,
     }];
     highlighter.shift_insert(3, 1, Some("9"));
     assert!(
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_PURPLE)
+            .any(|span| span.start == 3 && span.end == 4 && span.role == SyntaxRole::Constant)
     );
     assert!(
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 4 && span.end == 7 && span.color == DRACULA_GREEN)
+            .any(|span| span.start == 4 && span.end == 7 && span.role == SyntaxRole::Function)
     );
 
     highlighter.spans.clear();
     highlighter.shift_insert(0, 3, Some("str"));
     assert_eq!(highlighter.spans.len(), 1);
-    assert_eq!(highlighter.spans[0].color, DRACULA_CYAN);
+    assert_eq!(highlighter.spans[0].role, SyntaxRole::Keyword);
 }
 
 #[test]
@@ -292,17 +292,17 @@ fn highlighter_shift_delete_clamps_overlapping_spans() {
         ColorSpan {
             start: 0,
             end: 4,
-            color: DRACULA_GREEN,
+            role: SyntaxRole::Function,
         },
         ColorSpan {
             start: 5,
             end: 10,
-            color: DRACULA_ORANGE,
+            role: SyntaxRole::Parameter,
         },
         ColorSpan {
             start: 12,
             end: 15,
-            color: DRACULA_CYAN,
+            role: SyntaxRole::Keyword,
         },
     ];
 
@@ -312,19 +312,19 @@ fn highlighter_shift_delete_clamps_overlapping_spans() {
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 0 && span.end == 3 && span.color == DRACULA_GREEN)
+            .any(|span| span.start == 0 && span.end == 3 && span.role == SyntaxRole::Function)
     );
     assert!(
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 3 && span.end == 4 && span.color == DRACULA_ORANGE)
+            .any(|span| span.start == 3 && span.end == 4 && span.role == SyntaxRole::Parameter)
     );
     assert!(
         highlighter
             .spans
             .iter()
-            .any(|span| span.start == 6 && span.end == 9 && span.color == DRACULA_CYAN)
+            .any(|span| span.start == 6 && span.end == 9 && span.role == SyntaxRole::Keyword)
     );
     assert!(highlighter.spans.iter().all(|span| span.start < span.end));
 }
@@ -340,7 +340,7 @@ fn highlighter_flatten_spans_handles_empty_and_interpolation_markers() {
         vec![ColorSpan {
             start: 0,
             end: text.len(),
-            color: MARKER_INTERPOLATION,
+            role: SyntaxRole::Interpolation,
         }],
         text.len(),
         text,
@@ -350,9 +350,9 @@ fn highlighter_flatten_spans_handles_empty_and_interpolation_markers() {
         false,
     );
 
-    assert_eq!(byte_colors[0], DRACULA_ORANGE);
-    assert_eq!(byte_colors[1], DRACULA_FG);
-    assert_eq!(byte_colors[2], DRACULA_ORANGE);
+    assert_eq!(byte_colors[0], SyntaxRole::Parameter);
+    assert_eq!(byte_colors[1], SyntaxRole::Fg);
+    assert_eq!(byte_colors[2], SyntaxRole::Parameter);
     assert_eq!(flat.len(), 3);
 }
 
@@ -386,7 +386,7 @@ fn highlighter_priority_result_uses_anchor_not_file_start() {
     assert!(highlighter.spans.iter().any(|span| {
         span.start <= anchor
             && span.end >= anchor + "target".len()
-            && span.color == DRACULA_GREEN
+            && span.role == SyntaxRole::Function
     }));
     assert!(
         highlighter
@@ -502,7 +502,7 @@ fn newer_pending_priority_anchor_survives_older_partial_result() {
         vec![ColorSpan {
             start: 0,
             end: 100,
-            color: DRACULA_FG,
+            role: SyntaxRole::Fg,
         }],
         Vec::new(),
         Vec::new(),
@@ -519,7 +519,7 @@ fn newer_pending_priority_anchor_survives_older_partial_result() {
         vec![ColorSpan {
             start: 100,
             end: 200,
-            color: DRACULA_FG,
+            role: SyntaxRole::Fg,
         }],
         Vec::new(),
         Vec::new(),
@@ -538,12 +538,12 @@ fn unhighlighted_range_anchor_finds_gaps_in_scroll_direction() {
         ColorSpan {
             start: 0,
             end: 100,
-            color: DRACULA_FG,
+            role: SyntaxRole::Fg,
         },
         ColorSpan {
             start: 200,
             end: 300,
-            color: DRACULA_FG,
+            role: SyntaxRole::Fg,
         },
     ];
 
@@ -667,7 +667,7 @@ fn r3_102_worker_disconnect_clears_stale_pending_state() {
     let (tx, rx) = std::sync::mpsc::channel();
     drop(tx);
     highlighter.rx = rx;
-    highlighter.spans = vec![ColorSpan { start: 0, end: 1, color: DRACULA_FG }];
+    highlighter.spans = vec![ColorSpan { start: 0, end: 1, role: SyntaxRole::Fg }];
     highlighter.completions = vec![CompletionItem { word: "stale".to_string(), kind: SymbolKind::Unknown, scope_start: 0, scope_end: 1 }];
     highlighter.foldable_ranges = vec![(0, 1, false, false)];
     highlighter.syntax_errors = vec![(0, 1)];
@@ -719,4 +719,3 @@ fn dart_signature_help_is_limited_to_argument_lists() {
     assert!(highlighter.lsp_signature_help_allowed_at_cursor("dart", argument_cursor));
     assert!(!highlighter.lsp_signature_help_allowed_at_cursor("dart", outside_cursor));
 }
-

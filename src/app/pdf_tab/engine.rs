@@ -335,12 +335,19 @@ impl App {
     }
 
     pub fn toggle_pdf_dark_pages(&mut self) {
-        self.pdf_dark_pages = !self.pdf_dark_pages;
+        self.set_pdf_dark_pages(!self.pdf_dark_pages);
         self.save_current_config();
+        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+    }
+
+    pub(crate) fn set_pdf_dark_pages(&mut self, on: bool) {
+        if self.pdf_dark_pages == on {
+            return;
+        }
+        self.pdf_dark_pages = on;
         for tab in &self.tabs {
             if let Some(pdf) = tab.pdf.as_ref() { pdf.bump_render_gen(); }
         }
-        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
     }
 }
 

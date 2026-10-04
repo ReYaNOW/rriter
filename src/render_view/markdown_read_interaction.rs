@@ -638,11 +638,15 @@ fn styled_run_layer_enabled(
     }
 }
 
-fn search_highlight_color(highlights: ReadHighlights<'_>, search_idx: usize) -> [f32; 4] {
+fn search_highlight_color(
+    highlights: ReadHighlights<'_>,
+    search_idx: usize,
+    theme: &crate::renderer::Theme,
+) -> [f32; 4] {
     if highlights.search_current_idx == Some(search_idx) {
-        crate::render_view::SEARCH_ACTIVE_HIGHLIGHT_COLOR
+        theme.search_match_active
     } else {
-        crate::render_view::SEARCH_HIGHLIGHT_COLOR
+        theme.search_match
     }
 }
 
@@ -777,7 +781,7 @@ impl Renderer {
             is_active: false,
             icon_size: Some(header.button_icon_size),
             active_square_width: None,
-            custom_color: copied.then_some([0.3, 0.9, 0.4, 1.0]),
+            custom_color: copied.then_some(self.theme.markdown_copy_success),
         };
         ui_registry.register_icon_button(
             crate::ui_system::UiId::MarkdownCodeCopy(block.source_range.start),
@@ -996,7 +1000,7 @@ impl Renderer {
             };
             let width = left_pad + text_width + right_pad;
             let text_x = x + left_pad;
-            let color = markdown_text_color(style, self.theme.fg);
+            let color = markdown_text_color(style, self.theme.fg, &self.theme.syntax);
             for layer in STYLED_RUN_PAINT_ORDER {
                 if !styled_run_layer_enabled(layer, style, has_highlights) {
                     continue;
@@ -1231,7 +1235,7 @@ impl Renderer {
                 y,
                 width.max(1.0),
                 height.max(1.0),
-                search_highlight_color(highlights, search_idx),
+                search_highlight_color(highlights, search_idx, &self.theme),
             );
         }
         if highlights

@@ -16,6 +16,7 @@ fn test_theme() -> crate::renderer::Theme {
         diag_warn: [0.945, 0.980, 0.549, 1.0],
         diag_error: [1.0, 0.333, 0.333, 1.0],
         unused: [0.48, 0.48, 0.48, 0.6],
+        ..crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4])
     }
 }
 
@@ -94,6 +95,10 @@ pub(crate) fn test_app() -> Option<App> {
         editor: Editor::new(128),
         clipboard: Some(Clipboard::deferred_system()),
         theme: test_theme(),
+        system_selection: [0.0; 4],
+        editor_theme_id: crate::theme::ThemeId::Dracula,
+        ui_theme_id: crate::theme::ThemeId::Dracula,
+        theme_linked: true,
         base_title: "Безымянный".to_string(),
         file_path: None,
         file_key: None,

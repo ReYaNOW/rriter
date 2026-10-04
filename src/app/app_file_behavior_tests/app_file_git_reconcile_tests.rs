@@ -718,7 +718,7 @@ fn inline_git_rollback_undo_restores_cursor_to_changed_block_end() {
     app.highlighter.spans = vec![crate::highlighter::ColorSpan {
         start: 0,
         end: 1,
-        color: crate::highlighter::DRACULA_FG,
+        role: crate::theme::SyntaxRole::Fg,
     }];
     app.inline_git_popup = Some(crate::app::InlineGitPopup {
         hunk_idx: 0,
