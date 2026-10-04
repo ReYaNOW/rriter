@@ -1416,6 +1416,7 @@ Root:
 * `AGENTS.md` -> agent rules.
 * `PROJECT_AI_MAP.txt` -> fallback AI source index/call map; not exact source.
 * `PROJECT_GUIDE.md` -> broader architecture guide.
+* `src/theme.rs` -> theme IDs, syntax roles and palettes, editor theme construction.
 * `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
 * `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
 * `docs/superpowers/plans/2026-10-03-rust-support-release.md` -> rust-analyzer release tag and verified platform archive names, SHA-256 digests, sizes, and download URLs.

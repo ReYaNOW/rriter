@@ -1097,6 +1097,7 @@ mod git_gutter_tests {
             diag_warn: [0.0; 4],
             diag_error: [0.0; 4],
             unused: [0.0; 4],
+            ..crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4])
         }
     }
 
