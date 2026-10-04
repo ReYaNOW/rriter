@@ -641,7 +641,7 @@ const MAX_PDFIUM_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PDFIUM_LIB_BYTES: u64 = 256 * 1024 * 1024;
 const PDFIUM_VERSION_DIR_PREFIX: &str = "chromium-";
 const MAX_RUST_ANALYZER_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_RUST_ANALYZER_BINARY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RUST_ANALYZER_BINARY_BYTES: u64 = 256 * 1024 * 1024;
 
 struct RustAnalyzerInstallPlan {
     url: String,
