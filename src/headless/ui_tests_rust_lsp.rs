@@ -35,12 +35,12 @@ fn rust_crate(dir: &Path) -> PathBuf {
     file
 }
 
-fn install_rust_fake(session: &mut HeadlessSession, name: &str, mode: &str) -> PathBuf {
+pub(super) fn install_rust_fake(session: &mut HeadlessSession, name: &str, mode: &str) -> PathBuf {
     let tools = scratch_dir(&format!("{name}-tools"));
     install_fake_lsp(session, ToolKind::RustAnalyzer, &tools, mode)
 }
 
-fn open_file(session: &mut HeadlessSession, file: &Path) {
+pub(super) fn open_file(session: &mut HeadlessSession, file: &Path) {
     let lines = run_script(session, format!("open {}\n", file.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     wait_until(session, 5000, "Rust fixture tab", |session| {
@@ -81,7 +81,7 @@ fn rust_status(session: &HeadlessSession) -> Option<LspServerStatus> {
     session.app.lsp.as_ref().map(|lsp| lsp.rust_row_info().status)
 }
 
-fn fake_starts(executable: &Path) -> usize {
+pub(super) fn fake_starts(executable: &Path) -> usize {
     std::fs::read_to_string(executable.with_extension("starts"))
         .ok()
         .and_then(|value| value.parse().ok())
