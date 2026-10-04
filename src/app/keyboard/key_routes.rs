@@ -211,6 +211,7 @@ fn route_terminal_close_toggle(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
     let terminal_toggle = chord.is_some_and(|chord| app.keymap.hit(crate::keymap::Command::TerminalToggleFocus, chord));
     if ctx.key_event.state == ElementState::Pressed
         && (terminal_close || terminal_toggle)
+        && app.is_ide_mode
         && (!terminal_owns_chord || chord.is_some_and(|chord| {
             super::input_owner::is_default_chord(
                 if terminal_close { crate::keymap::Command::TerminalClose } else { crate::keymap::Command::TerminalToggleFocus },
@@ -219,17 +220,15 @@ fn route_terminal_close_toggle(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
             )
         }))
     {
-        if app.is_ide_mode {
-            let has_terminal = !app.ide_panel.terminals.is_empty();
-            let needs_terminal = apply_terminal_alt_q_shortcut(&mut app.ide_panel, terminal_close, has_terminal);
-            if needs_terminal {
-                app.add_terminal();
-            }
-            app.defer_terminal_panel_until_ready();
-            app.last_action = std::time::Instant::now();
-            app.request_redraw();
-            return true;
+        let has_terminal = !app.ide_panel.terminals.is_empty();
+        let needs_terminal = apply_terminal_alt_q_shortcut(&mut app.ide_panel, terminal_close, has_terminal);
+        if needs_terminal {
+            app.add_terminal();
         }
+        app.defer_terminal_panel_until_ready();
+        app.last_action = std::time::Instant::now();
+        app.request_redraw();
+        return true;
     }
     false
 }
@@ -492,10 +491,10 @@ fn route_api_output_example_menu(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 
 fn route_markdown_toggle(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
     if ctx.key_event.state == ElementState::Pressed {
-        if let Some(action) = ctx.markdown_toggle {
-            if action == MarkdownGlobalToggleAction::ToggleMode {
-                app.toggle_markdown_mode();
-            }
+        if let Some(action) = ctx.markdown_toggle && action == MarkdownGlobalToggleAction::ToggleMode {
+            app.toggle_markdown_mode();
+        }
+        if ctx.markdown_toggle.is_some() {
             return true;
         }
     }
@@ -552,7 +551,7 @@ fn route_settings_ignore_field(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
         }
         PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
             if let Some(text) = app.get_clipboard_text() {
-                let clean = text.replace('\n', "").replace('\r', "");
+                let clean = text.replace(['\n', '\r'], "");
                 if !clean.is_empty() {
                     app.settings_ignore_editor.insert_str(&clean);
                     app.request_redraw();
@@ -595,14 +594,14 @@ fn route_settings_ignore_field(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
             true
         }
         _ => {
-            if crate::platform::text_input_modifiers_allowed(app.modifiers) {
-                if let Some(txt) = key_event.logical_text.as_deref() {
-                    let clean_txt = txt.replace('\n', "");
-                    if !clean_txt.is_empty() {
-                        app.settings_ignore_editor.insert_str(&clean_txt);
-                        app.request_redraw();
-                        return true;
-                    }
+            if crate::platform::text_input_modifiers_allowed(app.modifiers)
+                && let Some(txt) = key_event.logical_text.as_deref()
+            {
+                let clean_txt = txt.replace('\n', "");
+                if !clean_txt.is_empty() {
+                    app.settings_ignore_editor.insert_str(&clean_txt);
+                    app.request_redraw();
+                    return true;
                 }
             }
             false
