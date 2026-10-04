@@ -155,6 +155,11 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             PendingAction::CloseFile => app.close_current_file(),
             PendingAction::CloseTab(index) => app.close_tab_at_unchecked(index),
             PendingAction::CloseAllTabs => app.close_all_tabs_unchecked(),
+            PendingAction::ResetKeymap => {
+                let mut overrides = app.keymap_overrides.clone();
+                overrides.reset_all();
+                app.set_keymap_overrides(overrides);
+            }
         }
     }
 

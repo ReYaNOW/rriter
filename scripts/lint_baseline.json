@@ -181,6 +181,10 @@
       "cognitive_complexity": 2,
       "too_many_lines": 2
     },
+    "src/app/database/database_table_key_methods.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
     "src/app/events.rs": {
       "collapsible_if": 4,
       "too_many_lines": 2,
@@ -276,6 +280,7 @@
     "src/app/keyboard.rs": {
       "collapsible_if": 8,
       "collapsible_str_replace": 2,
+      "too_many_lines": 2,
       "unwrap_used": 10
     },
     "src/app/keyboard/editor_keys.rs": {
@@ -294,6 +299,9 @@
       "field_reassign_with_default": 1,
       "too_many_lines": 2,
       "unwrap_used": 54
+    },
+    "src/app/keymap_settings.rs": {
+      "struct_excessive_bools": 2
     },
     "src/app/lsp_actions.rs": {
       "collapsible_if": 8,
@@ -472,6 +480,7 @@
       "unwrap_used": 62
     },
     "src/app/ui_handlers/ui_settings.rs": {
+      "cognitive_complexity": 2,
       "too_many_lines": 2,
       "unwrap_used": 16
     },

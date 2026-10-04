@@ -163,10 +163,12 @@ impl Renderer {
         closing_hints: &[crate::languages::dart::ClosingHint],
         ide_workspaces: &[std::path::PathBuf],
         show_readonly_notice: bool,
+        readonly_notice_text: &'static str,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
         markdown_media: &crate::markdown_media::MarkdownMedia,
+        empty_ide_open_label: &str,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
@@ -372,6 +374,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 true,
+                empty_ide_open_label,
             );
         }
         if is_ide_mode && tabs.is_empty() {
@@ -390,6 +393,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 false,
+                empty_ide_open_label,
             );
         } else {
             self.was_empty_ide = false;
@@ -454,6 +458,7 @@ impl Renderer {
                 ui_my,
                 blink_alpha,
                 show_readonly_notice,
+                readonly_notice_text,
                 tab_bar_h,
                 is_ui_disabled,
                 modal_overlay_open,
@@ -601,6 +606,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             show_readonly_notice,
+            readonly_notice_text,
             tab_bar_h,
             is_ui_disabled,
             modal_overlay_open,

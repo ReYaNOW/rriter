@@ -14,6 +14,7 @@ impl ProjectSearchState {
         physical_key: winit::keyboard::PhysicalKey,
         logical_text: Option<&str>,
         ctrl: bool,
+        run_search: bool,
         word: bool,
         shift: bool,
         allow_text_input: bool,
@@ -22,13 +23,12 @@ impl ProjectSearchState {
         use winit::keyboard::{KeyCode, PhysicalKey};
 
         let mut outcome = ProjectSearchInputOutcome::default();
+        if run_search {
+            outcome.should_run = field != ProjectSearchField::Filter;
+            return outcome;
+        }
         match physical_key {
             PhysicalKey::Code(KeyCode::Escape) => self.focused = None,
-            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
-                if ctrl =>
-            {
-                outcome.should_run = field != ProjectSearchField::Filter;
-            }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
                 if field == ProjectSearchField::Query {
                     self.project_search_editor_mut(field).insert_str("\n");

@@ -132,6 +132,26 @@ mod ui_tests_tree_trash;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_welcome;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_editor;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_pdf_image;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_file_tree;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_database;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_api_markdown;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_characterization_git_settings;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_settings;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_settings_edit;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 
 use crate::app::automation::{AutomationOptions, PgoScenario};
@@ -473,9 +493,15 @@ impl HeadlessSession {
                 });
                 self.frame_ok()
             }
-            Command::Key { input, mods, .. } => {
-                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input, mods);
+            Command::Key { input, mods, repeats, .. } => {
+                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input.clone(), mods);
                 self.step(true);
+                let mut repeated = input.clone();
+                repeated.repeat = true;
+                for _ in 0..repeats {
+                    self.app.handle_main_key_input(&HostLoop::headless(&self.loop_state), repeated.clone());
+                    self.step(true);
+                }
                 self.app.release_key_combo(&HostLoop::headless(&self.loop_state), &hold);
                 self.step(true);
                 self.app.end_key_combo(hold);

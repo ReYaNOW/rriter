@@ -11,6 +11,7 @@ pub(crate) use markdown::{
 };
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
+pub(crate) mod keymap_settings;
 pub(crate) mod pdf_tab;
 pub(crate) mod image_tab;
 mod app_bootstrap;
@@ -322,6 +323,7 @@ include!("app/database/database_app_methods.rs");
 include!("app/database/database_app_event_methods.rs");
 include!("app/database/database_table_app_methods.rs");
 include!("app/database/database_table_edit_methods.rs");
+include!("app/database/database_table_key_methods.rs");
 include!("app/database/database_query_app_methods.rs");
 include!("app/app_ide_tab_methods.rs");
 include!("app/app_ide_startup_methods.rs");

@@ -584,10 +584,12 @@ pub(crate) mod reviewer_stage2_integration {
             &[],
             &app.ide_workspaces,
             false,
+            "Файл открыт в режиме только чтение",
             None,
             &app.pdf_engine,
             app.pdf_dark_pages,
             &app.markdown_media,
+            &app.empty_ide_open_label,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;

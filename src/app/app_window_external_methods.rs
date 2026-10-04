@@ -328,6 +328,11 @@ impl App {
     pub(crate) fn begin_pending_action_save(&mut self) {
         self.protected_saves.clear_awaiting_action();
         let action = self.confirm_dialog.action();
+        if action == PendingAction::ResetKeymap {
+            self.confirm_dialog.mark_ready();
+            self.request_main_redraw();
+            return;
+        }
         if matches!(
             action,
             PendingAction::Quit | PendingAction::CloseAllTabs | PendingAction::CloseTab(_)
@@ -346,6 +351,7 @@ impl App {
                     .then_some(index)
                     .into_iter()
                     .collect(),
+                PendingAction::ResetKeymap => Vec::new(),
                 _ => (0..self.tabs.len())
                     .filter(|index| self.tab_text_is_dirty(*index))
                     .collect(),
@@ -435,7 +441,7 @@ impl App {
             PendingAction::CloseFile | PendingAction::OpenFile | PendingAction::OpenLinkedFile => {
                 self.editor.is_dirty()
             }
-            PendingAction::None => false,
+            PendingAction::None | PendingAction::ResetKeymap => false,
         }
     }
 

@@ -68,6 +68,10 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
 pub(crate) fn test_app() -> Option<App> {
     let now = Instant::now();
     Some(App {
+        keymap: crate::keymap::Keymap::build(&crate::keymap::KeymapOverrides::default()),
+        keymap_overrides: crate::keymap::KeymapOverrides::default(),
+        empty_ide_open_label: "Ctrl+O  — открыть файл".into(),
+        project_search_run_label: "Literal-only. Ctrl+Enter или кнопка запуска.".into(),
         automation: None,
         database_runtime: None,
         scroll_render_bench: None,
@@ -84,6 +88,7 @@ pub(crate) fn test_app() -> Option<App> {
         settings_database_scroll: crate::scroll::ScrollState::new(7.0),
         settings_general_max_scroll: 0.0,
         settings_database_max_scroll: 0.0,
+        keymap_settings: crate::app::keymap_settings::KeymapSettingsState::default(),
         tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor: Editor::new(128),
@@ -216,6 +221,7 @@ pub(crate) fn test_app() -> Option<App> {
         inline_git_diff_rx: None,
         inline_git_popup: None,
         readonly_notice_until: None,
+        readonly_notice_text: "Файл открыт в режиме только чтение",
         lsp: None,
         lsp_actions_menu: None,
         pending_fix_all_id: None,

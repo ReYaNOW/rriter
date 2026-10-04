@@ -417,6 +417,7 @@ impl App {
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),
             rust_settings: self.rust_settings.clone(),
+            keymap_overrides: self.keymap_overrides.clone(),
         };
         crate::save_config(&config);
     }
@@ -834,7 +835,8 @@ mod tests {
             include_str!("ui_handlers/ui_panels.rs"),
             include_str!("ui_handlers/ui_settings.rs"),
         );
-        let main_keys = include_str!("keyboard/main_keys.rs");
+        let main_keys_source = include_str!("keyboard/main_keys.rs");
+        let main_keys = main_keys_source.split("\n#[cfg(test)]").next().unwrap_or(main_keys_source);
         let editor_keys = include_str!("keyboard/editor_keys.rs");
 
         assert!(close.contains("self.ide_panel.terminals.remove(idx);"));
@@ -861,14 +863,14 @@ mod tests {
             .find("self.handle_terminal_search_keyboard_input(key_event);")
             .unwrap();
         let terminal_dispatch = main_keys
-            .find("self.handle_terminal_keyboard_input(key_event);")
+            .rfind("self.handle_terminal_keyboard_input(key_event);")
             .unwrap();
         assert!(shortcut_close < search_dispatch);
         assert!(shortcut_close < terminal_dispatch);
         assert!(main_keys[shortcut_close..search_dispatch].contains("return;"));
 
         assert!(editor_keys.contains(
-            "PhysicalKey::Code(KeyCode::Digit4) if ctrl => {\n                self.close_tab_at(self.active_tab);"
+            "_ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsClose, chord)) => {\n                self.close_tab_at(self.active_tab);"
         ));
     }
 

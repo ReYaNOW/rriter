@@ -1154,7 +1154,7 @@ fn terminal_match_cell_range(
 }
 
 #[cfg(test)]
-mod terminal_search_cell_tests {
+mod editor_focus_keymap_tests {
     use super::{normalize_tab_drag_after_close, terminal_match_cell_range};
 
     #[test]
@@ -1179,5 +1179,21 @@ mod terminal_search_cell_tests {
 
         normalize_tab_drag_after_close(&mut drag, 2);
         assert!(drag.is_none());
+    }
+
+    #[test]
+    fn editor_command_focus_excludes_pdf_and_image_tabs() {
+        for kind in [crate::app::EditorTabKind::Pdf, crate::app::EditorTabKind::Image] {
+            let mut app = crate::app::app_behavior_tests::test_app().expect("test app initializes");
+            let mut tab = crate::app::app_behavior_tests::tab_with("document", Some("/tmp/document.bin"), "hidden text");
+            tab.kind = kind.clone();
+            app.tabs = vec![tab];
+            app.active_tab = 0;
+            app.show_welcome = false;
+            let focused = app.editor_has_input_focus();
+            assert!(focused, "PDF/image tabs keep their own key input for {kind:?}: focused={focused}");
+            let active = app.command_context_active(crate::keymap::KeyContext::Editor);
+            assert!(!active, "Editor command context must be inactive for {kind:?} tabs: active={active}");
+        }
     }
 }

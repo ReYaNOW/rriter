@@ -17,6 +17,7 @@ pub enum PendingAction {
     CloseFile,
     CloseTab(usize),
     CloseAllTabs,
+    ResetKeymap,
 }
 
 /// Where the question is shown. Dropped together with its phase, so "dialog

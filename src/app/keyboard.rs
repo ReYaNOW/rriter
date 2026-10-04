@@ -14,6 +14,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 mod editor_keys;
 mod key_input;
 mod main_keys;
+mod commands;
+pub(crate) mod input_owner;
 pub(crate) use editor_keys::paired_editor_insert_text;
 pub(crate) use key_input::{KeyComboHold, KeyInput};
 
@@ -372,6 +374,15 @@ impl App {
             }
             return true;
         }
+        if self.show_settings && self.settings_tab == 6 && self.keymap_settings.filter_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() && !clean.chars().any(char::is_control) {
+                let mut filter = self.keymap_settings.filter.clone();
+                filter.push_str(&clean);
+                self.keymap_settings.update_filter(filter);
+            }
+            return true;
+        }
         if self.show_settings {
             return true;
         }
@@ -694,7 +705,11 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyInput) {
+    pub fn handle_search_keyboard_input(
+        &mut self,
+        key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -710,7 +725,7 @@ impl App {
                     self.pdf_restart_search_if_open();
                     self.window.as_ref().unwrap().request_redraw();
                 }
-                PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
+                _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchEditorOpen, chord)) => {
                     self.search_editor.select_all();
                 }
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::ArrowUp | KeyCode::ArrowDown)
@@ -831,7 +846,11 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyInput) {
+    pub fn handle_project_search_keyboard_input(
+        &mut self,
+        key_event: KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) {
         if key_event.state != ElementState::Pressed {
             return;
         }
@@ -852,6 +871,7 @@ impl App {
             key_event.physical_key,
             key_event.logical_text.as_deref(),
             ctrl,
+            chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchProjectRun, chord)),
             word,
             shift,
             crate::platform::text_input_modifiers_allowed(self.modifiers),

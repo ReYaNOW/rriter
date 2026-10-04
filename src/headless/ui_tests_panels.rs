@@ -793,7 +793,7 @@ fn headless_bug_settings_tab_y_integral() {
         .filter(|e| e["id"].as_str().unwrap_or("").starts_with("SettingsTab("))
         .map(rect_of)
         .collect();
-    assert_eq!(tabs.len(), 6, "settings tabs missing: {state}");
+    assert_eq!(tabs.len(), 7, "settings tabs missing: {state}");
     for (i, rect) in tabs.iter().enumerate() {
         assert_eq!(rect[1].fract(), 0.0, "SettingsTab({i}) y={}", rect[1]);
         assert_eq!(rect[3].fract(), 0.0, "SettingsTab({i}) h={}", rect[3]);

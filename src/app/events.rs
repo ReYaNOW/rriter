@@ -402,7 +402,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                                 r.gl.clear(glow::COLOR_BUFFER_BIT);
                             }
 
-                            r.draw_dialog_window(&self.base_title);
+                            r.draw_dialog_window(&self.base_title, self.confirm_dialog.action());
                             gl_surface.swap_buffers(gl_context).map_err(|error| {
                                 format!("failed to present dialog frame: {error}")
                             })?;

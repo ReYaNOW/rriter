@@ -707,44 +707,45 @@ impl App {
     /// document unless the terminal has the focus (save, undo/redo, close tab, tab switching).
     /// App-global chords pass: F1 (settings) and Alt+Q / Alt+W (panel toggles). Releases pass.
     pub(crate) fn startup_blocks_key_input(&self, key_event: &crate::app::keyboard::KeyInput) -> bool {
-        use winit::keyboard::{KeyCode, PhysicalKey};
+        let chord = crate::keymap::Chord::from_event(
+            crate::platform::CURRENT_PLATFORM,
+            key_event,
+            self.modifiers,
+        );
+        self.startup_blocks_key_input_with_chord(key_event, chord)
+    }
 
+    pub(crate) fn startup_blocks_key_input_with_chord(
+        &self,
+        key_event: &crate::app::keyboard::KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         if self.startup_editor_pending.is_none()
             || key_event.state == winit::event::ElementState::Released
         {
             return false;
         }
-        let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
-        let alt = self.modifiers.alt_key();
-        let key = key_event.physical_key;
-        let panel_toggle = alt
-            && !primary
-            && matches!(key, PhysicalKey::Code(KeyCode::KeyQ | KeyCode::KeyW));
         // A focused terminal owns its chords (Ctrl+Z/N/O/Q/T are shell bytes, Ctrl+4 closes a
         // terminal tab).
-        if key == PhysicalKey::Code(KeyCode::F1)
-            || panel_toggle
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SettingsToggle, chord)
+            || self.keymap.hit(crate::keymap::Command::TerminalClose, chord)
+            || self.keymap.hit(crate::keymap::Command::TerminalToggleFocus, chord)
+            || self.keymap.hit(crate::keymap::Command::ViewToggleProblems, chord))
             || self.ide_panel.terminal_focused
             || self.ide_panel.term_search_focused
         {
             return false;
         }
+        let assigned_startup_command = chord.is_some_and(|chord| {
+            [crate::keymap::Command::FileSave, crate::keymap::Command::EditorUndo,
+                crate::keymap::Command::EditorRedo, crate::keymap::Command::TabsCloseAll,
+                crate::keymap::Command::TabsClose,
+                crate::keymap::Command::FileOpen, crate::keymap::Command::TabsSwitchNext,
+                crate::keymap::Command::TabsSwitchPrevious]
+                .into_iter().any(|command| self.keymap.hit(command, chord))
+        });
         self.editor_has_input_focus()
-            || (primary
-                && matches!(
-                    key,
-                    PhysicalKey::Code(
-                        KeyCode::KeyS
-                            | KeyCode::KeyZ
-                            | KeyCode::KeyY
-                            | KeyCode::KeyQ
-                            | KeyCode::KeyO
-                            | KeyCode::Digit4
-                            | KeyCode::Tab
-                            | KeyCode::PageUp
-                            | KeyCode::PageDown
-                    )
-                ))
+            || assigned_startup_command
     }
 
     /// Input gate of the startup wait for the mouse: a press over the tab bar and the editor

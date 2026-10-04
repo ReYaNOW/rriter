@@ -12,12 +12,12 @@ const FAQ_TEXT: &str = "# Особенности RRiter
 Молниеносный рендеринг на GPU, плавная кинетическая прокрутка.
 
 # Работа с файлами
-Ctrl + S\tСохранить текущий документ
-Ctrl + O\tОткрыть файл
-Ctrl + Q\tВыйти из редактора (закрыть документ)
+{cmd:file.save}\tСохранить текущий документ
+{cmd:file.open}\tОткрыть файл
+{cmd:tabs.close_all}\tВыйти из редактора (закрыть документ)
 
 # Навигация и поиск
-Ctrl + F\tПоиск по тексту (Нажмите Esc для выхода)
+{cmd:search.editor.open}\tПоиск по тексту (Нажмите Esc для выхода)
 Ctrl + ← / →\tБыстрый переход по словам
 PgUp / PgDn\tПостраничная прокрутка документа
 Home / End\tПереход в начало / конец текущей строки
@@ -25,20 +25,21 @@ Ctrl + Home\tПереход в самое начало документа
 Ctrl + End\tПереход в самый конец документа
 
 # Редактирование
-Ctrl + W\tУмное выделение (Expand Selection)
-Ctrl + Z\tОтменить последнее действие
-Ctrl + Y\tПовторить отмененное действие
-Ctrl + X\tВырезать выделенный текст
-Ctrl + C\tСкопировать выделенный текст
-Ctrl + V\tВставить текст из буфера обмена
-Ctrl/Cmd + Shift + V\tMarkdown: чтение / редактирование
-Ctrl + A\tВыделить весь текст в документе
+{cmd:editor.expand_selection}\tУмное выделение (Expand Selection)
+{cmd:editor.undo}\tОтменить последнее действие
+{cmd:editor.redo}\tПовторить отмененное действие
+{cmd:edit.cut}\tВырезать выделенный текст
+{cmd:edit.copy}\tСкопировать выделенный текст
+{cmd:edit.paste}\tВставить текст из буфера обмена
+{cmd:markdown.toggle_mode}\tMarkdown: чтение / редактирование
+{cmd:edit.select_all}\tВыделить весь текст в документе
 Ctrl + Bksp\tУдалить слово слева от курсора
 Ctrl + Del\tУдалить слово справа от курсора
 
 # Прочее
-F1\tОткрыть настройки редактора
-F8\tПоказать/скрыть счетчик FPS
+{cmd:settings.toggle}\tОткрыть настройки редактора
+Вкладка «Горячие клавиши» в настройках меняет сочетания; overrides хранятся в ключе keymap файла config.json.
+{cmd:view.toggle_fps}\tПоказать/скрыть счетчик FPS
 
 # Управление мышью
 Зажатие ЛКМ\tПлавное выделение текста
@@ -105,6 +106,17 @@ impl App {
     }
 }
 
+pub(crate) fn faq_text(keymap: &crate::keymap::Keymap) -> String {
+    let mut text = FAQ_TEXT.to_string();
+    for info in crate::keymap::COMMANDS {
+        let placeholder = format!("{{cmd:{}}}", info.id);
+        if text.contains(&placeholder) {
+            text = text.replace(&placeholder, keymap.label(info.command));
+        }
+    }
+    text
+}
+
 impl App {
     pub(crate) fn new_from_config(
         config: crate::Config,
@@ -118,10 +130,16 @@ impl App {
             .unwrap_or_else(|| "Безымянный".to_string());
         let ext = options.ext.unwrap_or_default();
 
-        let mut faq_editor = Editor::new(FAQ_TEXT.len() + 100);
-        let _ = faq_editor.insert_str(FAQ_TEXT);
+        let keymap = crate::keymap::Keymap::build(&config.keymap_overrides);
+        let mut keymap_settings = crate::app::keymap_settings::KeymapSettingsState::default();
+        keymap_settings.refresh(&keymap, &config.keymap_overrides);
+        let faq_text = faq_text(&keymap);
+        let mut faq_editor = Editor::new(faq_text.len() + 100);
+        let _ = faq_editor.insert_str(&faq_text);
         faq_editor.cursor = 0;
         faq_editor.selection_anchor = None;
+        let empty_ide_open_label = format!("{}  — открыть файл", keymap.label(crate::keymap::Command::FileOpen));
+        let project_search_run_label = format!("Literal-only. {} или кнопка запуска.", keymap.label(crate::keymap::Command::SearchProjectRun));
 
         let highlighter = Highlighter::new();
         highlighter.bind_ui_waker(&options.ui_waker);
@@ -178,6 +196,10 @@ impl App {
             modifiers: ModifiersState::empty(),
             left_shift_down: false,
             ctrl_wheel_multiplier: config.ctrl_wheel_multiplier,
+            keymap,
+            keymap_overrides: config.keymap_overrides,
+            empty_ide_open_label,
+            project_search_run_label,
             is_dragging: false,
             is_editor_drag_pending: false,
             is_focused: true,
@@ -282,6 +304,7 @@ impl App {
             settings_anim_progress: 0.0,
             settings_y: 10000.0,
             settings_tab: 0,
+            keymap_settings,
             settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
             settings_general_scroll: crate::scroll::ScrollState::new(7.0),
             settings_database_scroll: crate::scroll::ScrollState::new(7.0),
@@ -299,6 +322,7 @@ impl App {
             inline_git_diff_rx: None,
             inline_git_popup: None,
             readonly_notice_until: None,
+            readonly_notice_text: "Файл открыт в режиме только чтение",
             lsp: None,
             lsp_actions_menu: None,
             pending_fix_all_id: None,
@@ -347,6 +371,7 @@ impl App {
             app.base_title = "Добро пожаловать".to_string();
         }
 
+        app.ide_panel.project_search.help_run_label = app.project_search_run_label.clone();
         app
     }
 }
@@ -364,6 +389,31 @@ mod tests {
         assert!(app.show_welcome);
         assert_eq!(app.base_title, "Добро пожаловать");
         assert!(!app.editor.original_hashes.is_empty());
+    }
+
+    #[test]
+    fn faq_command_placeholders_use_keymap_labels_and_keep_fixed_shortcuts() {
+        let keymap = crate::keymap::Keymap::build(&crate::keymap::KeymapOverrides::default());
+        let text = faq_text(&keymap);
+
+        assert!(text.contains(&format!("{}\tСохранить текущий документ", keymap.label(crate::keymap::Command::FileSave))));
+        assert!(text.contains("Ctrl + ← / →\tБыстрый переход по словам"));
+        assert!(text.contains("Ctrl + Bksp\tУдалить слово слева от курсора"));
+        assert!(!text.contains("{cmd:"));
+    }
+
+    #[test]
+    fn set_keymap_overrides_refreshes_cached_ui_labels() {
+        let mut app = App::new_from_config(crate::Config::default(), AppInitOptions::headless(None));
+        let mut overrides = crate::keymap::KeymapOverrides::default();
+        let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "mod+alt+g")
+            .expect("valid chord");
+        overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::FileOpen, chord);
+        app.set_keymap_overrides(overrides);
+
+        let label = app.keymap.label(crate::keymap::Command::FileOpen);
+        assert_eq!(app.empty_ide_open_label, format!("{label}  — открыть файл"));
+        assert!(app.faq_editor.get_full_text().contains(&format!("{label}\tОткрыть файл")));
     }
 
     #[test]

@@ -1473,6 +1473,10 @@ Root:
 * `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
 * `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
+* `src/headless/ui_tests_hotkeys.rs` -> headless UI tests for keymap overrides from `config.json`, configurable commands, and terminal shortcut ownership.
+* `src/headless/ui_tests_hotkeys_characterization.rs` / `src/headless/ui_tests_hotkeys_characterization_editor.rs` / `src/headless/ui_tests_hotkeys_characterization_file_tree.rs` / `src/headless/ui_tests_hotkeys_characterization_database.rs` / `src/headless/ui_tests_hotkeys_characterization_api_markdown.rs` / `src/headless/ui_tests_hotkeys_characterization_pdf_image.rs` / `src/headless/ui_tests_hotkeys_characterization_git_settings.rs` -> headless UI characterization for existing keyboard routing across editor, file tree, Database, API/Markdown, PDF/Image, and Git/Settings.
+* `src/headless/ui_tests_hotkeys_settings.rs` -> headless UI tests for hotkey Settings filtering, skipped-entry warnings, and recording-state behavior.
+* `src/headless/ui_tests_hotkeys_settings_edit.rs` -> headless UI tests for adding/removing/resetting bindings, conflict decisions, reserved chords, and recording cancellation.
 * `src/headless/ui_tests_editor_selection.rs` -> headless UI tests for double-click word, Shift+Home/End, Ctrl+A, Ctrl+Shift+arrows, and typing over a selection.
 * `src/headless/ui_tests_editor_shortcuts.rs` -> headless UI tests for Home/End, word navigation/deletion, file edges, Enter auto-indent, and Tab indentation.
 * `src/headless/ui_tests_editor_folding_minimap.rs` -> headless UI tests for folded rows and cursor skipping, sibling folds, minimap thumb drag/click, and thumb geometry.
@@ -1507,6 +1511,7 @@ Root:
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
 * `src/render_view/settings_tool_rows.rs` -> shared external-tool settings rows and Dart SDK controls; keeps tool UI behavior out of the main settings renderer.
+* `src/render_view/settings_keymap_ui.rs` -> Settings hotkey command groups, chord chips, filtering, conflict prompts and reset controls.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -1546,6 +1551,7 @@ Entrypoints/state:
 * `scripts/pgo_coverage.py` -> PGO pipeline coverage helpers: profdata parsing, per-module summary, group marker checks, PGO warning counts.
 * `scripts/pgo_fixtures.py` -> PGO pipeline fixture servers/data started by `pgo_pipeline.py`.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
+* `src/app/keymap_settings.rs` -> hotkey Settings filtering, recording, validation and conflict state for editable key bindings.
 * `src/app/rust_settings.rs` -> persistent Rust support and rust-analyzer check-command settings, including config parsing and defaults.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
@@ -1566,6 +1572,7 @@ Entrypoints/state:
 * `src/app/database/database_grid_selection_state.rs` -> grid cell position/selection, editor state, table prompts, and selection restoration state.
 * `src/app/database/database_table.rs` -> autocommit COUNT/chunk SQL, immutable parameterized DML plans, PK+`xmin` conflict checks, and dedicated pending transaction execution.
 * `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
+* `src/app/database/database_table_key_methods.rs` -> database table keyboard handling for table inputs, selection, and modals.
 * `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
 * `src/app/database/database_query_analysis_completion.rs` -> SQL formatting, semantic diagnostics, and completion candidate generation.
 * `src/app/database/database_query_analysis_completion_tests.rs` -> SQL completion and editor diagnostic regressions included by `database_query.rs`.
@@ -1656,11 +1663,16 @@ Entrypoints/state:
 Input:
 
 * `src/app/keyboard.rs` -> keyboard router + terminal/search helpers.
+* `src/app/keyboard/commands.rs` -> contextual dispatch for configurable panel commands.
 * `src/app/keyboard/main_keys.rs` -> global shortcuts + mode routing.
+* `src/app/keyboard/main_keys_tests.rs` -> tests for global keyboard routing and shortcut ownership, included by `main_keys.rs`.
+* `src/app/keyboard/input_owner.rs` -> terminal shortcut interception and input-owner routing predicates.
 * `src/app/keyboard/main_keys_vcs_copy.rs` -> Ctrl+C eligibility of the VCS log selection and its tests (child module of `main_keys.rs`).
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
+* `src/keymap.rs` -> physical-key chords, parsing, validation, overrides, and resolved keymaps.
+* `src/keymap/defaults.rs` -> command metadata and default key bindings.
 * `src/app/mouse.rs` -> mouse module shell.
 * `src/app/mouse/input.rs` -> mouse button module shell + shared click helpers.
 * `src/app/mouse/input/mouse_dispatch.rs` -> `handle_main_mouse_input_inner`: ordered press/release phase dispatch.

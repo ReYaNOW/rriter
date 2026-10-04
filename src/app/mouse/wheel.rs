@@ -791,6 +791,15 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if self.show_settings && self.settings_tab == 6 {
+            crate::render_view::settings_ui::scroll_settings_content(
+                &mut self.keymap_settings.scroll,
+                dy,
+                self.keymap_settings.max_scroll,
+            );
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return;
+        }
 
         if self.show_welcome || self.show_settings || self.modal_dialog_open() {
             return;

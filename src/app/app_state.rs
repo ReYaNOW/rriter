@@ -1117,6 +1117,18 @@ pub(crate) fn shift_python_inlay_hints_for_edits(
 }
 
 impl App {
+    pub(crate) fn set_keymap_overrides(&mut self, overrides: crate::keymap::KeymapOverrides) {
+        self.keymap_overrides = overrides;
+        self.keymap = crate::keymap::Keymap::build(&self.keymap_overrides);
+        self.keymap_settings.refresh(&self.keymap, &self.keymap_overrides);
+        self.empty_ide_open_label = format!("{}  — открыть файл", self.keymap.label(crate::keymap::Command::FileOpen));
+        self.project_search_run_label = format!("Literal-only. {} или кнопка запуска.", self.keymap.label(crate::keymap::Command::SearchProjectRun));
+        self.ide_panel.project_search.help_run_label = self.project_search_run_label.clone();
+        self.faq_editor.set_text_clean(&super::app_bootstrap::faq_text(&self.keymap));
+        self.faq_editor.cursor = 0;
+        self.save_current_config();
+    }
+
     pub(crate) fn editor_top_inset(&self, scale: f32) -> f32 {
         crate::render_view::editor_content_top_inset(
             self.show_welcome,
@@ -1185,6 +1197,10 @@ pub struct App {
     pub modifiers: ModifiersState,
     pub left_shift_down: bool,
     pub ctrl_wheel_multiplier: f32,
+    pub keymap: crate::keymap::Keymap,
+    pub keymap_overrides: crate::keymap::KeymapOverrides,
+    pub empty_ide_open_label: String,
+    pub project_search_run_label: String,
     pub is_dragging: bool,
     pub is_editor_drag_pending: bool,
     pub is_focused: bool,
@@ -1299,6 +1315,7 @@ pub struct App {
     pub settings_y: f32,
     pub settings_tab: usize,
     pub settings_ide_scroll: crate::scroll::ScrollState,
+    pub(crate) keymap_settings: crate::app::keymap_settings::KeymapSettingsState,
 
     pub ide_panel: IdePanelState,
     pub database_runtime: Option<crate::app::database::DatabaseRuntime>,
@@ -1313,6 +1330,7 @@ pub struct App {
         Option<crate::ui_waker::OneShot<crate::app::git_diff::InlineGitDiffEvent>>,
     pub inline_git_popup: Option<InlineGitPopup>,
     pub readonly_notice_until: Option<Instant>,
+    pub readonly_notice_text: &'static str,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
     /// Меню быстрых действий LSP (Alt+Enter)

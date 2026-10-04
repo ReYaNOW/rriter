@@ -516,7 +516,7 @@ impl Renderer {
         );
         cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
-            "Literal-only. Ctrl+Enter или кнопка запуска.",
+            &ide_panel.project_search.help_run_label,
             content_x,
             cy,
             0.70 * content_factor,

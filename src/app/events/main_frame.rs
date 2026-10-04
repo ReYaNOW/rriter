@@ -183,10 +183,12 @@ impl App {
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
+                    self.readonly_notice_text,
                     self.inline_git_popup.as_ref(),
                     &self.pdf_engine,
                     self.pdf_dark_pages,
                     &self.markdown_media,
+                    &self.empty_ide_open_label,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -548,6 +550,7 @@ impl App {
                         rust_row.as_ref(),
                         self.ide_panel.database.settings(),
                         self.ctrl_wheel_multiplier,
+                        &mut self.keymap_settings,
                         &mut self.ui_registry,
                     );
                     // Window resizes shrink the max; keep the scroll target inside it.

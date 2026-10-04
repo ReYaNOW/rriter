@@ -22,6 +22,7 @@ pub mod search;
 pub mod settings_ui;
 mod settings_tool_rows;
 mod settings_database_ui;
+mod settings_keymap_ui;
 pub mod sticky;
 pub mod tabs_ui;
 pub mod terminal_ui;

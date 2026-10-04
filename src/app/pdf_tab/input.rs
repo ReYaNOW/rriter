@@ -3,20 +3,26 @@ use winit::event::ElementState;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 impl App {
-    pub(crate) fn handle_pdf_key(&mut self, input: &KeyInput) -> bool {
+    pub(crate) fn handle_pdf_key(
+        &mut self,
+        input: &KeyInput,
+        chord: Option<crate::keymap::Chord>,
+    ) -> bool {
         if !self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) { return false; }
         // The search panel, terminal and other focused inputs own the keyboard while focused; their handlers run later.
         if !self.editor_has_input_focus() { return false; }
         let pressed = input.state == ElementState::Pressed;
+        if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::PdfCopy, chord)) {
+            if pressed { self.pdf_copy_selection(); }
+            return true;
+        }
         if self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key() {
             // Modified keys are application shortcuts (tab switching, panels, find, close tab): they go on to
             // the global handlers. The hidden editor's text commands are cut off later, in
             // `handle_editor_keyboard_input` (`pdf_tab_key_reaches_editor`). Only PDF copy is taken here.
-            let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
-            if primary && !self.modifiers.alt_key() && input.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
-                if pressed { self.pdf_copy_selection(); }
-                return true;
-            }
+            return false;
+        }
+        if chord.is_some_and(|chord| crate::keymap::COMMANDS.iter().any(|info| self.keymap.hit(info.command, chord))) {
             return false;
         }
         // Settings (F1) and the FPS overlay (F8) are application shortcuts, handled by the global handlers.

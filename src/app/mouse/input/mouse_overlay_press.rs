@@ -409,6 +409,7 @@ impl App {
                 self.settings_ide_scroll.end_drag();
                 self.settings_general_scroll.end_drag();
                 self.settings_database_scroll.end_drag();
+                self.keymap_settings.scroll.end_drag();
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let window_size = self.window.as_ref().unwrap().inner_size();
@@ -424,6 +425,7 @@ impl App {
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
                 if !outer.contains(mx, my) {
+                    self.keymap_settings.cancel_recording();
                     self.set_settings_visible(false);
                 } else {
                     // Ищем только среди оверлейных элементов настроек,
@@ -462,6 +464,9 @@ impl App {
                     } else {
                         // Клик мимо любого элемента — снимаем фокус
                         self.settings_ignore_focused = false;
+                        if self.settings_tab == 6 {
+                            self.keymap_settings.cancel_recording();
+                        }
                     }
                 }
             }
