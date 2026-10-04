@@ -33,9 +33,9 @@ fn inline_code_background(bg: [f32; 4], fg: [f32; 4]) -> [f32; 4] {
     ]
 }
 
-fn markdown_text_color(style: TextStyle, theme_fg: [f32; 4]) -> [f32; 4] {
+fn markdown_text_color(style: TextStyle, theme_fg: [f32; 4], syntax: &crate::theme::SyntaxPalette) -> [f32; 4] {
     if style.contains(TextStyle::CODE) {
-        MARKDOWN_GOLD
+        syntax.color(crate::theme::SyntaxRole::MdCode)
     } else if style.contains(TextStyle::LINK) {
         [0.47, 0.68, 0.96, 1.0]
     } else if style.contains(TextStyle::STRONG) {
@@ -425,4 +425,3 @@ fn visible_styled_run_range(runs: &[StyledRun], text_range: &Range<usize>) -> Ra
 fn faded(color: [f32; 4], alpha: f32) -> [f32; 4] {
     [color[0], color[1], color[2], alpha]
 }
-

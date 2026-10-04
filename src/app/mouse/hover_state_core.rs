@@ -37,7 +37,7 @@ pub struct HoverPopup {
 
 #[derive(Debug, Clone)]
 pub struct HoverVisualLine {
-    pub glyphs: Vec<(char, [f32; 4], usize)>,
+    pub glyphs: Vec<(char, crate::theme::SyntaxRole, usize)>,
     pub kind: crate::lsp::HoverLineKindPublic,
 }
 

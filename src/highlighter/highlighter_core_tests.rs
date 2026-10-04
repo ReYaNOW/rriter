@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme::{SyntaxPalette, SyntaxRole, ThemeId};
 use std::sync::atomic::AtomicUsize;
 
 #[test]

@@ -4,8 +4,6 @@ use crate::lsp::HoverLineKindPublic;
 use std::collections::HashMap;
 use tree_sitter::StreamingIterator;
 
-pub const DOCSTRING_TEXT: [f32; 4] = crate::highlighter::DRACULA_COMMENT;
-
 pub fn fence_tag(line: &str) -> Option<&str> {
     line.trim().strip_prefix("```").map(str::trim)
 }

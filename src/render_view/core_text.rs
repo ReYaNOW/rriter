@@ -44,10 +44,11 @@ impl Renderer {
         y: f32,
         max_x: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x;
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }
@@ -76,11 +77,12 @@ impl Renderer {
         y: f32,
         max_x: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x.round();
         let baseline_y = y.round();
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }
@@ -1173,9 +1175,10 @@ impl Renderer {
         y: f32,
         max_x: f32,
         scale: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) {
         let _ = self.draw_spanned_ui_line_pixel_snapped_alpha(
-            text, spans, base_offset, x, y, max_x, scale, 1.0,
+            text, spans, base_offset, x, y, max_x, scale, 1.0, palette,
         );
     }
 
@@ -1190,11 +1193,12 @@ impl Renderer {
         max_x: f32,
         scale: f32,
         alpha: f32,
+        palette: &crate::theme::SyntaxPalette,
     ) -> f32 {
         let mut draw_x = x.round();
         let baseline_y = y.round();
         let alpha = alpha.clamp(0.0, 1.0);
-        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+        for_each_spanned_ui_char(text, spans, base_offset, palette, |ch, span_color| {
             if draw_x > max_x {
                 return;
             }

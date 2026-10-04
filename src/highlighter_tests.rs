@@ -14,7 +14,7 @@ fn color_at(highlighter: &Highlighter, offset: usize) -> [f32; 4] {
         .spans
         .iter()
         .find(|span| span.start <= offset && offset < span.end)
-        .map(|span| span.color())
+        .map(|span| crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(span.role))
         .unwrap_or([0.972, 0.972, 0.949, 1.0])
 }
 
@@ -141,13 +141,13 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
     assert_eq!(color_at(&highlighter, h1), [0.741, 0.576, 0.976, 1.0]);
     assert_eq!(color_at(&highlighter, em), [0.973, 0.584, 0.502, 1.0]);
     assert_eq!(color_at(&highlighter, strong), [1.0, 0.474, 0.776, 1.0]);
-    assert_eq!(color_at(&highlighter, inline), MARKDOWN_GOLD);
+    assert_eq!(color_at(&highlighter, inline), [0.902, 0.714, 0.451, 1.0]);
     assert_eq!(color_at(&highlighter, link), [0.313, 0.980, 0.482, 1.0]);
     assert_eq!(color_at(&highlighter, uri), [0.545, 0.913, 0.992, 1.0]);
-    assert_eq!(color_at(&highlighter, link_title), MARKDOWN_GOLD);
+    assert_eq!(color_at(&highlighter, link_title), [0.902, 0.714, 0.451, 1.0]);
     assert_eq!(color_at(&highlighter, rust_fn), [1.0, 0.474, 0.776, 1.0]);
     assert_eq!(color_at(&highlighter, rust_name), [0.313, 0.980, 0.482, 1.0]);
-    assert_eq!(color_at(&highlighter, rust_string), MARKDOWN_GOLD);
+    assert_eq!(color_at(&highlighter, rust_string), [0.902, 0.714, 0.451, 1.0]);
     assert_eq!(color_at(&highlighter, python_def), [1.0, 0.474, 0.776, 1.0]);
     assert_eq!(color_at(&highlighter, python_name), [0.313, 0.980, 0.482, 1.0]);
     assert_eq!(color_at(&highlighter, unknown), [0.972, 0.972, 0.949, 1.0]);
@@ -175,7 +175,7 @@ fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
     for inline in ["handle_main_mouse_input", "src/render_view/editor_text_layer.rs"] {
         assert_eq!(
             color_at(&highlighter, source.find(inline).unwrap()),
-            MARKDOWN_GOLD,
+            [0.902, 0.714, 0.451, 1.0],
             "inline code should use markdown gold: {inline}"
         );
     }
@@ -204,7 +204,7 @@ fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
     }
     assert_eq!(
         color_at(&highlighter, source.find("quoted value").unwrap()),
-        MARKDOWN_GOLD,
+        [0.902, 0.714, 0.451, 1.0],
         "quoted bash strings keep string semantics but use markdown gold"
     );
     for alias_path in ["/tmp/sh-path", "/tmp/shell-path"] {
@@ -247,7 +247,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
     let mut inline_highlighter = Highlighter::new();
     inline_highlighter.reset(1, inline_source.to_string(), "md".to_string(), 0);
     wait(&mut inline_highlighter, 1);
-    assert_eq!(color_at(&inline_highlighter, 1), MARKDOWN_GOLD);
+    assert_eq!(color_at(&inline_highlighter, 1), [0.902, 0.714, 0.451, 1.0]);
 
     inline_highlighter.apply_edits(
         2,
@@ -256,7 +256,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
         Some(0),
     );
     wait(&mut inline_highlighter, 2);
-    assert_ne!(color_at(&inline_highlighter, 0), MARKDOWN_GOLD);
+    assert_ne!(color_at(&inline_highlighter, 0), [0.902, 0.714, 0.451, 1.0]);
 
     let fenced_source = "```bash\ncode-review-graph build --skip-postprocess\n```\n";
     let mut fenced_highlighter = Highlighter::new();

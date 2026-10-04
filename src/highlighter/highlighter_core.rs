@@ -16,19 +16,13 @@ use std::thread;
 use tree_sitter::StreamingIterator;
 
 use crate::queries::{get_folding_query, get_injection_query, get_params_query, get_ts_config};
-use crate::theme::{SyntaxPalette, SyntaxRole, ThemeId};
+use crate::theme::SyntaxRole;
 
 #[derive(Clone, Debug)]
 pub struct ColorSpan {
     pub start: usize,
     pub end: usize,
     pub role: SyntaxRole,
-}
-
-impl ColorSpan {
-    pub fn color(&self) -> [f32; 4] {
-        SyntaxPalette::for_id(ThemeId::Dracula).color(self.role)
-    }
 }
 
 pub fn flatten_color_spans_prefer_specific(
@@ -227,17 +221,6 @@ impl Drop for HighlighterWorker {
 mod tests;
 #[cfg(test)]
 use tests::{active_highlighter_worker_count, ActiveHighlighterWorkerGuard};
-
-pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
-pub(crate) const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
-pub(crate) const DRACULA_CYAN: [f32; 4] = [0.545, 0.913, 0.992, 1.0];
-pub(crate) const DRACULA_DARK_CYAN: [f32; 4] = [0.45, 0.85, 0.90, 1.0];
-pub(crate) const DRACULA_GREEN: [f32; 4] = [0.313, 0.980, 0.482, 1.0];
-pub(crate) const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
-pub(crate) const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
-pub(crate) const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
-pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
-pub(crate) const MARKDOWN_GOLD: [f32; 4] = [0.902, 0.714, 0.451, 1.0];
 
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_LINES: usize = 800;

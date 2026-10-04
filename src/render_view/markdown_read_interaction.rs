@@ -996,7 +996,7 @@ impl Renderer {
             };
             let width = left_pad + text_width + right_pad;
             let text_x = x + left_pad;
-            let color = markdown_text_color(style, self.theme.fg);
+            let color = markdown_text_color(style, self.theme.fg, &self.theme.syntax);
             for layer in STYLED_RUN_PAINT_ORDER {
                 if !styled_run_layer_enabled(layer, style, has_highlights) {
                     continue;

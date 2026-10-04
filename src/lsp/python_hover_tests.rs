@@ -4,7 +4,7 @@ fn rendered_color_at(spans: &[crate::highlighter::ColorSpan], offset: usize) -> 
     spans
         .iter()
         .find(|span| offset >= span.start && offset < span.end)
-        .map(|span| span.color())
+        .map(|span| crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(span.role))
         .unwrap_or([0.972, 0.972, 0.949, 1.0])
 }
 

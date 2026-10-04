@@ -64,8 +64,8 @@ impl Renderer {
         y: f32,
         max_x: f32,
     ) {
-        let _ =
-            self.draw_spanned_editor_line_alpha(text, spans, base_offset, x, y, max_x, 1.0);
+        let syntax = self.theme.syntax;
+        let _ = self.draw_spanned_editor_line_alpha(text, spans, base_offset, x, y, max_x, 1.0, &syntax);
     }
 
     fn draw_inline_git_popup_panel(

@@ -340,7 +340,7 @@ fn switch_back_to_partial_large_tab_restarts_full_highlight_without_clearing_cac
     assert_eq!(app.highlighter.current_version, 42);
     assert_eq!(app.highlighter.spans.len(), 1);
     assert_eq!(
-        app.highlighter.spans[0].color(),
+                crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(app.highlighter.spans[0].role),
         [1.0, 0.474, 0.776, 1.0]
     );
 }

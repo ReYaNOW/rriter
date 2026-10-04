@@ -424,6 +424,7 @@ impl Renderer {
         y: f32,
         w: f32,
     ) {
+        let syntax = self.ui.syntax;
         self.draw_spanned_ui_line_pixel_snapped(
             line,
             spans,
@@ -432,6 +433,7 @@ impl Renderer {
             y,
             x + w,
             1.0,
+            &syntax,
         );
     }
 
@@ -447,9 +449,9 @@ impl Renderer {
             if b == b'"' {
                 let end = json_string_end(line, idx);
                 let color = if json_string_is_property(line, end) {
-                    crate::highlighter::DRACULA_CYAN
+                    self.ui.syntax.color(crate::theme::SyntaxRole::Keyword)
                 } else {
-                    crate::highlighter::DRACULA_YELLOW
+                    self.ui.syntax.color(crate::theme::SyntaxRole::String)
                 };
                 self.draw_json_colored_segment(&line[idx..end], color, x, y, w, &mut draw_x);
                 idx = end;
@@ -459,7 +461,7 @@ impl Renderer {
                 let end = json_number_end(line, idx);
                 self.draw_json_colored_segment(
                     &line[idx..end],
-                    crate::highlighter::DRACULA_PURPLE,
+                    self.ui.syntax.color(crate::theme::SyntaxRole::Constant),
                     x,
                     y,
                     w,
@@ -471,7 +473,7 @@ impl Renderer {
             if let Some(end) = json_keyword_end(line, idx) {
                 self.draw_json_colored_segment(
                     &line[idx..end],
-                    crate::highlighter::DRACULA_PINK,
+                    self.ui.syntax.color(crate::theme::SyntaxRole::KeywordControl),
                     x,
                     y,
                     w,
@@ -511,7 +513,7 @@ impl Renderer {
         );
         let value = &rest[value_start..];
         let value_color = if header_value_is_number(value) {
-            crate::highlighter::DRACULA_PURPLE
+            self.ui.syntax.color(crate::theme::SyntaxRole::Constant)
         } else {
             [0.70, 0.72, 0.78, 1.0]
         };

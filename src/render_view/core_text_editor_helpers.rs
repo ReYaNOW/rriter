@@ -33,6 +33,7 @@ fn for_each_spanned_ui_char(
     text: &str,
     spans: &[crate::highlighter::ColorSpan],
     base_offset: Option<usize>,
+    palette: &crate::theme::SyntaxPalette,
     mut callback: impl FnMut(char, [f32; 4]),
 ) {
     let mut current_offset = base_offset.unwrap_or(usize::MAX);
@@ -61,7 +62,7 @@ fn for_each_spanned_ui_char(
                 && spans[span_index].start <= current_offset
                 && current_offset < spans[span_index].end
             {
-                spans[span_index].color()
+                palette.color(spans[span_index].role)
             } else {
                 [f32::NAN; 4]
             }

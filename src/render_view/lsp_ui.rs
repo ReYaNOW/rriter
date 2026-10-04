@@ -1043,7 +1043,7 @@ impl Renderer {
                                                         entry_idx += 1;
                                                     }
 
-                                                    let mut color = [0.875, 0.882, 0.902, 1.0];
+                                                    let mut color = self.ui.syntax.color(crate::theme::SyntaxRole::LogText);
                                                     if entry_idx < info.logs.len() {
                                                         let rel_offset =
                                                             current_chunk_offset - entry_start;
@@ -1051,7 +1051,7 @@ impl Renderer {
                                                             if rel_offset >= span.start
                                                                 && rel_offset < span.end
                                                             {
-                                                                color = span.color();
+                                                                color = self.ui.syntax.color(span.role);
                                                                 break;
                                                             }
                                                         }

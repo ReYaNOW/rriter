@@ -233,6 +233,7 @@ impl Renderer {
                 }
 
                 let mut current_offset = start_byte;
+                let syntax = self.theme.syntax;
                 while current_offset < end_byte {
                     let chunk = if current_offset < first_len {
                         let chunk_end = end_byte.min(first_len);
@@ -253,6 +254,7 @@ impl Renderer {
                         rect_y + self.baseline_offset,
                         self.width - minimap_w - 20.0,
                         alpha,
+                        &syntax,
                     );
                     current_offset = current_offset.saturating_add(chunk.len());
                     if x > self.width - minimap_w - 20.0 {

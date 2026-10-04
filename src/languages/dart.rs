@@ -1173,7 +1173,7 @@ mod tests {
             [0.945, 0.980, 0.549, 1.0],
         ] {
             assert!(
-                spans.iter().any(|span| span.color() == color),
+                spans.iter().any(|span| crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(span.role) == color),
                 "missing Dart hover syntax color {color:?}: {spans:?}"
             );
         }
@@ -1183,7 +1183,7 @@ mod tests {
         spans
             .iter()
             .find(|span| span.start <= byte && byte < span.end)
-            .map_or([0.972, 0.972, 0.949, 1.0], |span| span.color())
+            .map_or([0.972, 0.972, 0.949, 1.0], |span| crate::theme::SyntaxPalette::for_id(crate::theme::ThemeId::Dracula).color(span.role))
     }
 
     #[test]

@@ -755,7 +755,7 @@ impl Renderer {
                         if x - render_scroll_x + adv > 0.0 {
                             let mut current_color = self.theme.fg;
                             if span_idx < spans.len() && spans[span_idx].start <= current_offset {
-                                current_color = spans[span_idx].color();
+                                current_color = self.theme.syntax.color(spans[span_idx].role);
                             }
                             if folded_keyword_range.is_some_and(|(start, end)| {
                                 current_offset >= start && current_offset < end
@@ -905,7 +905,7 @@ impl Renderer {
                     dots_str,
                     box_x + 3.0 * s,
                     y,
-                    crate::highlighter::DRACULA_COMMENT,
+                    self.theme.syntax.color(crate::theme::SyntaxRole::Comment),
                     1.0,
                 );
 

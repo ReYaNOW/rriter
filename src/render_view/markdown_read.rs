@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use super::core_text::text_char_is_non_rendering_control;
 use crate::app::{LinkTarget, MarkdownMode, MarkdownTabState, inline_link_target, link_tooltip};
-use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
+use crate::highlighter::ColorSpan;
 use crate::markdown_media::MarkdownMedia;
 use crate::languages::markdown::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle, MarkdownListKind,
