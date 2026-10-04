@@ -880,7 +880,7 @@ mod tests {
             include_str!("ui_handlers/ui_panels.rs"),
             include_str!("ui_handlers/ui_settings.rs"),
         );
-        let main_keys = include_str!("keyboard/main_keys.rs");
+        let key_routes = include_str!("keyboard/key_routes.rs");
         // `about_to_wait_terminals` holds the terminal tick of `about_to_wait`.
         let about = include_str!("events/about/about_tick_input_sections.rs");
         let renderer = include_str!("../render_view/terminal_ui.rs");
@@ -900,7 +900,7 @@ mod tests {
             "UiId::TerminalTab(idx) => {\n                self.select_terminal_tab_from_user(idx);"
         ));
         assert!(ui_handlers.contains("self.defer_terminal_panel_until_ready();"));
-        assert!(main_keys.contains("self.defer_terminal_panel_until_ready();"));
+        assert!(key_routes.contains("app.defer_terminal_panel_until_ready();"));
         assert!(about.contains("app.process_terminal_presentation_intents()"));
         assert!(about.matches("app.add_terminal();").count() >= 2);
         // `enter_ide_mode_impl` lives in the startup file.
