@@ -159,6 +159,195 @@ impl LspManager {
         }
     }
 
+    fn poll_diagnostics_event(
+        &mut self,
+        event_index: usize,
+        server: &LspServerKind,
+        path: &Path,
+        version: &mut Option<i32>,
+        items: &mut Vec<Diagnostic>,
+        result_id: &Option<String>,
+        diagnostic_roots: &std::collections::HashMap<usize, crate::platform::PathKey>,
+        batch_messages: &mut std::collections::HashSet<Arc<str>>,
+        received_diagnostics: &mut usize,
+        diagnostics_replaced: &mut bool,
+    ) {
+        if self.suppress_diagnostics {
+            return;
+        }
+        let is_ty = *server == LspServerKind::Ty;
+        let is_dart = *server == LspServerKind::Dart;
+        let language = match server {
+            LspServerKind::Dart => Some(rooted_language::RootedLanguage::Dart),
+            LspServerKind::RustAnalyzer => Some(rooted_language::RootedLanguage::Rust),
+            _ => None,
+        };
+        let rooted = language.map(|lang| self.rooted(lang));
+        let existing_version = if is_ty {
+            self.ty_instant_diagnostics
+                .get(path)
+                .map(|(version, _)| *version)
+        } else if let Some(rooted) = rooted {
+            rooted.live_diagnostics()
+                .get(path)
+                .map(|diagnostics| diagnostics.version)
+        } else {
+            self.instant_diagnostics
+                .get(path)
+                .map(|(version, _)| *version)
+        };
+        let path_key = crate::platform::PathKey::new(path);
+        let is_open_file = if let Some(rooted) = rooted {
+            rooted.open_files().contains_key(&path_key)
+        } else {
+            self.open_python_files.contains_key(&path_key)
+        };
+        let current_version = language
+            .and_then(|lang| self.rooted(lang).document_version(path));
+        let diagnostic_root = language.and_then(|_| diagnostic_roots.get(&event_index));
+        let accepted = if let Some(lang) = language {
+            let accepts_unopened = lang == rooted_language::RootedLanguage::Rust;
+            if is_open_file {
+                if is_dart {
+                    current_version.is_some_and(|current| {
+                        version.is_none_or(|incoming| incoming >= current)
+                    }) && (version.is_none()
+                        || Self::should_accept_diagnostics_version(existing_version, *version, true))
+                } else {
+                    match (current_version, *version) {
+                        (_, None) => true,
+                        (Some(current), Some(incoming)) => incoming >= current,
+                        (None, Some(_)) => true,
+                    }
+                }
+            } else {
+                accepts_unopened
+            }
+        } else {
+            Self::should_accept_diagnostics_version(existing_version, *version, is_open_file)
+        };
+        if !accepted {
+            items.clear();
+            return;
+        }
+
+        let stored_version = if let Some(lang) = language {
+            if lang == rooted_language::RootedLanguage::Dart || is_open_file {
+                (*version).or(current_version).unwrap_or(0)
+            } else {
+                0
+            }
+        } else {
+            (*version).unwrap_or(0)
+        };
+        *received_diagnostics = received_diagnostics.saturating_add(items.len());
+        if is_dart {
+            for diagnostic in items.iter_mut() {
+                diagnostic.source = Some(Arc::<str>::from(dart_workspace::DART_SERVER_NAME));
+            }
+        }
+        self.compact_diagnostic_text(items, Some(batch_messages));
+
+        if is_ty {
+            if let Some(result_id) = result_id.as_ref() {
+                self.ty_diag_result_ids.insert(path.to_path_buf(), result_id.clone());
+            }
+            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+            self.ty_instant_diagnostics.insert(path.to_path_buf(), (stored_version, items));
+        } else if let Some(lang) = language {
+            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+            if items.is_empty() {
+                self.rooted_mut(lang).remove_live_diagnostics(path);
+            } else if let Some(root) = diagnostic_root {
+                self.rooted_mut(lang).insert_live_diagnostics(
+                    path.to_path_buf(),
+                    rooted_language::LiveDiagnostics {
+                        version: stored_version,
+                        root: root.clone(),
+                        items,
+                    },
+                );
+            }
+        } else {
+            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+            self.instant_diagnostics.insert(path.to_path_buf(), (stored_version, items));
+        }
+
+        if language.is_none() || is_ty {
+            self.mark_diagnostics_changed();
+        }
+        self.last_change = None;
+        *diagnostics_replaced = true;
+    }
+
+    fn poll_status_changed_event(&mut self, server: &LspServerKind, status: &LspServerStatus) {
+        if *server == LspServerKind::Dart {
+            if *status == LspServerStatus::Missing {
+                self.mark_dart_missing();
+            }
+            return;
+        }
+        if *server == LspServerKind::RustAnalyzer {
+            return;
+        }
+        if *server == LspServerKind::Ty {
+            self.ty_status = status.clone();
+            if *status == LspServerStatus::Running {
+                self.ty_unavailable = false;
+                self.ty_workspace_diag_dirty = true;
+            } else if matches!(
+                status,
+                LspServerStatus::Starting
+                    | LspServerStatus::Crashed
+                    | LspServerStatus::Missing
+                    | LspServerStatus::Disabled
+            ) {
+                self.ty_workspace_diag_pending = None;
+                if matches!(status, LspServerStatus::Disabled | LspServerStatus::Missing) {
+                    self.ty_unavailable = true;
+                    self.ty_process = None;
+                }
+            }
+        } else {
+            self.python_status = status.clone();
+            if *status == LspServerStatus::Running {
+                self.ruff_unavailable = false;
+                self.ruff_workspace_diag_dirty = true;
+            } else if matches!(status, LspServerStatus::Disabled | LspServerStatus::Missing) {
+                self.ruff_unavailable = true;
+                self.python = None;
+                self.ruff_workspace_diag_rx = None;
+                self.ruff_workspace_diag_pending = false;
+                self.ruff_workspace_diag_dirty = false;
+            }
+        }
+    }
+
+    fn poll_server_status_event(
+        &mut self,
+        server: &LspServerKind,
+        quiescent: bool,
+        health: rooted_language::ServerHealth,
+        message: &Option<String>,
+    ) {
+        if *server != LspServerKind::RustAnalyzer {
+            return;
+        }
+        self.rust.apply_server_status(!quiescent, health);
+        if health == rooted_language::ServerHealth::Error
+            && message.as_ref() != self.rust_last_health_message.as_ref()
+            && let Some(message) = message
+        {
+            self.server_logs.entry(RUST_ANALYZER_SERVER.program).or_default().push(LogEntry {
+                text: format!("[LSP] {message}"),
+                spans: Vec::new(),
+                folds: Vec::new(),
+                created_at: Instant::now(),
+            });
+        }
+        self.rust_last_health_message.clone_from(message);
+    }
+
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
@@ -195,170 +384,20 @@ impl LspManager {
                     items,
                     result_id,
                     ..
-                } => {
-                    if !self.suppress_diagnostics {
-                        let is_ty = *server == LspServerKind::Ty;
-                        let is_dart = *server == LspServerKind::Dart;
-                        let language = match server {
-                            LspServerKind::Dart => Some(rooted_language::RootedLanguage::Dart),
-                            LspServerKind::RustAnalyzer => Some(rooted_language::RootedLanguage::Rust),
-                            _ => None,
-                        };
-                        let rooted = language.map(|lang| self.rooted(lang));
-                        let existing_version = if is_ty {
-                            self.ty_instant_diagnostics
-                                .get(path)
-                                .map(|(version, _)| *version)
-                        } else if let Some(rooted) = rooted {
-                            rooted.live_diagnostics()
-                                .get(path)
-                                .map(|diagnostics| diagnostics.version)
-                        } else {
-                            self.instant_diagnostics
-                                .get(path)
-                                .map(|(version, _)| *version)
-                        };
-                        let path_key = crate::platform::PathKey::new(path);
-                        let is_open_file = if let Some(rooted) = rooted {
-                            rooted.open_files().contains_key(&path_key)
-                        } else {
-                            self.open_python_files.contains_key(&path_key)
-                        };
-                        let current_version = language
-                            .and_then(|lang| self.rooted(lang).document_version(path));
-                        let diagnostic_root = language
-                            .and_then(|_| diagnostic_roots.get(&event_index));
-                        let accepted = if let Some(lang) = language {
-                            let accepts_unopened = lang == rooted_language::RootedLanguage::Rust;
-                            if is_open_file {
-                                if is_dart {
-                                    current_version.is_some_and(|current| {
-                                        version.is_none_or(|incoming| incoming >= current)
-                                    }) && (version.is_none()
-                                        || Self::should_accept_diagnostics_version(
-                                            existing_version,
-                                            *version,
-                                            true,
-                                        ))
-                                } else {
-                                    match (current_version, *version) {
-                                        (_, None) => true,
-                                        (Some(current), Some(incoming)) => incoming >= current,
-                                        (None, Some(_)) => true,
-                                    }
-                                }
-                            } else {
-                                accepts_unopened
-                            }
-                        } else {
-                            Self::should_accept_diagnostics_version(
-                                existing_version,
-                                *version,
-                                is_open_file,
-                            )
-                        };
-                        if accepted {
-                            let stored_version = if let Some(lang) = language {
-                                if lang == rooted_language::RootedLanguage::Dart || is_open_file {
-                                    version.or(current_version).unwrap_or(0)
-                                } else {
-                                    0
-                                }
-                            } else {
-                                version.unwrap_or(0)
-                            };
-                            received_diagnostics = received_diagnostics.saturating_add(items.len());
-                            if is_dart {
-                                for diagnostic in items.iter_mut() {
-                                    diagnostic.source =
-                                    Some(Arc::<str>::from(dart_workspace::DART_SERVER_NAME));
-                                }
-                            }
-                            self.compact_diagnostic_text(items, Some(&mut batch_messages));
-
-                            if is_ty {
-                                if let Some(result_id) = result_id.as_ref() {
-                                    self.ty_diag_result_ids
-                                        .insert(path.clone(), result_id.clone());
-                                }
-                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                                self.ty_instant_diagnostics
-                                    .insert(path.clone(), (stored_version, items));
-                            } else if let Some(lang) = language {
-                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                                if items.is_empty() {
-                                    self.rooted_mut(lang).remove_live_diagnostics(path);
-                                } else if let Some(root) = diagnostic_root {
-                                    self.rooted_mut(lang).insert_live_diagnostics(
-                                        path.clone(),
-                                        rooted_language::LiveDiagnostics {
-                                            version: stored_version,
-                                            root: root.clone(),
-                                            items,
-                                        },
-                                    );
-                                }
-                            } else {
-                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                                self.instant_diagnostics
-                                    .insert(path.clone(), (stored_version, items));
-                            }
-
-                            if language.is_none() || is_ty {
-                                self.mark_diagnostics_changed();
-                            }
-                            self.last_change = None;
-                            diagnostics_replaced = true;
-                        } else {
-                            items.clear();
-                        }
-                    }
-                }
+                } => self.poll_diagnostics_event(
+                    event_index,
+                    server,
+                    path,
+                    version,
+                    items,
+                    result_id,
+                    &diagnostic_roots,
+                    &mut batch_messages,
+                    &mut received_diagnostics,
+                    &mut diagnostics_replaced,
+                ),
                 LspEvent::StatusChanged { server, status } => {
-                    if *server == LspServerKind::Dart {
-                        if *status == LspServerStatus::Missing {
-                            self.mark_dart_missing();
-                        }
-                        continue;
-                    }
-                    if *server == LspServerKind::RustAnalyzer {
-                        continue;
-                    }
-                    if *server == LspServerKind::Ty {
-                        self.ty_status = status.clone();
-                        if *status == LspServerStatus::Running {
-                            self.ty_unavailable = false;
-                            self.ty_workspace_diag_dirty = true;
-                        } else if *status == LspServerStatus::Starting
-                            || *status == LspServerStatus::Crashed
-                            || *status == LspServerStatus::Missing
-                            || *status == LspServerStatus::Disabled
-                        {
-                            self.ty_workspace_diag_pending = None;
-                            if matches!(
-                                status,
-                                LspServerStatus::Disabled | LspServerStatus::Missing
-                            ) {
-                                self.ty_unavailable = true;
-                                self.ty_process = None;
-                            }
-                        }
-                    } else {
-                        self.python_status = status.clone();
-                        if *status == LspServerStatus::Running {
-                            self.ruff_unavailable = false;
-                            self.ruff_workspace_diag_dirty = true;
-                        } else if matches!(
-                            status,
-                            LspServerStatus::Disabled | LspServerStatus::Missing
-                        ) {
-                            self.ruff_unavailable = true;
-                            self.python = None;
-                            self.ruff_workspace_diag_rx = None;
-                            self.ruff_workspace_diag_pending = false;
-                            self.ruff_workspace_diag_dirty = false;
-                        }
-                    }
+                    self.poll_status_changed_event(server, status);
                 }
                 LspEvent::ConfigurationServed { server } => {
                     if *server == LspServerKind::Ty {
@@ -385,24 +424,7 @@ impl LspManager {
                     trim_lsp_logs(logs, now);
                 }
                 LspEvent::ServerStatus { server, quiescent, health, message } => {
-                    if *server != LspServerKind::RustAnalyzer {
-                        continue;
-                    }
-                    self.rust.apply_server_status(!*quiescent, *health);
-                    if *health == rooted_language::ServerHealth::Error
-                        && message.as_ref() != self.rust_last_health_message.as_ref()
-                        && let Some(message) = message
-                    {
-                        self.server_logs.entry(RUST_ANALYZER_SERVER.program)
-                            .or_default()
-                            .push(LogEntry {
-                                text: format!("[LSP] {message}"),
-                                spans: Vec::new(),
-                                folds: Vec::new(),
-                                created_at: Instant::now(),
-                            });
-                    }
-                    self.rust_last_health_message = message.clone();
+                    self.poll_server_status_event(server, *quiescent, *health, message);
                 }
                 _ => {}
             }
@@ -426,7 +448,6 @@ impl LspManager {
             self.prune_diag_text_pool();
             self.rebuild_diagnostic_summary();
             self.dirty_diagnostics = false;
-            self.diagnostics_committed_this_poll = true;
         } else {
             self.finish_diagnostics_poll(diagnostics_replaced);
         }
@@ -609,6 +630,7 @@ impl LspManager {
         // Every visible diagnostics change passes through here, including
         // paths that clear the dirty flag themselves (workspace pruning).
         self.diagnostic_generation = self.diagnostic_generation.wrapping_add(1);
+        self.diagnostics_committed_this_poll = true;
         let mut ancestor_severities: HashMap<PathBuf, DiagSeverity> = HashMap::new();
         let mut total_counts = (0usize, 0usize);
         for path in self.diagnostic_paths() {

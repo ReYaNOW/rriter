@@ -1,6 +1,7 @@
 use crate::headless::tests_support::{
     assert_ui_y_integral, click_ui, dump, git_fixture, has_ui, run_script, sample_file, scratch_dir,
-    install_fake_ty, session_for_test, shell_failed, ui_center, wait_until,
+    install_fake_ty, seed_lsp_diagnostics, session_for_test, shell_failed, ui_center, wait_until,
+    workspace_with_explorer,
 };
 
 fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
@@ -491,6 +492,56 @@ fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist()
         .unwrap_or_else(|| panic!("diagnostic copy button missing: {state}"));
     click(&mut session, &copy_id);
     assert!(session.app.ide_panel.diag_copied_idx.is_some(), "diagnostic copy control did not run");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_status_diagnostics_redraw_after_deferred_summary_rebuild() {
+    let dir = scratch_dir("ui-lsp-diagnostic-summary-redraw");
+    let file = dir.join("main.py");
+    std::fs::write(&file, "def fixture():\n    return value\n").unwrap();
+    let mut session = workspace_with_explorer(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    seed_lsp_diagnostics(
+        &mut session,
+        vec![dir.clone()],
+        vec![(
+            file,
+            vec![crate::lsp::Diagnostic {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 8,
+                severity: crate::lsp::DiagSeverity::Error,
+                code: None,
+                code_href: None,
+                message: std::sync::Arc::from("deferred status diagnostic"),
+                source: Some(std::sync::Arc::from("headless-test")),
+                tags: crate::lsp::DiagTags::NONE,
+                extra: None,
+            }],
+        )],
+    );
+    if let Some(lsp) = session.app.lsp.as_mut() {
+        lsp.last_change = Some(std::time::Instant::now());
+    }
+    let _ = run_script(&mut session, b"settle 100\n");
+
+    let lines = run_script(&mut session, b"wait 3200\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let frames = lines[0]
+        .strip_prefix("ok frames=")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or_else(|| panic!("unexpected wait response: {lines:?}"));
+    assert!(frames > 0, "deferred diagnostic summary did not request a frame: {lines:?}");
+
+    let state = dump(&mut session);
+    assert!(state["diagnostics"]["errors"].as_u64().unwrap_or(0) > 0, "status count missing: {state}");
+    assert!(session.app.lsp.as_ref().is_some_and(|lsp| {
+        !lsp.dirty_diagnostics
+            && lsp.diagnostic_severity_under_path(&dir) == Some(crate::lsp::DiagSeverity::Error)
+    }), "explorer directory severity missing after summary rebuild");
+    assert!(has_ui(&state, "StatusDiagnostics"), "status diagnostics control missing: {state}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
