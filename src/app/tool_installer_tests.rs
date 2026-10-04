@@ -1125,8 +1125,124 @@ fn rust_analyzer_archive_constants_match_supported_platform_policy() {
         assert_eq!(archive.sha256.len(), 64);
         assert!(archive.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
-    #[cfg(not(windows))]
     assert!(crate::lsp::rust_analyzer_archive_for_platform().is_some());
-    #[cfg(windows)]
-    assert!(crate::lsp::rust_analyzer_archive_for_platform().is_none());
+    assert!(crate::lsp::RUST_ANALYZER_ARCHIVES.iter().any(|archive| {
+        archive.triple == "x86_64-pc-windows-msvc"
+            && archive.asset.ends_with(".zip")
+            && archive.sha256 == "ad78fb368525404c6ac09c4bba33e90797902ce1f5a17db0925c695cae096ccc"
+    }));
+    assert!(crate::lsp::RUST_ANALYZER_ARCHIVES.iter().any(|archive| {
+        archive.triple == "aarch64-pc-windows-msvc"
+            && archive.asset.ends_with(".zip")
+            && archive.sha256 == "f63c7fc9a00a7e863b21b5e0b77cda7ff61aaa9f6f83b0affa5bbb525be7c43c"
+    }));
+}
+
+#[test]
+fn rust_analyzer_zip_install_verifies_extracts_and_cleans_failed_or_cancelled_attempts() {
+    fn zip_bytes(name: &[u8], contents: &[u8], method: u16, bad_crc: bool) -> Vec<u8> {
+        let mut compressed = Vec::new();
+        if method == 0 {
+            compressed.extend_from_slice(contents);
+        } else {
+            let mut encoder = flate2::write::DeflateEncoder::new(
+                &mut compressed,
+                flate2::Compression::default(),
+            );
+            encoder.write_all(contents).unwrap();
+            encoder.finish().unwrap();
+        }
+        let mut crc = flate2::Crc::new();
+        crc.update(contents);
+        let crc = crc.sum() ^ u32::from(bad_crc);
+        let mut zip = Vec::new();
+        zip.extend_from_slice(b"PK\x03\x04");
+        zip.extend_from_slice(&20u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&method.to_le_bytes());
+        zip.extend_from_slice(&[0; 4]);
+        zip.extend_from_slice(&crc.to_le_bytes());
+        zip.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(contents.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(name);
+        zip.extend_from_slice(&compressed);
+        let central_offset = zip.len() as u32;
+        zip.extend_from_slice(b"PK\x01\x02");
+        zip.extend_from_slice(&[20, 0, 20, 0]);
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&method.to_le_bytes());
+        zip.extend_from_slice(&[0; 4]);
+        zip.extend_from_slice(&crc.to_le_bytes());
+        zip.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(contents.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        zip.extend_from_slice(&[0; 8]);
+        zip.extend_from_slice(&0u32.to_le_bytes());
+        zip.extend_from_slice(&0u32.to_le_bytes());
+        zip.extend_from_slice(name);
+        let central_size = zip.len() as u32 - central_offset;
+        zip.extend_from_slice(b"PK\x05\x06");
+        zip.extend_from_slice(&[0; 4]);
+        zip.extend_from_slice(&1u16.to_le_bytes());
+        zip.extend_from_slice(&1u16.to_le_bytes());
+        zip.extend_from_slice(&central_size.to_le_bytes());
+        zip.extend_from_slice(&central_offset.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip
+    }
+
+    use std::io::Write;
+    let (data, _) = test_roots("rust-analyzer-zip");
+    let root = data.join("managed");
+    fs::create_dir_all(&root).unwrap();
+    let executable = b"MZ fake rust-analyzer";
+    for (label, method) in [("stored", 0), ("deflate", 8)] {
+        let archive = data.join(format!("{label}.zip"));
+        fs::write(&archive, zip_bytes(b"rust-analyzer.exe", executable, method, false)).unwrap();
+        let destination = root.join(label).join("rust-analyzer.exe");
+        let hash = sha256_file_hex(&archive).unwrap();
+        assert_eq!(
+            install_rust_analyzer_from_zip(&archive, &hash, &destination, &AtomicBool::new(false), &mut |_, _| {}).unwrap(),
+            destination
+        );
+        assert_eq!(fs::read(&destination).unwrap(), executable);
+    }
+
+    let bad_crc_archive = data.join("bad-crc.zip");
+    fs::write(&bad_crc_archive, zip_bytes(b"rust-analyzer.exe", executable, 8, true)).unwrap();
+    let bad_crc_destination = root.join("bad-crc").join("rust-analyzer.exe");
+    let bad_crc_hash = sha256_file_hex(&bad_crc_archive).unwrap();
+    assert!(install_rust_analyzer_from_zip(
+        &bad_crc_archive, &bad_crc_hash, &bad_crc_destination, &AtomicBool::new(false), &mut |_, _| {},
+    ).is_err());
+    assert!(!bad_crc_destination.exists());
+    assert_eq!(fs::read_dir(bad_crc_destination.parent().unwrap()).unwrap().count(), 0);
+
+    let missing_archive = data.join("missing.zip");
+    fs::write(&missing_archive, zip_bytes(b"other.exe", executable, 0, false)).unwrap();
+    let missing_destination = root.join("missing").join("rust-analyzer.exe");
+    let missing_hash = sha256_file_hex(&missing_archive).unwrap();
+    assert!(install_rust_analyzer_from_zip(
+        &missing_archive, &missing_hash, &missing_destination, &AtomicBool::new(false), &mut |_, _| {},
+    ).unwrap_err().contains("не содержит rust-analyzer.exe"));
+    assert!(!missing_destination.exists());
+    assert_eq!(fs::read_dir(missing_destination.parent().unwrap()).unwrap().count(), 0);
+
+    let cancelled_archive = data.join("cancelled.zip");
+    fs::write(&cancelled_archive, zip_bytes(b"rust-analyzer.exe", executable, 8, false)).unwrap();
+    let cancelled_destination = root.join("cancelled").join("rust-analyzer.exe");
+    let cancelled_hash = sha256_file_hex(&cancelled_archive).unwrap();
+    let cancelled = AtomicBool::new(false);
+    assert_eq!(
+        install_rust_analyzer_from_zip(
+            &cancelled_archive, &cancelled_hash, &cancelled_destination, &cancelled,
+            &mut |phase, _| if phase == ToolInstallPhase::Extracting { cancelled.store(true, Ordering::Release) },
+        ).unwrap_err(),
+        INSTALL_CANCELLED_MESSAGE
+    );
+    assert!(!cancelled_destination.exists());
+    assert_eq!(fs::read_dir(cancelled_destination.parent().unwrap()).unwrap().count(), 0);
+    let _ = fs::remove_dir_all(data.parent().unwrap());
 }

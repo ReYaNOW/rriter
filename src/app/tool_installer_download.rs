@@ -641,6 +641,7 @@ const MAX_PDFIUM_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PDFIUM_LIB_BYTES: u64 = 256 * 1024 * 1024;
 const PDFIUM_VERSION_DIR_PREFIX: &str = "chromium-";
 const MAX_RUST_ANALYZER_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_RUST_ANALYZER_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 
 struct RustAnalyzerInstallPlan {
     url: String,
@@ -679,19 +680,34 @@ fn install_rust_analyzer(
             MAX_RUST_ANALYZER_ARCHIVE_BYTES,
             "rust-analyzer",
         )?;
+        let executable_name = if plan.asset.ends_with(".zip") {
+            "rust-analyzer.exe"
+        } else {
+            "rust-analyzer"
+        };
         let destination = crate::platform::data_dir()
             .join("tools")
             .join("managed")
             .join(crate::platform::MANAGED_RUST_ANALYZER_DIR)
             .join(plan.tag)
-            .join("rust-analyzer");
-        let installed = install_rust_analyzer_from_gz(
-            &archive_path,
-            plan.sha256,
-            &destination,
-            cancel,
-            &mut |phase, detail| reporter.phase(phase, detail),
-        )?;
+            .join(executable_name);
+        let installed = if plan.asset.ends_with(".zip") {
+            install_rust_analyzer_from_zip(
+                &archive_path,
+                plan.sha256,
+                &destination,
+                cancel,
+                &mut |phase: ToolInstallPhase, detail: &str| reporter.phase(phase, detail),
+            )?
+        } else {
+            install_rust_analyzer_from_gz(
+                &archive_path,
+                plan.sha256,
+                &destination,
+                cancel,
+                &mut |phase: ToolInstallPhase, detail: &str| reporter.phase(phase, detail),
+            )?
+        };
         Ok(ToolInstallOutcome {
             paths: vec![(ToolKind::RustAnalyzer, installed)],
         })
@@ -713,6 +729,36 @@ fn install_rust_analyzer_from_gz(
     destination: &Path,
     cancel: &AtomicBool,
     on_phase: &mut dyn FnMut(ToolInstallPhase, &str),
+) -> Result<PathBuf, String> {
+    install_rust_analyzer_archive(archive, expected_sha256, destination, cancel, on_phase, |output| {
+        let input = fs::File::open(archive)
+            .map_err(|error| format!("Не удалось открыть архив rust-analyzer: {error}"))?;
+        let mut decoder = flate2::read::GzDecoder::new(io::BufReader::new(input));
+        copy_rust_analyzer_binary(&mut decoder, output, cancel).map(|_| ())
+    })
+}
+
+fn install_rust_analyzer_from_zip(
+    archive: &Path,
+    expected_sha256: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    on_phase: &mut dyn FnMut(ToolInstallPhase, &str),
+) -> Result<PathBuf, String> {
+    install_rust_analyzer_archive(archive, expected_sha256, destination, cancel, on_phase, |output| {
+        let bytes = fs::read(archive)
+            .map_err(|error| format!("Не удалось прочитать архив rust-analyzer: {error}"))?;
+        extract_rust_analyzer_zip(&bytes, output, cancel)
+    })
+}
+
+fn install_rust_analyzer_archive(
+    archive: &Path,
+    expected_sha256: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    on_phase: &mut dyn FnMut(ToolInstallPhase, &str),
+    extract: impl FnOnce(&mut fs::File) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
     check_cancelled(cancel)?;
     on_phase(ToolInstallPhase::Verifying, "Проверка контрольной суммы архива");
@@ -737,27 +783,12 @@ fn install_rust_analyzer_from_gz(
         crate::platform::next_operation_id()
     ));
     let result = (|| {
-        let input = fs::File::open(archive)
-            .map_err(|error| format!("Не удалось открыть архив rust-analyzer: {error}"))?;
-        let mut decoder = flate2::read::GzDecoder::new(io::BufReader::new(input));
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)
             .map_err(|error| format!("Не удалось создать временный файл rust-analyzer: {error}"))?;
-        let mut buffer = [0u8; 64 * 1024];
-        loop {
-            check_cancelled(cancel)?;
-            let read = decoder
-                .read(&mut buffer)
-                .map_err(|error| format!("Не удалось распаковать rust-analyzer: {error}"))?;
-            if read == 0 {
-                break;
-            }
-            output
-                .write_all(&buffer[..read])
-                .map_err(|error| format!("Не удалось записать rust-analyzer: {error}"))?;
-        }
+        extract(&mut output)?;
         output
             .flush()
             .map_err(|error| format!("Не удалось сохранить rust-analyzer: {error}"))?;
@@ -778,6 +809,129 @@ fn install_rust_analyzer_from_gz(
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+fn copy_rust_analyzer_binary(
+    input: &mut dyn Read,
+    output: &mut fs::File,
+    cancel: &AtomicBool,
+) -> Result<(u32, u64), String> {
+    let mut crc = flate2::Crc::new();
+    let mut size = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        check_cancelled(cancel)?;
+        let read = input
+            .read(&mut buffer)
+            .map_err(|error| format!("Не удалось распаковать rust-analyzer: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        size = size.saturating_add(read as u64);
+        if size > MAX_RUST_ANALYZER_BINARY_BYTES {
+            return Err("распакованный rust-analyzer превышает допустимый размер".to_string());
+        }
+        crc.update(&buffer[..read]);
+        output
+            .write_all(&buffer[..read])
+            .map_err(|error| format!("Не удалось записать rust-analyzer: {error}"))?;
+    }
+    Ok((crc.sum(), size))
+}
+
+fn extract_rust_analyzer_zip(
+    bytes: &[u8],
+    output: &mut fs::File,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    const EOCD: &[u8; 4] = b"PK\x05\x06";
+    const CENTRAL: &[u8; 4] = b"PK\x01\x02";
+    const LOCAL: &[u8; 4] = b"PK\x03\x04";
+    let eocd_start = bytes.len().saturating_sub(22 + u16::MAX as usize);
+    let eocd = bytes[eocd_start..]
+        .windows(4)
+        .rposition(|signature| signature == EOCD)
+        .map(|offset| eocd_start + offset)
+        .ok_or_else(|| "ZIP rust-analyzer повреждён: отсутствует каталог".to_string())?;
+    let eocd_fields = zip_range(bytes, eocd, 22)?;
+    let disk = zip_u16(eocd_fields, 4)?;
+    let central_disk = zip_u16(eocd_fields, 6)?;
+    let entries = zip_u16(eocd_fields, 10)?;
+    let central_size = zip_u32(eocd_fields, 12)? as usize;
+    let central_offset = zip_u32(eocd_fields, 16)? as usize;
+    if disk != 0 || central_disk != 0 || entries == u16::MAX || central_size == u32::MAX as usize {
+        return Err("ZIP rust-analyzer: многотомные архивы и ZIP64 не поддерживаются".to_string());
+    }
+    zip_range(bytes, central_offset, central_size)?;
+    let mut cursor = central_offset;
+    let mut selected = None;
+    for _ in 0..entries {
+        check_cancelled(cancel)?;
+        let header = zip_range(bytes, cursor, 46)?;
+        if &header[..4] != CENTRAL {
+            return Err("ZIP rust-analyzer повреждён: неверная запись каталога".to_string());
+        }
+        let name_len = zip_u16(header, 28)? as usize;
+        let extra_len = zip_u16(header, 30)? as usize;
+        let comment_len = zip_u16(header, 32)? as usize;
+        let record_len = 46usize.saturating_add(name_len).saturating_add(extra_len).saturating_add(comment_len);
+        let record = zip_range(bytes, cursor, record_len)?;
+        if &record[46..46 + name_len] == b"rust-analyzer.exe" {
+            selected = Some((
+                zip_u16(header, 8)?, zip_u16(header, 10)?, zip_u32(header, 16)?,
+                zip_u32(header, 20)?, zip_u32(header, 24)?, zip_u32(header, 42)?,
+            ));
+            break;
+        }
+        cursor = cursor.saturating_add(record_len);
+    }
+    let (flags, method, expected_crc, compressed_size, uncompressed_size, local_offset) = selected
+        .ok_or_else(|| "ZIP rust-analyzer не содержит rust-analyzer.exe".to_string())?;
+    if flags & 1 != 0 || flags & 0x40 != 0 {
+        return Err("ZIP rust-analyzer использует неподдерживаемое шифрование".to_string());
+    }
+    if uncompressed_size as u64 > MAX_RUST_ANALYZER_BINARY_BYTES {
+        return Err("распакованный rust-analyzer превышает допустимый размер".to_string());
+    }
+    let local = zip_range(bytes, local_offset as usize, 30)?;
+    if &local[..4] != LOCAL {
+        return Err("ZIP rust-analyzer повреждён: неверный заголовок файла".to_string());
+    }
+    let local_name_len = zip_u16(local, 26)? as usize;
+    let local_extra_len = zip_u16(local, 28)? as usize;
+    let local_name = zip_range(bytes, local_offset as usize + 30, local_name_len)?;
+    if local_name != b"rust-analyzer.exe"
+        || zip_u16(local, 6)? != flags
+        || zip_u16(local, 8)? != method
+    {
+        return Err("ZIP rust-analyzer повреждён: заголовки файла не совпадают".to_string());
+    }
+    let data_offset = (local_offset as usize).saturating_add(30).saturating_add(local_name_len).saturating_add(local_extra_len);
+    let compressed = zip_range(bytes, data_offset, compressed_size as usize)?;
+    let mut decoder: Box<dyn Read + '_> = match method {
+        0 if compressed_size == uncompressed_size => Box::new(io::Cursor::new(compressed)),
+        0 => return Err("ZIP rust-analyzer: неверный размер stored-файла".to_string()),
+        8 => Box::new(flate2::read::DeflateDecoder::new(io::Cursor::new(compressed))),
+        _ => return Err(format!("ZIP rust-analyzer: неподдерживаемый метод сжатия {method}")),
+    };
+    let (actual_crc, actual_size) = copy_rust_analyzer_binary(&mut decoder, output, cancel)?;
+    if actual_crc != expected_crc || actual_size != uncompressed_size as u64 {
+        return Err("ZIP rust-analyzer повреждён: контрольная сумма или размер не совпадает".to_string());
+    }
+    Ok(())
+}
+
+fn zip_range(bytes: &[u8], offset: usize, len: usize) -> Result<&[u8], String> {
+    let end = offset.checked_add(len).ok_or_else(|| "ZIP rust-analyzer повреждён: неверная длина".to_string())?;
+    bytes.get(offset..end).ok_or_else(|| "ZIP rust-analyzer обрезан".to_string())
+}
+
+fn zip_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
+    Ok(u16::from_le_bytes(zip_range(bytes, offset, 2)?.try_into().map_err(|_| "ZIP rust-analyzer обрезан")?))
+}
+
+fn zip_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
+    Ok(u32::from_le_bytes(zip_range(bytes, offset, 4)?.try_into().map_err(|_| "ZIP rust-analyzer обрезан")?))
 }
 
 fn download_archive(

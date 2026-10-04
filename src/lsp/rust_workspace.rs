@@ -34,6 +34,16 @@ pub const RUST_ANALYZER_ARCHIVES: &[RustAnalyzerArchive] = &[
         asset: "rust-analyzer-aarch64-apple-darwin.gz",
         sha256: "54ec873d8996e2c127d758bf45d4eacb6d3371dae4f6f6d5d3f05cedbae5fd59",
     },
+    RustAnalyzerArchive {
+        triple: "x86_64-pc-windows-msvc",
+        asset: "rust-analyzer-x86_64-pc-windows-msvc.zip",
+        sha256: "ad78fb368525404c6ac09c4bba33e90797902ce1f5a17db0925c695cae096ccc",
+    },
+    RustAnalyzerArchive {
+        triple: "aarch64-pc-windows-msvc",
+        asset: "rust-analyzer-aarch64-pc-windows-msvc.zip",
+        sha256: "f63c7fc9a00a7e863b21b5e0b77cda7ff61aaa9f6f83b0affa5bbb525be7c43c",
+    },
 ];
 
 pub fn rust_analyzer_archive_for_platform() -> Option<&'static RustAnalyzerArchive> {
@@ -42,6 +52,8 @@ pub fn rust_analyzer_archive_for_platform() -> Option<&'static RustAnalyzerArchi
         ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
         ("x86_64", "macos") => "x86_64-apple-darwin",
         ("aarch64", "macos") => "aarch64-apple-darwin",
+        ("x86_64", "windows") => "x86_64-pc-windows-msvc",
+        ("aarch64", "windows") => "aarch64-pc-windows-msvc",
         _ => return None,
     };
     RUST_ANALYZER_ARCHIVES.iter().find(|archive| archive.triple == triple)
