@@ -172,3 +172,34 @@ fn headless_rust_server_status_busy_flag() {
     });
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn headless_rust_settings_picks_analyzer_override_and_starts_it() {
+    let (dir, file, mut session) = rust_crate_session("rust-settings-picked-path");
+    let _reset = ToolPathsReset;
+    let executable = install_rust_fake(&mut session, "rust-settings-picked-path", "rust_analyzer_initlog");
+    open_settings_tab(&mut session, 1);
+    scroll_to_rust_settings(&mut session);
+    let pick_id = format!("SettingsToolPick({})", ToolKind::RustAnalyzer.index());
+    let clear_id = format!("SettingsToolClear({})", ToolKind::RustAnalyzer.index());
+    assert!(has_ui(&dump(&mut session), &clear_id), "configured analyzer should expose Clear before picking: {}", dump(&mut session));
+    click_ui(&mut session, &clear_id);
+
+    session.app.external_requests.queue_picker_answer(vec![executable.clone()]);
+    click_ui(&mut session, &pick_id);
+    wait_until(&mut session, 5000, "Rust analyzer path picked in Settings", |session| {
+        session.app.tool_paths.get(ToolKind::RustAnalyzer) == Some(executable.as_path())
+    });
+    let resolution = platform::resolve_tool_kind(ToolKind::RustAnalyzer);
+    assert_eq!(resolution.configured_path.as_deref(), Some(executable.as_path()), "configured Rust analyzer path: {resolution:?}");
+    assert_eq!(resolution.source_label(ToolKind::RustAnalyzer), Some("настройки"), "Rust analyzer source: {resolution:?}");
+    assert!(has_ui(&dump(&mut session), &pick_id), "Rust analyzer Settings row missing after picker");
+
+    open_file(&mut session, &file);
+    wait_until(&mut session, 8000, "picked Rust analyzer server", |session| {
+        rust_status(session) == Some(LspServerStatus::Running)
+    });
+    assert_eq!(std::fs::read_to_string(executable.with_extension("starts")).ok().as_deref(), Some("1"));
+    assert!(!init_log(&executable).is_empty(), "picked fake server did not receive initialization");
+    let _ = std::fs::remove_dir_all(dir);
+}
