@@ -23,7 +23,7 @@ fn primary_s() -> &'static str {
     }
 }
 
-fn begin_recording(session: &mut HeadlessSession, command: Command, filter: &str) {
+pub(super) fn begin_recording(session: &mut HeadlessSession, command: Command, filter: &str) {
     open_settings_tab(session, 6);
     click_ui(session, "SettingsKeymapFilter");
     let keys = filter

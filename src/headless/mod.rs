@@ -148,9 +148,19 @@ mod ui_tests_hotkeys_characterization_git_settings;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_git_commands;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_database_commands;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys_settings;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_hotkeys_settings_edit;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_persistence;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_feature_commands;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_hotkeys_settings_hints;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 

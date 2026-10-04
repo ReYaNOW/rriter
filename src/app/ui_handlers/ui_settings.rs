@@ -10,6 +10,27 @@ impl App {
         {
             self.keymap_settings.cancel_recording();
         }
+        let scrollbar = if id == UiId::SettingsKeymapScrollY {
+            self.ui_registry.rect_for(UiId::SettingsKeymapScrollY).map(|rect| {
+                let scale = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                (rect, scale, pointer)
+            })
+        } else { None };
+        if let Some(keymap_click) = self.keymap_settings.handle_settings_click(
+            id, &self.keymap, &self.keymap_overrides, scrollbar,
+        ) {
+            if let Some(overrides) = keymap_click.overrides { self.set_keymap_overrides(overrides); }
+            if keymap_click.reset_all && self.confirm_dialog.request(crate::app::PendingAction::ResetKeymap) {
+                self.request_main_redraw();
+            }
+            if keymap_click.redraw
+                && let Some(window) = self.window.as_ref()
+            {
+                window.request_redraw();
+            }
+            return UiClickFlow::Handled;
+        }
         match id {
 
             // Settings tabs
@@ -17,58 +38,6 @@ impl App {
                 self.keymap_settings.cancel_recording();
                 self.settings_tab = idx;
                 if let Some(window) = self.window.as_ref() { window.request_redraw(); }
-            }
-            UiId::SettingsKeymapFilter => {
-                self.keymap_settings.filter_focused = true;
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
-            }
-            UiId::SettingsKeymapAdd(index) => {
-                if let Some(info) = crate::keymap::COMMANDS.get(index) {
-                    self.keymap_settings.begin_recording(info.command);
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
-                }
-            }
-            UiId::SettingsKeymapRemove(index, chord_index) => {
-                if let Some(info) = crate::keymap::COMMANDS.get(index)
-                    && let Some(chord) = self.keymap.chords(info.command).get(chord_index).copied()
-                {
-                    let mut overrides = self.keymap_overrides.clone();
-                    overrides.remove_chord(crate::platform::CURRENT_PLATFORM, info.command, chord);
-                    self.set_keymap_overrides(overrides);
-                }
-            }
-            UiId::SettingsKeymapReset(index) => {
-                if let Some(info) = crate::keymap::COMMANDS.get(index) {
-                    let mut overrides = self.keymap_overrides.clone();
-                    overrides.reset_command(info.command);
-                    self.set_keymap_overrides(overrides);
-                }
-            }
-            UiId::SettingsKeymapResetAll => {
-                self.keymap_settings.cancel_recording();
-                if self.confirm_dialog.request(crate::app::PendingAction::ResetKeymap) {
-                    self.request_main_redraw();
-                }
-            }
-            UiId::SettingsKeymapConflictCancel => {
-                self.keymap_settings.cancel_recording();
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
-            }
-            UiId::SettingsKeymapConflictAccept => {
-                if let Some((command, chord, owners)) = self.keymap_settings.confirm_conflict() {
-                    let mut overrides = self.keymap_overrides.clone();
-                    overrides.reassign(crate::platform::CURRENT_PLATFORM, chord, command, &owners);
-                    self.set_keymap_overrides(overrides);
-                }
-            }
-            UiId::SettingsKeymapScrollY => {
-                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsKeymapScrollY) {
-                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
-                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
-                    let bar = crate::render_view::settings_ui::settings_scrollbar(rect, rect.3, self.keymap_settings.max_scroll, self.keymap_settings.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
-                    let geometry = bar.geometry(s);
-                    crate::app::mouse::press_scrollbar(&mut self.keymap_settings.scroll, geometry, 0.0, pointer);
-                }
             }
             UiId::SettingsEditorCtrlWheelAdjust(delta) => {
                 let next = crate::normalize_ctrl_wheel_multiplier(

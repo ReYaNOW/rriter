@@ -89,6 +89,46 @@ pub enum ServerHealth {
     Error,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RootedLanguageState {
+    Disabled,
+    DisabledMissing,
+    Enabled,
+    EnabledMissing,
+}
+
+impl RootedLanguageState {
+    fn new(enabled: bool) -> Self {
+        if enabled { Self::Enabled } else { Self::Disabled }
+    }
+
+    fn enabled(self) -> bool {
+        matches!(self, Self::Enabled | Self::EnabledMissing)
+    }
+
+    fn missing(self) -> bool {
+        matches!(self, Self::DisabledMissing | Self::EnabledMissing)
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        *self = match (enabled, self.missing()) {
+            (false, false) => Self::Disabled,
+            (false, true) => Self::DisabledMissing,
+            (true, false) => Self::Enabled,
+            (true, true) => Self::EnabledMissing,
+        };
+    }
+
+    fn set_missing(&mut self, missing: bool) {
+        *self = match (self.enabled(), missing) {
+            (false, false) => Self::Disabled,
+            (false, true) => Self::DisabledMissing,
+            (true, false) => Self::Enabled,
+            (true, true) => Self::EnabledMissing,
+        };
+    }
+}
+
 pub struct RootedWorkspaces {
     pub lang: RootedLanguage,
     open_files: HashMap<PathKey, OpenRootedFile>,
@@ -99,8 +139,7 @@ pub struct RootedWorkspaces {
     status: LspServerStatus,
     health: Option<ServerHealth>,
     busy: bool,
-    enabled: bool,
-    missing: bool,
+    state: RootedLanguageState,
     root_statuses: HashMap<PathKey, LspServerStatus>,
     diagnostics_changed: bool,
 }
@@ -121,8 +160,7 @@ impl RootedWorkspaces {
             status: LspServerStatus::Disabled,
             health: None,
             busy: false,
-            enabled,
-            missing: false,
+            state: RootedLanguageState::new(enabled),
             root_statuses: HashMap::new(),
             diagnostics_changed: false,
         }
@@ -132,9 +170,9 @@ impl RootedWorkspaces {
     pub fn status_ref(&self) -> &LspServerStatus { &self.status }
     pub fn health(&self) -> Option<ServerHealth> { self.health }
     pub fn busy(&self) -> bool { self.busy }
-    pub fn enabled(&self) -> bool { self.enabled }
+    pub fn enabled(&self) -> bool { self.state.enabled() }
     pub fn missing(&self) -> bool {
-        self.missing || self.root_statuses.values().any(|status| *status == LspServerStatus::Missing)
+        self.state.missing() || self.root_statuses.values().any(|status| *status == LspServerStatus::Missing)
     }
     pub fn init_options(&self) -> Option<&serde_json::Value> { self.init_options.as_ref() }
     pub fn open_files(&self) -> &HashMap<PathKey, OpenRootedFile> { &self.open_files }
@@ -145,7 +183,7 @@ impl RootedWorkspaces {
     }
 
     pub fn clear_missing(&mut self) {
-        self.missing = false;
+        self.state.set_missing(false);
         self.root_statuses.clear();
         self.recompute_status(false);
     }
@@ -306,7 +344,7 @@ impl RootedWorkspaces {
     }
 
     pub fn mark_missing(&mut self) -> bool {
-        self.missing = true;
+        self.state.set_missing(true);
         let keys = self.roots.keys().cloned().collect::<Vec<_>>();
         for key in keys { self.stop_root(&key); }
         self.recompute_status(false);
@@ -351,7 +389,7 @@ impl RootedWorkspaces {
     }
 
     pub fn set_enabled(&mut self, enabled: bool) -> bool {
-        self.enabled = enabled;
+        self.state.set_enabled(enabled);
         if !enabled {
             let keys = self.roots.keys().cloned().collect::<Vec<_>>();
             for key in keys { self.stop_root(&key); }
@@ -386,7 +424,7 @@ impl RootedWorkspaces {
     }
 
     fn ensure_process(&mut self, root: &PathKey, executable: Option<PathBuf>, ui_waker: &UiWaker) {
-        if !self.enabled || self.missing { return; }
+        if !self.state.enabled() || self.state.missing() { return; }
         let Some(state) = self.roots.get_mut(root) else { return; };
         if state.process.is_some() { return; }
         let Some(executable) = executable else {
@@ -401,8 +439,8 @@ impl RootedWorkspaces {
     }
 
     pub(super) fn recompute_status(&mut self, has_pending: bool) {
-        self.status = if !self.enabled { LspServerStatus::Disabled }
-        else if self.missing { LspServerStatus::Missing }
+        self.status = if !self.state.enabled() { LspServerStatus::Disabled }
+        else if self.state.missing() { LspServerStatus::Missing }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Crashed) { LspServerStatus::Crashed }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Starting) || has_pending { LspServerStatus::Starting }
         else if self.root_statuses.values().any(|status| *status == LspServerStatus::Running)
@@ -511,11 +549,11 @@ mod tests {
         state.root_statuses.insert(other, LspServerStatus::Starting);
         state.recompute_status(false);
         assert_eq!(state.status(), LspServerStatus::Starting);
-        state.enabled = false;
+        state.state.set_enabled(false);
         state.recompute_status(false);
         assert_eq!(state.status(), LspServerStatus::Disabled);
-        state.enabled = true;
-        state.missing = true;
+        state.state.set_enabled(true);
+        state.state.set_missing(true);
         state.recompute_status(false);
         assert_eq!(state.status(), LspServerStatus::Missing);
     }

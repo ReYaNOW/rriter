@@ -304,7 +304,10 @@ impl App {
             }
         } else if force_close_autocomplete {
             self.close_autocomplete();
-        } else if should_trigger_autocomplete && self.file_extension != "dart" {
+        } else if should_trigger_autocomplete && !self.lsp_context_completion_active() {
+            // LSP-context languages with a running server are served by
+            // `request_lsp_autocomplete` below; running the Ty flow too would
+            // send a second, discarded completion request.
             if let Some(trigger) = ty_completion_trigger {
                 self.request_ide_autocomplete(AutocompleteMode::TyContext, Some(trigger));
             } else if self.autocomplete_active
@@ -375,7 +378,7 @@ impl App {
         if should_notify_lsp {
             self.last_sent_version = self.editor.version;
         }
-        if should_trigger_autocomplete && self.file_extension == "dart" {
+        if should_trigger_autocomplete && self.lsp_context_completion_active() {
             self.request_lsp_autocomplete(ty_completion_trigger);
         }
 
@@ -452,9 +455,19 @@ impl App {
             self.highlighter
                 .shift_insert(self.editor.cursor - inserted_len, inserted_len, Some(text));
         }
-        let trigger = (text == ".").then_some(".");
-        let wants_completion =
-            text == "." || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        // Same triggers as the key path in `handle_editor_keyboard_input`: `(`/`,`
+        // open signature help for LSP-context languages, so IME commits of them
+        // must request it as well.
+        let signature_trigger = matches!(text, "(" | ",") && self.lsp_context_completion_active();
+        let trigger = match text {
+            "." => Some("."),
+            "(" if signature_trigger => Some("("),
+            "," if signature_trigger => Some(","),
+            _ => None,
+        };
+        let wants_completion = text == "."
+            || signature_trigger
+            || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
         self.finish_editor_edit_after_input(
             false,
             false,
@@ -1166,7 +1179,7 @@ impl App {
                 }
             }
             _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorComplete, chord)) => {
-                if self.file_extension == "dart" {
+                if self.lsp_context_completion_active() {
                     self.request_lsp_autocomplete(None);
                 } else {
                     self.update_autocomplete();
@@ -1334,7 +1347,10 @@ impl App {
                         if txt == "." && !multi_cursor_active {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
-                        } else if !multi_cursor_active && self.file_extension == "dart" && matches!(txt, "(" | ",") {
+                        } else if !multi_cursor_active
+                            && matches!(txt, "(" | ",")
+                            && self.lsp_context_completion_active()
+                        {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(if txt == "(" { "(" } else { "," });
                         } else if !multi_cursor_active && txt.chars().all(|c| c.is_alphanumeric() || c == '_') {

@@ -128,6 +128,19 @@ impl LspManager {
 
     pub fn rust_status(&self) -> LspServerStatus { self.rust.status() }
 
+    /// True when the rooted server owning the open document at `abs_path`
+    /// is up. Missing, starting, crashed or disabled servers leave the
+    /// document to the Tree-sitter completion path.
+    pub fn rooted_document_server_running(&self, abs_path: &Path, ext: &str) -> bool {
+        let Some(LangRoute::Rooted(lang)) = Self::language_for_ext(ext) else {
+            return false;
+        };
+        let rooted = self.rooted(lang);
+        rooted.root_for_open_path(abs_path).is_some_and(|root| {
+            rooted.root_status(&crate::platform::PathKey::new(root)) == Some(LspServerStatus::Running)
+        })
+    }
+
     pub fn diagnostic_generation(&self) -> u64 {
         self.diagnostic_generation
     }

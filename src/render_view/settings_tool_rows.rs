@@ -606,7 +606,7 @@ impl Renderer {
         } else {
             47
         };
-        let mut status = tool_status_text(
+        let status = tool_status_text(
             kind,
             &resolution,
             dart_tool_state,
@@ -614,12 +614,6 @@ impl Renderer {
             rust_row,
             compact_path_chars,
         );
-        if kind == crate::platform::ToolKind::RustAnalyzer
-            && crate::lsp::rust_analyzer_archive_for_platform().is_none()
-            && cfg!(windows)
-        {
-            status.push_str(" · установите через rustup: rustup component add rust-analyzer");
-        }
         let status_color = tool_status_color(kind, &resolution, dart_tool_state);
 
         self.push_rounded_rect(

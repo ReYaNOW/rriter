@@ -81,7 +81,7 @@ fn python_inlay_hint_request_range(
 }
 
 fn request_python_inlay_hints_if_needed(app: &mut App) {
-    if !app.is_ide_mode || !matches!(app.file_extension.as_str(), "py" | "pyi" | "dart") {
+    if !app.is_ide_mode || !crate::lsp::has_server_for_extension(&app.file_extension) {
         clear_python_inlay_hint_state(app);
         return;
     }

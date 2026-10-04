@@ -141,7 +141,7 @@ _ if self.keymap.hit(Command::Save, chord) => { ... }         // стало
 | id | Действие | `KeyContext` | Условие применимости (иначе `Unavailable`) |
 |---|---|---|---|
 | `editor.git_diff.prev_hunk` / `next_hunk` | соседний inline Git-hunk | Editor | у активного документа есть hunks |
-| `git.stage_all`, `git.unstage_all` (через текущее подтверждение), `git.push`, `git.fetch`, `git.pull`, `git.refresh`, `git.toggle_graph`, `git.toggle_logs` | как кнопки Git-панели | Global | активный репозиторий; graph/logs — IDE-режим |
+| `git.stage_all`, `git.unstage_all` (как кнопка — без подтверждения), `git.push`, `git.fetch`, `git.pull`, `git.refresh`, `git.toggle_graph`, `git.toggle_logs` | как кнопки Git-панели | Global | активный репозиторий; graph/logs — IDE-режим |
 | `lsp.restart_server`, `lsp.fix_all` | сервер активного документа | Editor | есть сервер; fix_all — документ записываемый |
 | `api.import_openapi_file`, `api.send_request`, `api.mock.toggle_server`, `api.mock.export_openapi` | как кнопки API Client / Mock | ApiClient | есть активный запрос / конфигурация Mock |
 | `database.refresh_selected` | как кнопка БД | Global | выбрано подключение |

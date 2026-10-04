@@ -478,8 +478,8 @@ const FILE_TREE_DEBOUNCE: Duration = Duration::from_millis(300);
 /// Reads change nothing on disk: inotify reports every `open` (our own directory scan, pdfium
 /// reading an open PDF), and passing those on made each refresh trigger the next one.
 /// A close after writing still counts, as a write signal.
-fn notify_event_changes_tree(kind: &notify_debouncer_mini::notify::EventKind) -> bool {
-    use notify_debouncer_mini::notify::event::{AccessKind, AccessMode, EventKind};
+fn notify_event_changes_tree(kind: &notify::EventKind) -> bool {
+    use notify::event::{AccessKind, AccessMode, EventKind};
     match kind {
         EventKind::Access(access) => matches!(access, AccessKind::Close(AccessMode::Write)),
         _ => true,
@@ -547,9 +547,9 @@ pub(crate) fn build_file_tree_watch_paths(
     )
 }
 
-/// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
-/// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
-/// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
+/// Запускает фоновый поток watcher-а на `notify` (debounce свой, `FILE_TREE_DEBOUNCE`).
+/// Отправляет `()` в `tx` один раз на пачку событий в watched папках:
+/// спам событий ОС сворачивается в одно сообщение.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn spawn_watcher(
     paths: Vec<PathBuf>,
@@ -557,7 +557,7 @@ pub fn spawn_watcher(
     stop_rx: mpsc::Receiver<()>,
 ) -> bool {
     match crate::platform::spawn_named("rriter-file-tree-watcher", move || {
-        use notify_debouncer_mini::notify::{self, Watcher, RecursiveMode};
+        use notify::{Watcher, RecursiveMode};
 
         let (etx, erx) = mpsc::channel();
         let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn read_access_events_do_not_refresh_file_tree() {
-        use notify_debouncer_mini::notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
+        use notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
         assert!(!notify_event_changes_tree(&EventKind::Access(AccessKind::Open(AccessMode::Any))));
         assert!(!notify_event_changes_tree(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
         assert!(notify_event_changes_tree(&EventKind::Access(AccessKind::Close(AccessMode::Write))));

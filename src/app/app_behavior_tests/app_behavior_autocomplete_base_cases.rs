@@ -217,6 +217,7 @@ pub(crate) fn test_app() -> Option<App> {
         file_tree_watcher_stop_tx: None,
         file_tree_watched_dirs: Vec::new(),
         external_changes_rx: None,
+        external_changes_pending: false,
         git_diff_rx: Vec::new(),
         inline_git_diff_rx: None,
         inline_git_popup: None,

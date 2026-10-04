@@ -69,7 +69,7 @@ globset = "0.4.19"
 memchr = "2.8.3"
 encoding_rs = "0.8.35"
 lexical-sort = "0.3"
-notify-debouncer-mini = "0.7.0"
+notify = "8.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["preserve_order"] }
 url = "2.5.8"

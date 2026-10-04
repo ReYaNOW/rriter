@@ -116,10 +116,23 @@ def main() -> None:
     # Also publish diagnostics for a file that was never opened (sibling.rs).
     publish_unopened = "_unopened" in mode
     log_init_options = "_initlog" in mode
+    rust_ide_requests = "_ide_requests" in mode
+    root_uri = None
+
+    def record_ide_request(message: dict) -> None:
+        record = {
+            "method": message.get("method"),
+            "rootUri": root_uri,
+            "params": message.get("params"),
+        }
+        with Path(sys.argv[0]).with_suffix(".requests.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+
     while message := read_message():
         method = message.get("method")
         request_id = message.get("id")
         if method == "initialize":
+            root_uri = (message.get("params") or {}).get("rootUri")
             if log_init_options:
                 record_init_options(message.get("params") or {})
             write_message(
@@ -130,6 +143,7 @@ def main() -> None:
                         "capabilities": {
                             "hoverProvider": True,
                             "inlayHintProvider": True,
+                            "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                         }
                     },
                 }
@@ -143,6 +157,54 @@ def main() -> None:
             write_message({"jsonrpc": "2.0", "id": request_id, "result": None})
         elif method == "exit":
             return
+        elif rust_ide_requests and request_id is not None:
+            record_ide_request(message)
+            if method == "textDocument/hover":
+                hover_text = (
+                    "```rust\npub struct RustHoverItem { rust_hover_value: i32 }\n```\n"
+                    "\nRust analyzer hover text."
+                )
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"contents": {"kind": "markdown", "value": hover_text}},
+                })
+            elif method == "textDocument/completion":
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "isIncomplete": False,
+                        "items": [{"label": "ra_completion_item", "insertText": "ra_completion_item"}],
+                    },
+                })
+            elif method == "textDocument/definition":
+                document_uri = message.get("params", {}).get("textDocument", {}).get("uri", "")
+                source_uri = document_uri.rpartition("/")[0]
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "uri": f"{source_uri}/definitions.rs",
+                        "range": {
+                            "start": {"line": 0, "character": 7},
+                            "end": {"line": 0, "character": 29},
+                        },
+                    },
+                })
+            elif method == "textDocument/signatureHelp":
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "signatures": [{
+                            "label": "rust_signature_target(value: i32)",
+                            "parameters": [{"label": "value", "documentation": "Input value"}],
+                        }],
+                        "activeSignature": 0,
+                        "activeParameter": 0,
+                    },
+                })
         elif method == "textDocument/hover":
             hover_text = "Fake hover from LSP stub for hover_subject"
             if long_hover:

@@ -25,6 +25,17 @@ pub(crate) fn server_names_for_extension(extension: &str) -> &'static [&'static 
     }
 }
 
+pub(crate) fn has_server_for_extension(extension: &str) -> bool {
+    !server_names_for_extension(extension).is_empty()
+}
+
+/// Languages whose completion and signature help go through the generic
+/// LSP context flow (`request_lsp_autocomplete`). Python has servers too but
+/// uses its own Ty flow, so it is excluded here.
+pub(crate) fn uses_lsp_context_completion(extension: &str) -> bool {
+    has_server_for_extension(extension) && !matches!(extension, "py" | "pyi")
+}
+
 #[cfg(test)]
 mod restart_server_keymap_tests {
     use super::*;

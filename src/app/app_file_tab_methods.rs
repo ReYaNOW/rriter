@@ -680,7 +680,7 @@ impl App {
 
     pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
         if !self.modifiers.control_key()
-            || !matches!(self.file_extension.as_str(), "py" | "pyi" | "dart")
+            || !crate::lsp::has_server_for_extension(&self.file_extension)
             || !self.is_ide_mode
         {
             self.clear_ctrl_definition();

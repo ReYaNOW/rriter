@@ -1325,6 +1325,7 @@ pub struct App {
     pub file_tree_watcher_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     pub file_tree_watched_dirs: Vec<PathBuf>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
+    pub external_changes_pending: bool,
     pub git_diff_rx: Vec<crate::app::git_diff::GitDiffReceiver>,
     pub inline_git_diff_rx:
         Option<crate::ui_waker::OneShot<crate::app::git_diff::InlineGitDiffEvent>>,

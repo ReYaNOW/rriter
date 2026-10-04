@@ -38,12 +38,33 @@ pub(crate) struct KeymapSettingsRow {
     pub label: &'static str,
     pub id: &'static str,
     pub chords: Vec<String>,
-    pub has_override: bool,
-    pub array_override: bool,
-    pub conflicted: bool,
-    pub terminal_warning: bool,
+    pub override_state: OverrideState,
+    pub warning: RowWarning,
     pub search: String,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverrideState {
+    Default,
+    Array,
+    Scalar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RowWarning {
+    None,
+    Conflict,
+    TerminalIntercept,
+    ConflictAndTerminalIntercept,
+}
+
+pub(crate) struct KeymapSettingsClick {
+    pub redraw: bool,
+    pub reset_all: bool,
+    pub overrides: Option<KeymapOverrides>,
+}
+
+type SettingsKeymapScrollbar = Option<((f32, f32, f32, f32), f32, f32)>;
 
 impl Default for KeymapSettingsState {
     fn default() -> Self {
@@ -64,6 +85,67 @@ impl Default for KeymapSettingsState {
 }
 
 impl KeymapSettingsState {
+    pub(crate) fn handle_settings_click(
+        &mut self,
+        id: crate::ui_system::UiId,
+        keymap: &crate::keymap::Keymap,
+        current_overrides: &KeymapOverrides,
+        scrollbar: SettingsKeymapScrollbar,
+    ) -> Option<KeymapSettingsClick> {
+        let mut result = KeymapSettingsClick { redraw: false, reset_all: false, overrides: None };
+        match id {
+            crate::ui_system::UiId::SettingsKeymapFilter => {
+                self.filter_focused = true;
+                result.redraw = true;
+            }
+            crate::ui_system::UiId::SettingsKeymapAdd(index) => {
+                if let Some(info) = crate::keymap::COMMANDS.get(index) {
+                    self.begin_recording(info.command);
+                    result.redraw = true;
+                }
+            }
+            crate::ui_system::UiId::SettingsKeymapRemove(index, chord_index) => {
+                if let Some(info) = crate::keymap::COMMANDS.get(index)
+                    && let Some(chord) = keymap.chords(info.command).get(chord_index).copied()
+                {
+                    let mut overrides = current_overrides.clone();
+                    overrides.remove_chord(crate::platform::CURRENT_PLATFORM, info.command, chord);
+                    result.overrides = Some(overrides);
+                }
+            }
+            crate::ui_system::UiId::SettingsKeymapReset(index) => {
+                if let Some(info) = crate::keymap::COMMANDS.get(index) {
+                    let mut overrides = current_overrides.clone();
+                    overrides.reset_command(info.command);
+                    result.overrides = Some(overrides);
+                }
+            }
+            crate::ui_system::UiId::SettingsKeymapResetAll => {
+                self.cancel_recording();
+                result.reset_all = true;
+            }
+            crate::ui_system::UiId::SettingsKeymapConflictCancel => {
+                self.cancel_recording();
+                result.redraw = true;
+            }
+            crate::ui_system::UiId::SettingsKeymapConflictAccept => {
+                if let Some((command, chord, owners)) = self.confirm_conflict() {
+                    let mut overrides = current_overrides.clone();
+                    overrides.reassign(crate::platform::CURRENT_PLATFORM, chord, command, &owners);
+                    result.overrides = Some(overrides);
+                }
+            }
+            crate::ui_system::UiId::SettingsKeymapScrollY => {
+                if let Some((rect, scale, pointer)) = scrollbar {
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(rect, rect.3, self.max_scroll, self.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
+                    crate::app::mouse::press_scrollbar(&mut self.scroll, bar.geometry(scale), 0.0, pointer);
+                }
+            }
+            _ => return None,
+        }
+        Some(result)
+    }
+
     pub fn refresh(&mut self, keymap: &crate::keymap::Keymap, overrides: &KeymapOverrides) {
         let raw = overrides.to_value();
         self.rows.clear();
@@ -81,10 +163,21 @@ impl KeymapSettingsState {
                 label: info.label,
                 id: info.id,
                 chords,
-                has_override: overrides.has(info.command),
-                array_override: raw.get(info.id).is_none_or(serde_json::Value::is_array),
-                conflicted: keymap.conflicted(info.command),
-                terminal_warning: matches!(info.context, KeyContext::Global | KeyContext::Terminal) && keymap.chords(info.command).iter().any(|chord| crate::app::keyboard::input_owner::terminal_intercepts(*chord, crate::platform::CURRENT_PLATFORM)),
+                override_state: match (overrides.has(info.command), raw.get(info.id).is_some_and(|value| !value.is_array())) {
+                    (false, _) => OverrideState::Default,
+                    (true, true) => OverrideState::Scalar,
+                    (true, false) => OverrideState::Array,
+                },
+                warning: match (
+                    keymap.conflicted(info.command),
+                    matches!(info.context, KeyContext::Global | KeyContext::Terminal)
+                        && keymap.chords(info.command).iter().any(|chord| crate::app::keyboard::input_owner::terminal_intercepts(*chord, crate::platform::CURRENT_PLATFORM)),
+                ) {
+                    (false, false) => RowWarning::None,
+                    (true, false) => RowWarning::Conflict,
+                    (false, true) => RowWarning::TerminalIntercept,
+                    (true, true) => RowWarning::ConflictAndTerminalIntercept,
+                },
                 search,
             });
         }
@@ -291,7 +384,7 @@ mod tests {
         let mut state = KeymapSettingsState::default();
         state.refresh(&keymap, &overrides);
         let row = state.rows.iter().find(|row| row.command == Command::TerminalCloseTab);
-        let warning = row.is_some_and(|row| row.terminal_warning);
+        let warning = row.is_some_and(|row| matches!(row.warning, super::RowWarning::TerminalIntercept | super::RowWarning::ConflictAndTerminalIntercept));
         assert!(warning, "TerminalCloseTab terminal warning: {warning}, row_found={}", row.is_some());
     }
 

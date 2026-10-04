@@ -25,7 +25,7 @@ const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
 
-fn run_ok(session: &mut HeadlessSession, script: &str) {
+pub(super) fn run_ok(session: &mut HeadlessSession, script: &str) {
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 }
@@ -37,7 +37,7 @@ fn headless_hotkeys_database_excluded_rows_have_reasons() {
     }
 }
 
-fn active_query_state(
+pub(super) fn active_query_state(
     session: &HeadlessSession,
 ) -> Option<&crate::app::database::DatabaseQueryTabState> {
     session.app.tabs.get(session.app.active_tab).and_then(|tab| match &tab.kind {
@@ -46,7 +46,7 @@ fn active_query_state(
     })
 }
 
-fn active_table_state(
+pub(super) fn active_table_state(
     session: &HeadlessSession,
 ) -> Option<&crate::app::database::DatabaseTableTabState> {
     session.app.tabs.get(session.app.active_tab).and_then(|tab| match &tab.kind {
@@ -55,7 +55,7 @@ fn active_table_state(
     })
 }
 
-fn database_query_session(
+pub(super) fn database_query_session(
     name: &str,
 ) -> (std::path::PathBuf, PostgresFixture, HeadlessSession) {
     let fixture = crate::headless::tests_support::postgres_fixture();
@@ -85,7 +85,7 @@ fn database_query_session(
     (dir, fixture, session)
 }
 
-fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) {
+pub(super) fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) {
     let display_name = format!("Database table hotkey fixture {}", fixture.port);
     let connection_index = connect_postgres_fixture_through_ui(session, fixture, &display_name);
     let database_index = session.app.ide_panel.database.connections[connection_index]

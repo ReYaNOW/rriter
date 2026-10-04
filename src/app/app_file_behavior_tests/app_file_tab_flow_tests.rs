@@ -1010,6 +1010,36 @@ fn async_external_changes_reload_clean_tabs_without_blocking_highlight_wait() {
 }
 
 #[test]
+fn external_changes_request_during_check_starts_followup_check() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!("rriter-tabs-followup-test-{}", std::process::id());
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("followup.txt");
+    std::fs::write(&path, "disk text\n").unwrap();
+    let mut tab = tab_with("followup.txt", Some(path.to_str().unwrap()), "editor text\n");
+    tab.editor.set_original_text();
+    app.tabs = vec![tab];
+    app.active_tab = 0;
+    app.sync_active_tab();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.external_changes_rx = Some(rx);
+    app.start_external_changes_check();
+    assert!(app.external_changes_pending);
+    tx.send(Vec::new()).unwrap();
+
+    assert!(!app.poll_external_changes());
+    assert!(!app.external_changes_pending);
+    assert!(app.external_changes_rx.is_some(), "pending request did not start a follow-up check");
+
+    drop(app);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn app_tabs_recent_files_search_jump_and_autocomplete_empty_paths() {
     let Some(mut app) = test_app() else {
         return;

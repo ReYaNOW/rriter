@@ -38,6 +38,8 @@ pub use integration::{
     system_proxy_config, user_cache_root,
 };
 pub(crate) use integration::app_paths_for_root;
+#[cfg(test)]
+pub(crate) use integration::app_root_override;
 pub(crate) type AppPaths = integration::AppPaths;
 pub use window_host::{HeadlessWindow, WindowHost};
 

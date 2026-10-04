@@ -280,6 +280,25 @@ impl App {
             return true;
         }
 
+        if self.handle_database_ime_commit(text)
+            || self.handle_settings_ime_commit(text)
+            || self.handle_project_search_ime_commit(text)
+            || self.handle_lsp_log_filter_ime_commit(text)
+            || self.handle_git_message_ime_commit(text)
+            || self.handle_api_client_ime_commit(text)
+            || self.handle_lsp_logs_ime_commit()
+            || self.handle_terminal_search_ime_commit(text)
+            || self.handle_search_ime_commit(text)
+            || self.handle_terminal_ime_commit(text)
+        {
+            return true;
+        }
+
+        self.handle_editor_ime_commit(text);
+        true
+    }
+
+    fn handle_database_ime_commit(&mut self, text: &str) -> bool {
         if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
             let mut invalidate_table_modal_layout = false;
             match modal {
@@ -365,7 +384,10 @@ impl App {
         if self.database_blocking_modal_open() {
             return true;
         }
+        false
+    }
 
+    fn handle_settings_ime_commit(&mut self, text: &str) -> bool {
         if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
@@ -386,7 +408,10 @@ impl App {
         if self.show_settings {
             return true;
         }
+        false
+    }
 
+    fn handle_project_search_ime_commit(&mut self, text: &str) -> bool {
         if !self.ide_panel.is_open(crate::app::PanelId::Search) {
             self.ide_panel.project_search.focused = None;
         }
@@ -423,7 +448,10 @@ impl App {
             }
             return true;
         }
+        false
+    }
 
+    fn handle_lsp_log_filter_ime_commit(&mut self, text: &str) -> bool {
         if !self.ide_panel.is_open(crate::app::PanelId::LspServers) {
             self.ide_panel.lsp_log_filter_focused = false;
             self.ide_panel.lsp_logs_focused = None;
@@ -437,7 +465,10 @@ impl App {
             }
             return true;
         }
+        false
+    }
 
+    fn handle_git_message_ime_commit(&mut self, text: &str) -> bool {
         if self.ide_panel.git.message_focused && self.ide_panel.is_open(crate::app::PanelId::Git) {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
@@ -446,16 +477,19 @@ impl App {
             }
             return true;
         }
+        false
+    }
 
-        if self.handle_api_client_ime_commit(text) {
-            return true;
-        }
+    fn handle_lsp_logs_ime_commit(&mut self) -> bool {
         if self.ide_panel.is_open(crate::app::PanelId::LspServers)
             && self.ide_panel.lsp_logs_focused.is_some()
         {
             return true;
         }
+        false
+    }
 
+    fn handle_terminal_search_ime_commit(&mut self, text: &str) -> bool {
         if self.ide_panel.is_open(crate::app::PanelId::Terminal)
             && self.ide_panel.term_show_search
             && self.ide_panel.term_search_focused
@@ -469,6 +503,10 @@ impl App {
             }
             return true;
         }
+        false
+    }
+
+    fn handle_search_ime_commit(&mut self, text: &str) -> bool {
         if self.show_search && self.search_focused {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
@@ -479,6 +517,10 @@ impl App {
             }
             return true;
         }
+        false
+    }
+
+    fn handle_terminal_ime_commit(&mut self, text: &str) -> bool {
         if self.is_ide_mode
             && self.ide_panel.terminal_focused
             && self.ide_panel.is_open(crate::app::PanelId::Terminal)
@@ -488,9 +530,7 @@ impl App {
             }
             return true;
         }
-
-        self.handle_editor_ime_commit(text);
-        true
+        false
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

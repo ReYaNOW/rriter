@@ -104,7 +104,7 @@ pub(super) fn draw(
         let metrics = keymap_row_metrics(row_y, s);
         if row_index.is_multiple_of(2) { renderer.push_rect(x.round(), row_y.round(), width.round(), metrics.row_h, [1.0, 1.0, 1.0, 0.025]); }
         let command_index = row.command as usize;
-        let color = if row.conflicted { [1.0, 0.46, 0.42, 1.0] } else { [0.88, 0.89, 0.92, 1.0] };
+        let color = if matches!(row.warning, crate::app::keymap_settings::RowWarning::Conflict | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) { [1.0, 0.46, 0.42, 1.0] } else { [0.88, 0.89, 0.92, 1.0] };
         renderer.draw_string_scaled(row.label, (x + (5.0 * s).round()).round(), metrics.first_baseline, color, 0.83);
         renderer.draw_string_scaled(row.id, (x + (5.0 * s).round()).round(), metrics.second_baseline, [0.48, 0.49, 0.54, 1.0], 0.65);
         let mut chip_x = x + width * 0.49;
@@ -119,13 +119,13 @@ pub(super) fn draw(
             register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", [1.0, 0.58, 0.62, 1.0]);
             chip_x += chip_w + (4.0 * s).round();
         }
-        if row.array_override {
+        if matches!(row.override_state, crate::app::keymap_settings::OverrideState::Default | crate::app::keymap_settings::OverrideState::Array) {
             register_button(renderer, ui, UiId::SettingsKeymapAdd(command_index), chip_x.round(), metrics.chip_y, (28.0 * s).round(), metrics.chip_h, if state.recording.is_some_and(|recording| recording.command == row.command) { "…" } else { "+" }, [0.72, 0.78, 0.96, 1.0]);
         }
-        if row.has_override {
+        if !matches!(row.override_state, crate::app::keymap_settings::OverrideState::Default) {
             register_button(renderer, ui, UiId::SettingsKeymapReset(command_index), (x + width - (30.0 * s).round()).round(), metrics.chip_y, (26.0 * s).round(), metrics.chip_h, "↺", [0.84, 0.75, 0.96, 1.0]);
         }
-        if row.terminal_warning {
+        if matches!(row.warning, crate::app::keymap_settings::RowWarning::TerminalIntercept | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) {
             renderer.draw_string_scaled("терминал перехватывает", x + width * 0.76, (row_y + 34.0 * s).round(), [1.0, 0.7, 0.42, 1.0], 0.62);
         }
         row_y += row_step;

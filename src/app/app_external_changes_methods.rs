@@ -85,6 +85,7 @@ impl App {
 
     pub fn start_external_changes_check(&mut self) {
         if self.external_changes_rx.is_some() {
+            self.external_changes_pending = true;
             return;
         }
         self.sync_active_tab();
@@ -146,11 +147,13 @@ impl App {
                 self.ide_panel.file_tree_error = Some(
                     external_changes_disconnect_message().to_string(),
                 );
+                self.external_changes_pending = false;
                 self.start_external_changes_check();
                 return true;
             }
         };
         if changes.is_empty() {
+            self.restart_external_changes_check_if_pending();
             return false;
         }
 
@@ -257,6 +260,14 @@ impl App {
         if needs_redraw && let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
+        self.restart_external_changes_check_if_pending();
         needs_redraw
+    }
+
+    fn restart_external_changes_check_if_pending(&mut self) {
+        if self.external_changes_pending {
+            self.external_changes_pending = false;
+            self.start_external_changes_check();
+        }
     }
 }

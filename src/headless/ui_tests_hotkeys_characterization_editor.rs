@@ -72,6 +72,11 @@ fn headless_hotkeys_editor_save_and_history() {
 fn headless_hotkeys_ctrl_o_on_welcome_requests_file_picker() {
     let mut session = session_for_test(1280, 720);
     assert_eq!(dump(&mut session)["mode"], "welcome");
+    // The startup gate swallows command keys; under parallel load it can outlive
+    // finish_startup's deadline.
+    wait_until(&mut session, 5000, "startup gate open", |s| {
+        s.app.startup_editor_pending.is_none()
+    });
 
     run_ok(&mut session, "key ctrl+o\n");
     assert_eq!(dump(&mut session)["external_request"]["kind"], "pick_file");
