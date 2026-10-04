@@ -807,11 +807,11 @@ pub(crate) fn load_config() -> Config {
     let mut config = Config::default();
     let mut path = rriter_config_dir();
 
-    if !path.exists() {
-        if let Err(error) = std::fs::create_dir_all(&path) {
-            eprintln!("RRiter: failed to create config directory: {error}");
-            return config;
-        }
+    if !path.exists()
+        && let Err(error) = std::fs::create_dir_all(&path)
+    {
+        eprintln!("RRiter: failed to create config directory: {error}");
+        return config;
     }
 
     path.push("config.json");

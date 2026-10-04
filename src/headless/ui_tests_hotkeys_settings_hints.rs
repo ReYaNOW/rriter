@@ -96,7 +96,7 @@ fn headless_hotkeys_remap_refreshes_empty_state_and_faq_labels() {
     session.app.set_keymap_overrides(overrides);
     let label = session.app.keymap.label(Command::FileOpen);
 
-    assert!(session.app.empty_ide_open_label.contains(&label));
+    assert!(session.app.empty_ide_open_label.contains(label));
     assert!(session.app.empty_ide_open_label.ends_with("— открыть файл"));
     assert!(session.app.faq_editor.get_full_text().contains(&format!("{label}\tОткрыть файл")));
     let lines = run_script(&mut session, b"mouse_move 0 0\n");

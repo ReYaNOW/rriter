@@ -24,8 +24,10 @@ impl App {
             if keymap_click.reset_all && self.confirm_dialog.request(crate::app::PendingAction::ResetKeymap) {
                 self.request_main_redraw();
             }
-            if keymap_click.redraw {
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            if keymap_click.redraw
+                && let Some(window) = self.window.as_ref()
+            {
+                window.request_redraw();
             }
             return UiClickFlow::Handled;
         }

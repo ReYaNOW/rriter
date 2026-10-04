@@ -11,14 +11,23 @@ struct DatabaseTableKeyContext<'a> {
     key_event: &'a crate::app::keyboard::KeyInput,
     chord: Option<crate::keymap::Chord>,
     terminal_owns_chord: bool,
-    primary: bool,
-    word: bool,
-    shift: bool,
+    modifiers: DatabaseTableKeyModifiers,
     text_input_allowed: bool,
     // Taken by the one handler that consumes the key; avoids cloning the clipboard text.
     paste_text: std::cell::Cell<Option<String>>,
-    default_table_copy_chord: bool,
-    default_table_undo_chord: bool,
+    default_table_shortcut: Option<DefaultTableShortcut>,
+}
+
+struct DatabaseTableKeyModifiers {
+    primary: bool,
+    word: bool,
+    shift: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefaultTableShortcut {
+    Copy,
+    Undo,
 }
 
 impl App {
@@ -51,15 +60,16 @@ impl App {
         } else {
             crate::keymap::Mods::CTRL
         };
-        let (default_table_copy_chord, default_table_undo_chord) = chord.map_or(
-            (false, false),
-            |chord| {
-                (
-                    chord.mods == primary_mod && chord.key == KeyCode::KeyC,
-                    chord.mods == primary_mod && chord.key == KeyCode::KeyZ,
-                )
-            },
-        );
+        let default_table_shortcut = chord.and_then(|chord| {
+            if chord.mods != primary_mod {
+                return None;
+            }
+            match chord.key {
+                KeyCode::KeyC => Some(DefaultTableShortcut::Copy),
+                KeyCode::KeyZ => Some(DefaultTableShortcut::Undo),
+                _ => None,
+            }
+        });
         let paste_text = if primary
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV)
         {
@@ -71,13 +81,14 @@ impl App {
             key_event,
             chord,
             terminal_owns_chord,
-            primary,
-            word: crate::platform::word_navigation_modifier(self.modifiers),
-            shift: self.modifiers.shift_key(),
+            modifiers: DatabaseTableKeyModifiers {
+                primary,
+                word: crate::platform::word_navigation_modifier(self.modifiers),
+                shift: self.modifiers.shift_key(),
+            },
             text_input_allowed: crate::platform::text_input_modifiers_allowed(self.modifiers),
             paste_text: std::cell::Cell::new(paste_text),
-            default_table_copy_chord,
-            default_table_undo_chord,
+            default_table_shortcut,
         };
 
         if self.ide_panel.database.table_modal.is_some() {
@@ -121,7 +132,7 @@ impl App {
                     self.ide_panel.database.table_modal,
                     Some(DatabaseTableModal::MultilineEditor { .. })
                 );
-                if multiline && !context.primary {
+                if multiline && !context.modifiers.primary {
                     if let Some(DatabaseTableModal::MultilineEditor { input, error, .. }) =
                         self.ide_panel.database.table_modal.as_mut()
                     {
@@ -149,7 +160,7 @@ impl App {
                     && database_multiline_edit_may_change_text(
                         physical_key,
                         context.key_event.logical_text.as_deref(),
-                        context.primary,
+                        context.modifiers.primary,
                         context.text_input_allowed,
                     );
                 if let Some(input) =
@@ -159,9 +170,9 @@ impl App {
                         input,
                         physical_key,
                         context.key_event.logical_text.as_deref(),
-                        context.primary,
-                        context.word,
-                        context.shift,
+                        context.modifiers.primary,
+                        context.modifiers.word,
+                        context.modifiers.shift,
                         context.text_input_allowed,
                         context.paste_text.take(),
                         if multiline {
@@ -193,7 +204,9 @@ impl App {
     ) -> bool {
         use winit::keyboard::{KeyCode, PhysicalKey};
 
-        if context.primary && context.key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
+        if context.modifiers.primary
+            && context.key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC)
+        {
             let selected = self
                 .ide_panel
                 .database
@@ -218,7 +231,7 @@ impl App {
         }) = self.ide_panel.database.table_modal.as_mut()
         {
             let target = match context.key_event.physical_key {
-                PhysicalKey::Code(KeyCode::KeyA) if context.primary => {
+                PhysicalKey::Code(KeyCode::KeyA) if context.modifiers.primary => {
                     *selection_anchor = Some(0);
                     *cursor = text.len();
                     return true;
@@ -232,14 +245,14 @@ impl App {
                     database_vertical_cursor_target(text, *cursor, 1)
                 }
                 PhysicalKey::Code(KeyCode::Home) => {
-                    if context.primary {
+                    if context.modifiers.primary {
                         0
                     } else {
                         line_start_boundary(text, *cursor)
                     }
                 }
                 PhysicalKey::Code(KeyCode::End) => {
-                    if context.primary {
+                    if context.modifiers.primary {
                         text.len()
                     } else {
                         line_end_boundary(text, *cursor)
@@ -247,7 +260,7 @@ impl App {
                 }
                 _ => return true,
             };
-            move_read_only_cursor(cursor, selection_anchor, target, context.shift);
+            move_read_only_cursor(cursor, selection_anchor, target, context.modifiers.shift);
         }
         true
     }
@@ -266,21 +279,21 @@ impl App {
             } else {
                 let input = &mut state.unavailable_text;
                 match context.key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyA) if context.primary => input.select_all(),
-                    PhysicalKey::Code(KeyCode::KeyC) if context.primary => {
+                    PhysicalKey::Code(KeyCode::KeyA) if context.modifiers.primary => input.select_all(),
+                    PhysicalKey::Code(KeyCode::KeyC) if context.modifiers.primary => {
                         copied = input.selected_text().map(str::to_owned);
                     }
                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
                         let target = previous_char_boundary(input.text(), input.cursor);
-                        input.set_cursor(target, context.shift);
+                        input.set_cursor(target, context.modifiers.shift);
                     }
                     PhysicalKey::Code(KeyCode::ArrowRight) => {
                         let target = next_char_boundary(input.text(), input.cursor);
-                        input.set_cursor(target, context.shift);
+                        input.set_cursor(target, context.modifiers.shift);
                     }
-                    PhysicalKey::Code(KeyCode::Home) => input.set_cursor(0, context.shift),
+                    PhysicalKey::Code(KeyCode::Home) => input.set_cursor(0, context.modifiers.shift),
                     PhysicalKey::Code(KeyCode::End) => {
-                        input.set_cursor(input.text().len(), context.shift);
+                        input.set_cursor(input.text().len(), context.modifiers.shift);
                     }
                     _ => {}
                 }
@@ -307,7 +320,7 @@ impl App {
         if filter_focus && self.autocomplete_active {
             match self.handle_active_autocomplete_key(
                 context.key_event.physical_key,
-                context.primary,
+                context.modifiers.primary,
             ) {
                 crate::app::AutocompletePopupKeyResult::Consumed => return true,
                 crate::app::AutocompletePopupKeyResult::Continue
@@ -363,12 +376,13 @@ impl App {
                     self.apply_database_table_filters(tab_id)
                 }
                 Some(DatabaseTableInputTarget::Cell) => {
-                    self.commit_database_table_cell_editor(tab_id, context.primary)
+                    self.commit_database_table_cell_editor(tab_id, context.modifiers.primary)
                 }
                 None => return false,
             },
             _ if focus.is_none()
-                && (!context.terminal_owns_chord || context.default_table_copy_chord)
+                && (!context.terminal_owns_chord
+                    || context.default_table_shortcut == Some(DefaultTableShortcut::Copy))
                 && context.chord.is_some_and(|chord| {
                     self.keymap.hit(crate::keymap::Command::DatabaseTableCopy, chord)
                 }) =>
@@ -376,7 +390,8 @@ impl App {
                 self.copy_database_table_selection(tab_id)
             }
             _ if focus.is_none()
-                && (!context.terminal_owns_chord || context.default_table_undo_chord)
+                && (!context.terminal_owns_chord
+                    || context.default_table_shortcut == Some(DefaultTableShortcut::Undo))
                 && context.chord.is_some_and(|chord| {
                     self.keymap.hit(crate::keymap::Command::DatabaseTableUndo, chord)
                 }) =>
@@ -495,9 +510,9 @@ impl App {
             input,
             physical_key,
             context.key_event.logical_text.as_deref(),
-            context.primary,
-            context.word,
-            context.shift,
+            context.modifiers.primary,
+            context.modifiers.word,
+            context.modifiers.shift,
             context.text_input_allowed,
             context.paste_text.take(),
             if matches!(focus, Some(DatabaseTableInputTarget::Cell)) {

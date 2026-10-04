@@ -328,7 +328,7 @@ fn headless_rust_goto_definition_opens_server_target_in_same_root() {
     assert_request_for_root(&executable, "textDocument/definition", &dir, &file);
     assert_ok(run_script(
         &mut session,
-        format!("click left down\nclick left up\n").as_bytes(),
+        "click left down\nclick left up\n".as_bytes(),
     ));
     wait_until(&mut session, 5000, "Rust target tab", |session| {
         session.app.file_path.as_deref() == Some(target.as_path())

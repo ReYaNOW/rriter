@@ -42,10 +42,10 @@ impl App {
     }
 
     fn run_bound_command(&mut self, command: Command, repeat: bool) -> bool {
-        if !repeat {
-            if let CommandOutcome::Unavailable(message) = self.run_command(command) {
-                self.show_command_unavailable(message);
-            }
+        if !repeat
+            && let CommandOutcome::Unavailable(message) = self.run_command(command)
+        {
+            self.show_command_unavailable(message);
         }
         true
     }

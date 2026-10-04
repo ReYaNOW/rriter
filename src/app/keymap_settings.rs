@@ -64,6 +64,8 @@ pub(crate) struct KeymapSettingsClick {
     pub overrides: Option<KeymapOverrides>,
 }
 
+type SettingsKeymapScrollbar = Option<((f32, f32, f32, f32), f32, f32)>;
+
 impl Default for KeymapSettingsState {
     fn default() -> Self {
         Self {
@@ -88,7 +90,7 @@ impl KeymapSettingsState {
         id: crate::ui_system::UiId,
         keymap: &crate::keymap::Keymap,
         current_overrides: &KeymapOverrides,
-        scrollbar: Option<((f32, f32, f32, f32), f32, f32)>,
+        scrollbar: SettingsKeymapScrollbar,
     ) -> Option<KeymapSettingsClick> {
         let mut result = KeymapSettingsClick { redraw: false, reset_all: false, overrides: None };
         match id {

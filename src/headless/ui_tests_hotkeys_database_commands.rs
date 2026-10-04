@@ -46,7 +46,7 @@ fn headless_hotkeys_database_table_refresh_save_and_preview_match_buttons() {
         }),
     );
 
-    let generation = active_table_state(&session).unwrap().generation.clone();
+    let generation = active_table_state(&session).unwrap().generation;
     run_ok(&mut session, "key ctrl+shift+r\n");
     assert_ne!(active_table_state(&session).unwrap().generation, generation);
     wait_until(&mut session, 10000, "table refresh", |session| {
