@@ -28,6 +28,13 @@ fn row_is_visible(row_y: f32, row_h: f32, clip_y: f32, clip_h: f32) -> bool {
     row_y + row_h >= clip_y && row_y <= clip_y + clip_h
 }
 
+fn keymap_list_viewport(y: f32, scale: f32, clip: UiClipRect) -> UiClipRect {
+    let list_top = (y.round() + (72.0 * scale).round()).round();
+    let top = list_top.max(clip.y);
+    let bottom = (clip.y + clip.h).max(top);
+    UiClipRect::new(clip.x, top, clip.w, bottom - top)
+}
+
 pub(super) fn draw(
     renderer: &mut Renderer,
     x: f32,
@@ -73,13 +80,14 @@ pub(super) fn draw(
         renderer.draw_string_scaled(hint, x, (filter_y + 54.0 * s).round(), [0.9, 0.78, 0.56, 1.0], 0.9);
     }
 
-    let list_y = filter_y + 72.0 * s - state.scroll.current.round();
+    let viewport = keymap_list_viewport(filter_y, s, clip);
+    let list_y = viewport.y - state.scroll.current.round();
     let mut row_y = list_y;
     let mut previous_context = None;
     let mut row_index = 0usize;
     let row_step = (ROW_H * s).round().max(1.0);
-    ui.push_clip(clip);
-    renderer.begin_tab_strip_scissor(clip.x, clip.y, clip.w, clip.h);
+    ui.push_clip(viewport);
+    renderer.begin_tab_strip_scissor(viewport.x, viewport.y, viewport.w, viewport.h);
     for row in &state.rows {
         if !state.row_matches(row) { continue; }
 
@@ -88,7 +96,7 @@ pub(super) fn draw(
             renderer.draw_string_scaled(context_label(row.context), x.round(), (row_y.round() + (18.0 * s).round()), [0.78, 0.65, 1.0, 1.0], 0.9);
             row_y += (25.0 * s).round();
         }
-        if !row_is_visible(row_y, row_step, clip.y, clip.h) {
+        if !row_is_visible(row_y, row_step, viewport.y, viewport.h) {
             row_y += row_step;
             row_index += 1;
             continue;
@@ -105,7 +113,7 @@ pub(super) fn draw(
             chip_x += (82.0 * s).round();
         }
         for (chord_index, label) in row.chords.iter().enumerate() {
-            let chip_w = (renderer.measure_ui_width(label, 0.76) + 25.0 * s).min(112.0 * s);
+            let chip_w = renderer.measure_ui_width(label, 0.76) + 25.0 * s;
             renderer.push_rounded_rect(chip_x.round(), metrics.chip_y, chip_w.round(), metrics.chip_h, (5.0 * s).round(), [0.3, 0.27, 0.38, 1.0]);
             renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), [0.9, 0.88, 0.96, 1.0], 0.76);
             register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", [1.0, 0.58, 0.62, 1.0]);
@@ -124,10 +132,10 @@ pub(super) fn draw(
         row_index += 1;
     }
     renderer.end_tab_strip_scissor();
-    state.max_scroll = (row_y - list_y - clip.h).max(0.0);
+    state.max_scroll = (row_y - list_y - viewport.h).max(0.0);
     state.scroll.clamp_target(0.0, state.max_scroll);
     if state.max_scroll > 0.0 {
-        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, clip.y, 14.0 * s, clip.h), clip.h, state.max_scroll, state.scroll.current, 6.0, super::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
+        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, viewport.y, 14.0 * s, viewport.h), viewport.h, state.max_scroll, state.scroll.current, 6.0, super::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
         renderer.draw_scrollbar(&bar, s, 1.0, Some(super::scrollbar_widget::ScrollbarHit { ui, id: UiId::SettingsKeymapScrollY, mx: renderer.last_mouse_x, my: renderer.last_mouse_y, blocker: false }));
     }
     ui.pop_clip();
@@ -178,7 +186,7 @@ fn context_label(context: crate::keymap::KeyContext) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{keymap_row_metrics, row_is_visible};
+    use super::{keymap_list_viewport, keymap_row_metrics, row_is_visible, UiClipRect};
 
     #[test]
     fn row_baselines_and_chips_land_on_integer_pixels_at_fractional_scale() {
@@ -223,5 +231,11 @@ mod tests {
     #[test]
     fn row_clipping_keeps_a_row_touching_the_bottom_edge() {
         assert!(row_is_visible(129.0, 1.0, 100.0, 30.0));
+    }
+
+    #[test]
+    fn keymap_list_viewport_starts_below_filter_and_ends_at_content_clip() {
+        let viewport = keymap_list_viewport(100.0, 1.333, UiClipRect::new(20.0, 80.0, 500.0, 600.0));
+        assert_eq!(viewport, UiClipRect::new(20.0, 196.0, 500.0, 484.0));
     }
 }

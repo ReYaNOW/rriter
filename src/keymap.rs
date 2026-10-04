@@ -164,7 +164,7 @@ fn key_token(key: KeyCode) -> &'static str {
 
 fn display_key(key: KeyCode) -> String {
     let token = key_token(key);
-    if (token.starts_with('f') && token[1..].parse::<u8>().is_ok()) || token.len() == 1 { token.to_uppercase() } else { match token { "up" => "↑".into(), "down" => "↓".into(), "left" => "←".into(), "right" => "→".into(), _ => { let mut chars = token.chars(); chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default() } } }
+    if (token.starts_with('f') && token[1..].parse::<u8>().is_ok()) || token.len() == 1 { token.to_uppercase() } else { match token { "up" => "↑".into(), "down" => "↓".into(), "left" => "←".into(), "right" => "→".into(), "pageup" => "PageUp".into(), "pagedown" => "PageDown".into(), _ => { let mut chars = token.chars(); chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default() } } }
 }
 
 pub fn validate(platform: PlatformKind, chord: Chord) -> Result<(), ChordError> {
@@ -352,6 +352,8 @@ mod tests {
         assert_eq!(mac.display(PlatformKind::Macos), "⇧⌘F");
         assert_eq!(chord(PlatformKind::Macos, "ctrl+alt+shift+cmd+q").display(PlatformKind::Macos), "⌃⌥⇧⌘Q");
         assert_eq!(chord(PlatformKind::Macos, "ctrl+cmd+q").serialize(PlatformKind::Macos), "mod+ctrl+q");
+        assert_eq!(chord(PlatformKind::Linux, "mod+pagedown").display(PlatformKind::Linux), "Ctrl+PageDown");
+        assert_eq!(chord(PlatformKind::Linux, "mod+pageup").display(PlatformKind::Linux), "Ctrl+PageUp");
         for input in ["", "ctrl+", "ctrl++a", "ctrl+ctrl+a", "mod+mod+a", "wat+a", "ctrl+unknown"] {
             assert!(Chord::parse(PlatformKind::Linux, input).is_err(), "{input}");
         }

@@ -92,9 +92,18 @@ impl KeymapSettingsState {
     }
 
     pub fn update_filter(&mut self, filter: String) {
-        self.filter_lower = filter.to_lowercase();
-        self.filter = filter;
+        self.set_filter(filter);
         self.filter_input.set_text_clean(&self.filter);
+    }
+
+    pub fn set_filter(&mut self, filter: String) {
+        if self.filter != filter {
+            self.filter_lower = filter.to_lowercase();
+            self.filter = filter;
+            self.scroll.current = 0.0;
+            self.scroll.target = 0.0;
+            self.scroll.velocity = 0.0;
+        }
     }
 
     pub fn row_matches(&self, row: &KeymapSettingsRow) -> bool {
@@ -215,8 +224,7 @@ impl App {
                 );
                 if let Some(copied) = copied { self.set_clipboard_text(copied); }
                 let filter = self.keymap_settings.filter_input.get_full_text();
-                self.keymap_settings.filter_lower = filter.to_lowercase();
-                self.keymap_settings.filter = filter;
+                self.keymap_settings.set_filter(filter);
             }
             if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return true;
@@ -288,14 +296,26 @@ mod tests {
     }
 
     #[test]
-    fn filter_matches_serialized_chord_text() {
+    fn filter_matches_save_label_id_and_serialized_chord_text() {
         let keymap = Keymap::build(&KeymapOverrides::default());
         let mut state = KeymapSettingsState::default();
         state.refresh(&keymap, &KeymapOverrides::default());
+        state.scroll.current = 420.0;
+        state.scroll.target = 420.0;
+
+        state.update_filter("save".into());
+        assert_eq!(state.scroll.current, 0.0);
+        assert_eq!(state.scroll.target, 0.0);
+        let save_row = state.rows.iter().find(|row| row.command == Command::FileSave);
+        assert!(save_row.is_some_and(|row| state.row_matches(row)), "FileSave matched save filter");
+
+        state.update_filter("сохранить".into());
+        let save_row = state.rows.iter().find(|row| row.command == Command::FileSave);
+        assert!(save_row.is_some_and(|row| state.row_matches(row)), "FileSave matched Russian label substring");
+
         state.update_filter("mod+s".into());
-        let row = state.rows.iter().find(|row| row.command == Command::FileSave);
-        let matched = row.is_some_and(|row| state.row_matches(row));
-        assert!(matched, "FileSave matched serialized mod+s search: {matched}, row_found={}", row.is_some());
+        let save_row = state.rows.iter().find(|row| row.command == Command::FileSave);
+        assert!(save_row.is_some_and(|row| state.row_matches(row)), "FileSave matched serialized mod+s search");
     }
 
     #[test]
