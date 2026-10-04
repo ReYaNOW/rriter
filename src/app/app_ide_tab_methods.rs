@@ -817,6 +817,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "ip39: replaced by RouteId order test in stage 2"]
     fn terminal_tab_close_routes_share_one_app_lifecycle() {
         let app_tabs = include_str!("app_ide_tab_methods.rs");
         let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
