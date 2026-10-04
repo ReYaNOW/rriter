@@ -39,7 +39,9 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     );
     assert!(opened.iter().all(|line| line.starts_with("ok")), "{opened:?}");
     wait_until(&mut session, 5000, "second Python tab highlight", |session| {
-        session.app.tabs.len() == 2 && session.app.tabs[1].is_highlight_complete
+        session.app.tabs.len() == 2
+            && session.app.active_tab == 1
+            && session.app.is_highlight_complete
     });
     let highlight_version = session.app.highlighter.current_version;
     let initial_theme_gen = session.app.renderer.as_ref().expect("renderer").theme_gen;
@@ -61,8 +63,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     let switched = run_script(&mut session, b"key ctrl+tab\n");
     assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
     assert_eq!(session.app.active_tab, 0);
-    assert!(session.app.tabs[0]
-        .spans
+    assert!(session.app.highlighter.spans
         .iter()
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
     assert_keyword_pixel(
@@ -75,8 +76,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     let switched = run_script(&mut session, b"key ctrl+tab\n");
     assert!(switched.iter().all(|line| line == "ok"), "{switched:?}");
     assert_eq!(session.app.active_tab, 1);
-    assert!(session.app.tabs[1]
-        .spans
+    assert!(session.app.highlighter.spans
         .iter()
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
     assert_keyword_pixel(
