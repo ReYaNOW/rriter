@@ -914,7 +914,7 @@ impl App {
             self.request_ide_autocomplete(AutocompleteMode::TyContext, trigger);
             return;
         }
-        if !crate::lsp::has_server_for_extension(&self.file_extension)
+        if !crate::lsp::uses_lsp_context_completion(&self.file_extension)
             || !self.is_ide_mode
             || self.show_welcome
         {

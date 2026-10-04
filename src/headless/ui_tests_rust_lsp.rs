@@ -342,14 +342,18 @@ fn headless_rust_goto_definition_opens_server_target_in_same_root() {
 #[test]
 fn headless_rust_signature_help_uses_rust_server_parameters() {
     let (dir, file, mut session) = rust_crate_session("rust-signature-help");
-    let source = "fn main() {\n    rust_signature_target\n}\n";
+    // The closing `)` is pre-seeded: `type` commits text as IME input, which
+    // does not auto-pair like the `(` key does, and signature help is only
+    // requested inside a call's arguments. The `(` goes right after the
+    // callee, not after the closing brace at EOF.
+    let source = "fn main() {\n    rust_signature_target)\n}\n";
     std::fs::write(&file, source).expect("write Rust signature fixture");
     let executable = install_rust_fake(&mut session, "rust-signature-help", "rust_ide_requests");
     open_file(&mut session, &file);
     wait_until(&mut session, 8000, "Rust signature server", |session| {
         rust_status(session) == Some(LspServerStatus::Running)
     });
-    assert_ok(run_script(&mut session, b"key ctrl+end\ntype (\n"));
+    assert_ok(run_script(&mut session, b"key ctrl+home\nkey down\nkey end\nkey left\ntype (\n"));
     wait_until(&mut session, 5000, "Rust signature parameter completion", |session| {
         session.app.autocomplete_options.iter().any(|(item, _)| item.word == "value")
     });
