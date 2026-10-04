@@ -5,7 +5,6 @@ use crate::headless::HeadlessSession;
 use crate::keymap::{Chord, Command};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 fn config_path() -> PathBuf {
     crate::headless::tests_support::ensure_test_profile_root();
@@ -33,17 +32,6 @@ fn chord(text: &str) -> Chord {
         .unwrap_or_else(|error| panic!("invalid test chord {text}: {error:?}"))
 }
 
-fn clean_config() -> PathBuf {
-    let path = config_path();
-    let _ = std::fs::remove_file(&path);
-    path
-}
-
-fn config_test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().expect("config test lock")
-}
-
 fn run_ok(session: &mut HeadlessSession, script: &str) {
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
@@ -59,13 +47,8 @@ fn record_file_save_chord(session: &mut HeadlessSession, key: &str) {
 }
 
 #[test]
-#[ignore = "bug: cfg(test) load_config/save_config bypass config.json"]
 fn headless_hotkeys_config_file_is_loaded_at_startup() {
-    let _guard = config_test_lock();
-    let path = clean_config();
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create test config directory");
-    std::fs::write(&path, json!({"keymap": {"view.toggle_fps": ["ctrl+shift+f8"]}}).to_string())
-        .expect("seed keymap config");
+    prepare_config(json!({"keymap": {"view.toggle_fps": ["ctrl+shift+f8"]}}));
 
     let mut session = session_for_test(1280, 720);
     let fps_before = session.app.show_fps;
@@ -76,9 +59,7 @@ fn headless_hotkeys_config_file_is_loaded_at_startup() {
 }
 
 #[test]
-#[ignore = "bug: cfg(test) load_config/save_config bypass config.json"]
 fn headless_hotkeys_settings_persists_diff_remove_reset_and_skipped_values() {
-    let _guard = config_test_lock();
     let unknown = json!([1, true]);
     let skipped = "not-a-chord";
     let path = prepare_config(json!({
@@ -107,10 +88,8 @@ fn headless_hotkeys_settings_persists_diff_remove_reset_and_skipped_values() {
 }
 
 #[test]
-#[ignore = "bug: cfg(test) load_config/save_config bypass config.json"]
 fn headless_hotkeys_saved_keymap_loads_in_a_new_session() {
-    let _guard = config_test_lock();
-    let path = clean_config();
+    let path = prepare_config(json!({}));
     let mut first = session_for_test(1280, 720);
     record_file_save_chord(&mut first, "ctrl+alt+s");
     assert_eq!(read_config(&path)["keymap"]["file.save"], json!(["mod+s", "mod+alt+s"]));

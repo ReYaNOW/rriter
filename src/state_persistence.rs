@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) const CTRL_WHEEL_MULTIPLIER_DEFAULT: f32 = 2.0;
 pub(crate) const CTRL_WHEEL_MULTIPLIER_MIN: f32 = 1.25;
@@ -635,8 +635,22 @@ fn format_config_content(config: &Config) -> String {
     )
 }
 
+/// Tests opt into real config I/O by seeding `config.json` in the per-process test
+/// profile (`app_root_override`); otherwise config stays in memory and the user's
+/// real config is never touched.
 #[cfg(test)]
-pub fn save_config(_config: &Config) {}
+fn test_config_path() -> Option<PathBuf> {
+    let root = crate::platform::app_root_override()?;
+    let path = crate::platform::app_paths_for_root(root).config.join("config.json");
+    path.is_file().then_some(path)
+}
+
+#[cfg(test)]
+pub fn save_config(config: &Config) {
+    if let Some(path) = test_config_path() {
+        write_config_file(&path, config);
+    }
+}
 
 #[cfg(not(test))]
 pub fn save_config(config: &Config) {
@@ -645,14 +659,17 @@ pub fn save_config(config: &Config) {
         eprintln!("RRiter: failed to create config directory: {error}");
         return;
     }
-    let path = config_path();
+    write_config_file(&config_path(), config);
+}
+
+fn write_config_file(path: &Path, config: &Config) {
     let content = format_config_content(config);
-    if let Ok(existing) = crate::platform::read_text_file(&path) {
+    if let Ok(existing) = crate::platform::read_text_file(path) {
         if existing.text == content {
             return;
         }
     }
-    if let Err(error) = crate::platform::atomic_write(&path, content.as_bytes()) {
+    if let Err(error) = crate::platform::atomic_write(path, content.as_bytes()) {
         eprintln!("RRiter: failed to persist config: {error}");
     }
 }
@@ -778,7 +795,11 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
 
 #[cfg(test)]
 pub(crate) fn load_config() -> Config {
-    Config::default()
+    test_config_path()
+        .and_then(|path| crate::platform::read_text_file(&path).ok())
+        .map_or_else(Config::default, |content| {
+            parse_config_content(&content.text, Config::default())
+        })
 }
 
 #[cfg(not(test))]
