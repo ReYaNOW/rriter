@@ -312,11 +312,15 @@ impl Theme {
             diff_deleted: [0.76, 0.78, 0.84, 0.24],
             diff_added_gutter: [diff_added[0], diff_added[1], diff_added[2], 0.95],
             diff_deleted_gutter: [0.76, 0.78, 0.84, 0.90],
-            cursor_line: [0.9, 0.9, 0.9, 0.12],
+            cursor_line: if id.is_dark() { [0.9, 0.9, 0.9, 0.12] } else { [values.fg[0], values.fg[1], values.fg[2], 0.12] },
             bracket_match: [0.6, 0.6, 0.6, 0.3],
             definition_underline: [0.545, 0.913, 0.992, 0.95],
             folded_keyword: [0.55, 0.62, 0.80, 1.0],
-            markdown_code_bg: [0.11, 0.12, 0.15, 0.96],
+            markdown_code_bg: match id {
+                ThemeId::Sepia => [0.902, 0.855, 0.741, 0.96],
+                ThemeId::OneLight => [0.898, 0.898, 0.902, 0.96],
+                _ => [0.11, 0.12, 0.15, 0.96],
+            },
             markdown_quote_guide: [0.52, 0.46, 0.72, 0.72],
             markdown_check: [0.45, 0.86, 0.60, 1.0],
             sticky_shadow: [0.0, 0.0, 0.0, 1.0],
@@ -324,7 +328,7 @@ impl Theme {
             terminal_text_dim: [0.6, 0.6, 0.6, 1.0],
             terminal_cursor: if id.is_dark() { [1.0, 1.0, 1.0, 0.5] } else { [values.fg[0], values.fg[1], values.fg[2], 0.5] },
             terminal_close_hover: if id.is_dark() { [1.0, 1.0, 1.0, 1.0] } else { values.fg },
-            rollback_hover: [0.92, 0.96, 1.0, 1.0],
+            rollback_hover: if id.is_dark() { [0.92, 0.96, 1.0, 1.0] } else { values.fg },
             markdown_copy_success: [0.3, 0.9, 0.4, 1.0],
         }
     }
