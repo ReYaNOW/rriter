@@ -92,6 +92,52 @@ fn problem_paths(session: &HeadlessSession) -> Vec<PathBuf> {
     session.app.ide_panel.flat_diags.iter().map(|row| row.path.to_path_buf()).collect()
 }
 
+fn request_log(executable: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(executable.with_extension("requests.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+fn assert_request_for_root(executable: &Path, method: &str, root: &Path, file: &Path) {
+    let root_uri = format!("file://{}", root.display());
+    let file_uri = format!("file://{}", file.display());
+    assert!(
+        request_log(executable).iter().any(|request| {
+            request["method"] == method
+                && request["rootUri"] == root_uri
+                && request["params"]["textDocument"]["uri"] == file_uri
+        }),
+        "missing {method} request for {file_uri} handled by {root_uri}: {:?}",
+        request_log(executable)
+    );
+}
+
+fn source_point(session: &mut HeadlessSession, line: usize, column: usize) -> (f32, f32) {
+    let state = dump(session);
+    let body = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "EditorTextBody")
+        .unwrap_or_else(|| panic!("editor body missing: {state}"));
+    let rect = body["rect"].as_array().unwrap();
+    let body_x = rect[0].as_f64().unwrap() as f32;
+    let body_y = rect[1].as_f64().unwrap() as f32;
+    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    let advance = renderer.ascii_advances['a' as usize];
+    let line_height = renderer.line_height;
+    (
+        (body_x + column as f32 * advance + advance * 0.5).round(),
+        (body_y + line as f32 * line_height + line_height * 0.5).round(),
+    )
+}
+
+fn assert_ok(lines: Vec<String>) {
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
 fn open_all_problems(session: &mut HeadlessSession) {
     click_ui(session, "SidebarSlot(Problems)");
     wait_until(session, 5000, "Problems tabs", |session| {
@@ -205,4 +251,91 @@ fn headless_rust_two_roots_are_independent() {
     assert!(problem_paths(&session).contains(&second));
     assert_eq!(fake_starts(&executable), 2, "one rust-analyzer process per Cargo root");
     let _ = std::fs::remove_dir_all(parent);
+}
+
+#[test]
+fn headless_rust_hover_shows_rust_server_markdown_and_rust_highlighting() {
+    let (dir, file, mut session) = rust_crate_session("rust-hover-request");
+    let source = "fn main() {\n    hover_subject();\n}\n";
+    std::fs::write(&file, source).expect("write Rust hover fixture");
+    let executable = install_rust_fake(&mut session, "rust-hover-request", "rust_ide_requests");
+    open_file(&mut session, &file);
+    wait_until(&mut session, 8000, "Rust hover server", |session| {
+        rust_status(session) == Some(LspServerStatus::Running)
+    });
+
+    let (x, y) = source_point(&mut session, 1, 5);
+    assert_ok(run_script(&mut session, format!("mouse_move {x} {y}\n").as_bytes()));
+    wait_until(&mut session, 5000, "Rust hover popup", |session| {
+        session.app.hover.popup.is_some()
+    });
+    let popup = session.app.hover.popup.as_ref().expect("hover popup");
+    assert!(popup.text.contains("rust_hover_value"), "unexpected hover: {}", popup.text);
+    let struct_start = popup.text.find("struct").expect("Rust struct in hover block");
+    assert!(
+        popup.spans.iter().any(|span| span.start <= struct_start && struct_start < span.end),
+        "Rust keyword was not highlighted: {:?}",
+        popup.spans
+    );
+    assert_request_for_root(&executable, "textDocument/hover", &dir, &file);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_rust_completion_lists_and_inserts_rust_server_item() {
+    let (dir, file, mut session) = rust_crate_session("rust-completion-request");
+    let source = "fn main() {\n    rust_server_object";
+    std::fs::write(&file, source).expect("write Rust completion fixture");
+    let executable = install_rust_fake(&mut session, "rust-completion-request", "rust_ide_requests");
+    open_file(&mut session, &file);
+    wait_until(&mut session, 8000, "Rust completion server", |session| {
+        rust_status(session) == Some(LspServerStatus::Running)
+    });
+    assert_ok(run_script(&mut session, b"key ctrl+end\ntype .\n"));
+    wait_until(&mut session, 8000, "Rust server completion popup", |session| {
+        session.app.autocomplete_active
+            && session.app.autocomplete_options.iter().any(|(item, _)| item.word == "ra_completion_item")
+    });
+    assert_request_for_root(&executable, "textDocument/completion", &dir, &file);
+    assert_ok(run_script(&mut session, b"key enter\n"));
+    assert!(
+        session.app.editor.get_full_text().contains("ra_completion_item"),
+        "completion was not inserted: {}",
+        session.app.editor.get_full_text()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "bug: Ctrl-hover definition routing excludes Rust files"]
+fn headless_rust_goto_definition_opens_server_target_in_same_root() {
+    let (dir, file, mut session) = rust_crate_session("rust-definition-request");
+    let source = "fn main() {\n    rust_definition_target();\n}\n";
+    std::fs::write(&file, source).expect("write Rust definition fixture");
+    let target = file.with_file_name("definitions.rs");
+    std::fs::write(&target, "pub fn rust_definition_target() {}\n")
+        .expect("write Rust definition target");
+    let executable = install_rust_fake(&mut session, "rust-definition-request", "rust_ide_requests");
+    open_file(&mut session, &file);
+    wait_until(&mut session, 8000, "Rust definition server", |session| {
+        rust_status(session) == Some(LspServerStatus::Running)
+    });
+    let (x, y) = source_point(&mut session, 1, 8);
+    session.app.modifiers = winit::keyboard::ModifiersState::CONTROL;
+    assert_ok(run_script(&mut session, format!("mouse_move {x} {y}\n").as_bytes()));
+    wait_until(&mut session, 8000, "Rust definition response", |session| {
+        session.app.ctrl_definition.target.is_some()
+    });
+    assert_request_for_root(&executable, "textDocument/definition", &dir, &file);
+    assert_ok(run_script(
+        &mut session,
+        format!("click left down\nclick left up\n").as_bytes(),
+    ));
+    wait_until(&mut session, 5000, "Rust target tab", |session| {
+        session.app.file_path.as_deref() == Some(target.as_path())
+    });
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"][1]["path"], target.display().to_string());
+    assert_eq!(state["tabs"][1]["cursor"]["line"], 1);
+    let _ = std::fs::remove_dir_all(dir);
 }
