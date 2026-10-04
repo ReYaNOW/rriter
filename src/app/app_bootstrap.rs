@@ -176,11 +176,11 @@ impl App {
             } else {
                 Some(crate::platform::Clipboard::deferred_system())
             },
-            theme: crate::renderer::Theme::for_id(config.editor_theme, system_selection),
+            theme: crate::renderer::Theme::for_id(config.theme.editor, system_selection),
             system_selection,
-            editor_theme_id: config.editor_theme,
-            ui_theme_id: config.ui_theme,
-            theme_linked: config.theme_linked,
+            editor_theme_id: config.theme.editor,
+            ui_theme_id: config.theme.ui,
+            theme_linked: config.theme.linked,
             base_title: title,
             file_path: options.file_path,
             file_key,

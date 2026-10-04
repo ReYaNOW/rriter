@@ -2,6 +2,14 @@ use crate::app::App;
 use crate::theme::ThemeId;
 
 impl App {
+    pub(crate) fn theme_selection(&self) -> crate::theme::ThemeSelection {
+        crate::theme::ThemeSelection {
+            linked: self.theme_linked,
+            editor: self.editor_theme_id,
+            ui: self.ui_theme_id,
+        }
+    }
+
     pub(crate) fn apply_themes(&mut self, editor: ThemeId, ui: ThemeId) {
         if editor == self.editor_theme_id && ui == self.ui_theme_id {
             return;

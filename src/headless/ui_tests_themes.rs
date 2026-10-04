@@ -119,7 +119,9 @@ fn assert_keyword_pixel(
         format!("screenshot {}\n", screenshot_path.display()).as_bytes(),
     );
     assert!(response.iter().all(|line| line.starts_with("ok")), "{response:?}");
-    let screenshot = image::open(screenshot_path).expect("read theme screenshot").to_rgba8();
+    let screenshot = image::open(screenshot_path)
+        .unwrap_or_else(|error| panic!("read theme screenshot: {error}"))
+        .to_rgba8();
     let expected = expected.map(|channel| (channel * 255.0).round() as i16);
     assert!(
         screenshot.pixels().any(|pixel| {

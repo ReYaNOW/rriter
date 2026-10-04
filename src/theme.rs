@@ -54,6 +54,23 @@ impl ThemeId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThemeSelection {
+    pub linked: bool,
+    pub editor: ThemeId,
+    pub ui: ThemeId,
+}
+
+impl Default for ThemeSelection {
+    fn default() -> Self {
+        Self {
+            linked: true,
+            editor: ThemeId::Dracula,
+            ui: ThemeId::Dracula,
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SyntaxRole {

@@ -77,20 +77,19 @@ pub(super) fn resolve_role(
         role = SyntaxRole::KeywordControl;
     }
 
-    if node_text != "self" && node_text != "cls" {
-        if matches!(
+    if node_text != "self"
+        && node_text != "cls"
+        && matches!(
             name,
             "py_ident" | "py_builtin_or_func" | "py_assign" | "parameter" | "variable" | "fg"
-        ) {
-            let is_param = param_scopes.iter().any(|scope| {
+        )
+        && param_scopes.iter().any(|scope| {
                 start_byte >= scope.start
                     && start_byte < scope.end
                     && scope.params.contains(node_text)
-            });
-            if is_param {
-                role = SyntaxRole::Parameter;
-            }
-        }
+            })
+    {
+        role = SyntaxRole::Parameter;
     }
     role
 }
