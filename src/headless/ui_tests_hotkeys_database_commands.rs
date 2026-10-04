@@ -199,7 +199,6 @@ fn headless_hotkeys_database_query_format_and_next_diagnostic_match_buttons() {
 }
 
 #[test]
-#[ignore = "bug: DatabaseTable context is inactive without a table tab, so its bound command cannot report Unavailable or consume the chord"]
 fn headless_hotkeys_database_table_command_without_table_reports_unavailable() {
     let (dir, _fixture, mut session) = database_query_session("ui-hotkeys-database-no-table");
     let config_dir = scratch_dir("ui-hotkeys-database-no-table-config");

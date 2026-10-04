@@ -18,23 +18,36 @@ impl App {
         if self.command_terminal_owns_chord(chord) {
             return false;
         }
+        // A database tab whose sibling context owns the chord reports why the
+        // command cannot run instead of letting the chord fall through.
+        let mut sibling = None;
         for info in COMMANDS.iter().skip(Command::EditorGitDiffPrevHunk as usize) {
             if context.is_some_and(|context| info.context != context)
-                || !self.command_context_active(info.context)
                 || !self.keymap.hit(info.command, chord)
             {
                 continue;
             }
-            if repeat {
-                return true;
+            if !self.command_context_active(info.context) {
+                if sibling.is_none()
+                    && matches!(info.context, KeyContext::DatabaseTable | KeyContext::DatabaseQuery)
+                    && self.active_tab_is_database()
+                {
+                    sibling = Some(info.command);
+                }
+                continue;
             }
-            let outcome = self.run_command(info.command);
-            if let CommandOutcome::Unavailable(message) = outcome {
+            return self.run_bound_command(info.command, repeat);
+        }
+        sibling.is_some_and(|command| self.run_bound_command(command, repeat))
+    }
+
+    fn run_bound_command(&mut self, command: Command, repeat: bool) -> bool {
+        if !repeat {
+            if let CommandOutcome::Unavailable(message) = self.run_command(command) {
                 self.show_command_unavailable(message);
             }
-            return true;
         }
-        false
+        true
     }
 
     pub(crate) fn run_command(&mut self, command: Command) -> CommandOutcome {
@@ -133,7 +146,7 @@ impl App {
             }
             C::DatabaseTableRefresh | C::DatabaseTableSave | C::DatabaseTablePreviewSql => {
                 if !self.active_tab_is_database_table() {
-                    return CommandOutcome::Unavailable("Таблица не открыта");
+                    return CommandOutcome::Unavailable("Нет открытой таблицы БД");
                 }
                 if command == C::DatabaseTableSave
                     && !self.active_database_table_has_pending_changes()
