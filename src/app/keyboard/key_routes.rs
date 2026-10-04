@@ -14,9 +14,9 @@ pub(super) enum RouteId {
     InstallerLog,
     FileTreeModal,
     KeymapSettings,
+    ConfirmModal,
     QueryReview,
     TerminalCloseToggle,
-    ConfirmModal,
     DatabaseQuery,
     DatabaseTableCommands,
     DatabaseTablePdfImage,
@@ -43,8 +43,8 @@ pub(super) enum RouteId {
     LspLogFilter,
     GitCopySelection,
     GitMessage,
-    ApiClient,
     TerminalGate,
+    ApiClient,
     LspLogEditor,
     TabsSwitch,
     TerminalCloseTab,
@@ -70,9 +70,11 @@ pub(super) const KEY_ROUTES: &[(RouteId, KeyRouteFn)] = &[
     (RouteId::InstallerLog, route_installer_log),
     (RouteId::FileTreeModal, route_file_tree_modal),
     (RouteId::KeymapSettings, route_keymap_settings),
+    // The confirm dialog is modal: SQL review commit/rollback and the terminal
+    // close/toggle hotkey must not run underneath it.
+    (RouteId::ConfirmModal, route_confirm_modal),
     (RouteId::QueryReview, route_query_review),
     (RouteId::TerminalCloseToggle, route_terminal_close_toggle),
-    (RouteId::ConfirmModal, route_confirm_modal),
     (RouteId::DatabaseQuery, route_database_query),
     (RouteId::DatabaseTableCommands, route_database_table_commands),
     (RouteId::DatabaseTablePdfImage, route_database_table_pdf_image),
@@ -98,9 +100,14 @@ pub(super) const KEY_ROUTES: &[(RouteId, KeyRouteFn)] = &[
     (RouteId::FileTreeShortcut, route_file_tree_shortcut),
     (RouteId::LspLogFilter, route_lsp_log_filter),
     (RouteId::GitCopySelection, route_git_copy_selection),
+    // LspLogFilter, GitMessage and a focused API panel field exclude terminal
+    // ownership in input_owner::terminal_keyboard_owner; GitCopySelection gates
+    // itself on terminal_owns_chord. route_api_client does not, so the terminal
+    // gate must precede it: otherwise an active API tab steals Ctrl+W/Ctrl+C and
+    // global chords from the focused terminal.
     (RouteId::GitMessage, route_git_message),
-    (RouteId::ApiClient, route_api_client),
     (RouteId::TerminalGate, route_terminal_gate),
+    (RouteId::ApiClient, route_api_client),
     (RouteId::LspLogEditor, route_lsp_log_editor),
     (RouteId::TabsSwitch, route_tabs_switch),
     (RouteId::TerminalCloseTab, route_terminal_close_tab),

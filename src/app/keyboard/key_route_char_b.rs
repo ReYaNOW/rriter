@@ -178,7 +178,7 @@ fn database_table_command_wins_collision_with_api_command() {
 }
 
 #[test]
-fn terminal_close_precedes_confirm_modal() {
+fn confirm_modal_blocks_terminal_close() {
     let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
         panic!("test app must initialize");
     };
@@ -194,9 +194,29 @@ fn terminal_close_precedes_confirm_modal() {
 
     press_key(&mut app, KeyCode::KeyQ);
 
-    // characterization: current behaviour
-    assert!(!app.ide_panel.is_open(crate::app::PanelId::Terminal), "terminal close currently runs before the confirm modal");
-    assert!(app.modal_dialog_open(), "confirm modal remains open after the terminal closes");
+    assert!(app.ide_panel.is_open(crate::app::PanelId::Terminal), "terminal close must not run under the confirm modal");
+    assert!(app.modal_dialog_open(), "confirm modal stays open");
+}
+
+#[test]
+fn focused_terminal_gets_control_chord_before_api_surface() {
+    let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+        panic!("test app must initialize");
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.ide_panel.open(crate::app::PanelId::ApiClient);
+    app.ide_panel.open(crate::app::PanelId::Terminal);
+    app.ide_panel.terminal_focused = true;
+    let chord = crate::keymap::Chord::parse(crate::platform::CURRENT_PLATFORM, "ctrl+g").expect("test chord");
+    let mut overrides = crate::keymap::KeymapOverrides::default();
+    overrides.add_chord(crate::platform::CURRENT_PLATFORM, crate::keymap::Command::GitToggleGraph, chord);
+    app.keymap = crate::keymap::Keymap::build(&overrides);
+    app.modifiers = winit::keyboard::ModifiersState::CONTROL;
+
+    press_key(&mut app, KeyCode::KeyG);
+
+    assert_eq!(app.ide_panel.git.bottom_pane, crate::app::git_panel::GitBottomPane::Closed, "Ctrl+G is a PTY control byte: the API surface must not run the global command");
 }
 
 #[test]
