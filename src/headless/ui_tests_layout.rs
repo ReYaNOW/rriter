@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_rect_inside_window, assert_ui_y_integral, click_ui, dump, has_ui, ok_json, run_script,
-    sample_file, scratch_dir, session_for_test, ui_center,
+    sample_file, scratch_dir, session_for_test, ui_center, wait_until,
 };
 
 fn open_file(session: &mut crate::headless::HeadlessSession, path: &std::path::Path) {
@@ -322,8 +322,9 @@ fn open_layout_panel(
     }
     click_ui(session, &id);
     if slot == "Terminal" {
-        // Terminal stays hidden until the spawned shell is ready for presentation.
-        run_script(session, b"wait 8000\n");
+        wait_until(session, 8000, "terminal body hitbox", |session| {
+            has_ui(&dump(session), "TerminalBody")
+        });
     } else {
         run_script(session, b"settle 100\n");
     }

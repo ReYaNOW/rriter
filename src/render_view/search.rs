@@ -12,6 +12,14 @@ pub(crate) struct SearchPanelGeometry {
     pub counter_reserve: f32,
 }
 
+/// Search panel height before scaling.
+pub(crate) const SEARCH_PANEL_H: f32 = 52.0;
+
+/// True when no pixel of the panel at `y` (including its 1 px border) is inside the window.
+pub(crate) fn search_panel_offscreen(y: f32, scale: f32) -> bool {
+    y + SEARCH_PANEL_H * scale + 1.0 <= 0.0
+}
+
 pub(crate) fn search_panel_geometry(scrollbar_x: f32, scale: f32) -> SearchPanelGeometry {
     let w = (480.0 * scale).min((scrollbar_x - 8.0 * scale).max(0.0));
     let x = (scrollbar_x - w - 8.0 * scale).max(0.0);
@@ -69,7 +77,7 @@ impl Renderer {
         let s = self.scale_factor;
         let geometry = search_panel_geometry(scrollbar_x, s);
         let search_w = geometry.w;
-        let search_h = 52.0 * s;
+        let search_h = SEARCH_PANEL_H * s;
         let search_x = geometry.x;
 
         if search_w > 0.0 && search_h > 0.0 {

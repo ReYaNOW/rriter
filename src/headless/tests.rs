@@ -1161,6 +1161,21 @@ mod session_cases {
         assert_eq!(lines[1], "ok frames=0 settled=true", "{lines:?}");
     }
 
+    /// A scale change moves the closed search panel's offscreen rest position; it must not
+    /// animate (one redraw per step for ~0.5 s) while nothing of it is on screen.
+    #[test]
+    fn headless_scale_change_does_not_animate_hidden_search_panel() {
+        let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, b"settle 2000\nscale 1.333\nsettle 2000\n");
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        let frames: u32 = lines[2]
+            .strip_prefix("ok frames=")
+            .and_then(|rest| rest.strip_suffix(" settled=true"))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{lines:?}"));
+        assert!(frames <= 3, "{lines:?}");
+    }
+
     #[test]
     fn headless_dump_has_all_keys_and_welcome_mode() {
         let mut session = session_for_test(640, 400);

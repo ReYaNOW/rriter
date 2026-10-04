@@ -91,9 +91,9 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
     let open_y = (window_height - h) / 2.0;
     let target_y = if app.show_settings { open_y } else { start_y };
 
-    if !app.show_settings && app.settings_y > start_y {
-        // Closed panel still parked below the window (initial 10000.0): snap instead of
-        // animating ~0.9 s of invisible redraws after every launch.
+    if !app.show_settings && (app.settings_y > start_y || app.settings_anim_progress <= 0.0) {
+        // Closed panel parked below the window (initial 10000.0, or a rest position moved by
+        // a scale/resize): snap instead of animating ~0.5–0.9 s of invisible redraws.
         app.settings_y = start_y;
         app.settings_anim_progress = 0.0;
     }
@@ -117,7 +117,11 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
         -120.0 * s
     };
     let search_diff = target_search_y - app.search_anim_y;
-    if search_diff.abs() > 1.5 {
+    if !app.show_search && crate::render_view::search::search_panel_offscreen(app.search_anim_y, s) {
+        // Closed and off screen: a scale change only moves the hidden rest position, so
+        // snap instead of redrawing an invisible slide every frame.
+        app.search_anim_y = target_search_y;
+    } else if search_diff.abs() > 1.5 {
         let speed = if app.show_search { 20.0 } else { 7.0 };
         app.search_anim_y += search_diff * speed * dt;
         needs_redraw = true;
