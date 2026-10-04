@@ -288,7 +288,7 @@ impl App {
                 &self.base_title,
                 self.editor.is_dirty(),
             );
-            self.window.as_ref().unwrap().request_redraw();
+            self.request_redraw();
             return true;
         }
 
@@ -598,9 +598,7 @@ impl App {
             {
                 self.editor.clear_extra_cursors();
                 self.close_autocomplete();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.request_redraw();
                 return;
             }
             if !multi_cursor_action {
@@ -646,9 +644,7 @@ impl App {
                         self.markdown.read_scroll_bounds(),
                         line_step * f32::from(direction),
                     );
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                    self.request_redraw();
                 }
                 MarkdownEditorKeyAction::ScrollPages(direction) => {
                     let page = self
@@ -663,9 +659,7 @@ impl App {
                         self.markdown.read_scroll_bounds(),
                         page * f32::from(direction),
                     );
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                    self.request_redraw();
                 }
                 MarkdownEditorKeyAction::ScrollStart => {
                     if self.prepare_markdown_absolute_scroll_target_navigation() {
@@ -673,9 +667,7 @@ impl App {
                         self.scroll_y.animate_to(0.0);
                         self.markdown.remember_pending_absolute_scroll_target_y(0.0);
                     }
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                    self.request_redraw();
                 }
                 MarkdownEditorKeyAction::ScrollEnd => {
                     if self.prepare_markdown_absolute_scroll_target_navigation()
@@ -686,9 +678,7 @@ impl App {
                         self.markdown
                             .remember_pending_absolute_scroll_target_y(max_scroll);
                     }
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                    self.request_redraw();
                 }
                 MarkdownEditorKeyAction::Consume => {}
             }
@@ -715,7 +705,7 @@ impl App {
             match physical_key {
                 PhysicalKey::Code(KeyCode::Escape) => {
                     self.lsp_actions_menu = None;
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                     return;
                 }
                 PhysicalKey::Code(KeyCode::ArrowUp) => {
@@ -726,7 +716,7 @@ impl App {
                             menu.selected = menu.items.len().saturating_sub(1);
                         }
                     }
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                     return;
                 }
                 PhysicalKey::Code(KeyCode::ArrowDown) => {
@@ -735,7 +725,7 @@ impl App {
                             menu.selected = (menu.selected + 1) % menu.items.len();
                         }
                     }
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                     return;
                 }
                 PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
@@ -825,7 +815,7 @@ impl App {
                 self.update_search();
                 self.jump_to_search_result();
 
-                self.window.as_ref().unwrap().request_redraw();
+                self.request_redraw();
                 return;
             }
             _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditorExpandSelection, chord)) => {
@@ -852,7 +842,7 @@ impl App {
                     self.search_focused = false;
                     self.search_results.clear();
                     self.search_current_idx = None;
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                     return;
                 }
             }
@@ -1184,9 +1174,7 @@ impl App {
                 } else {
                     self.update_autocomplete();
                 }
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.request_redraw();
                 return;
             }
             PhysicalKey::Code(KeyCode::Space)
@@ -1247,7 +1235,7 @@ impl App {
                     }
                 }
                 if copied {
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                 }
             }
             _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::EditCut, chord)) => {
@@ -1474,7 +1462,7 @@ impl App {
         }
 
         self.last_action = Instant::now();
-        self.window.as_ref().unwrap().request_redraw();
+        self.request_redraw();
     }
 }
 

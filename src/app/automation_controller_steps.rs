@@ -160,8 +160,8 @@ impl AutomationController {
             AutomationStep::OpenSearch => {
                 app.show_search = true;
                 app.search_focused = true;
-                app.search_editor.select_all();
-                request_redraw(app);
+                 app.search_editor.select_all();
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::SetSearchQuery(query) => {
@@ -170,7 +170,7 @@ impl AutomationController {
                 app.search_focused = true;
                 app.update_search();
                 app.jump_to_search_result();
-                request_redraw(app);
+                app.request_redraw();
                 if app.search_results.is_empty() {
                     StepResult::Failed(format!("editor search returned no results: {query}"))
                 } else {
@@ -181,7 +181,7 @@ impl AutomationController {
                 app.search_case_sensitive = !app.search_case_sensitive;
                 app.update_search();
                 app.jump_to_search_result();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::NextSearchResult => {
@@ -193,7 +193,7 @@ impl AutomationController {
                     .map_or(0, |idx| (idx + 1) % app.search_results.len());
                 app.search_current_idx = Some(next);
                 app.jump_to_search_result();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::PreviousSearchResult => {
@@ -209,7 +209,7 @@ impl AutomationController {
                 });
                 app.search_current_idx = Some(previous);
                 app.jump_to_search_result();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::CloseSearch => {
@@ -217,7 +217,7 @@ impl AutomationController {
                 app.search_focused = false;
                 app.search_results.clear();
                 app.search_current_idx = None;
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::ScrollEditorTimed { duration_secs } => {
@@ -247,7 +247,7 @@ impl AutomationController {
                             failure = Some(error);
                         }
                     });
-                    request_redraw(app);
+                    app.request_redraw();
                     failure.map_or(result, StepResult::Failed)
                 }
                 _ => match crate::app::automation_markdown::run_step(app, *markdown_step) {
@@ -267,7 +267,7 @@ impl AutomationController {
                 let max_scroll = renderer.get_max_scroll(&app.editor, height);
                 let target = (max_scroll * fraction.clamp(0.0, 1.0)).round();
                 app.scroll_y.jump_to(target);
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::ToggleFirstFold => {
@@ -282,7 +282,7 @@ impl AutomationController {
                 } else if let Some(offset) = app.editor.line_offsets.get(line).copied() {
                     app.editor.folded_start_bytes.remove(&offset);
                 }
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::SetEditorCursorAfter(needle) => {
@@ -293,7 +293,7 @@ impl AutomationController {
                 app.editor.cursor = offset;
                 app.editor.selection_anchor = None;
                 focus_main_editor_semantic(app);
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::TriggerAutocomplete(expected) => {
@@ -304,7 +304,7 @@ impl AutomationController {
                         .iter()
                         .any(|(item, _)| item.word == *expected)
                 {
-                    request_redraw(app);
+                    app.request_redraw();
                     StepResult::Done
                 } else if app.is_highlight_complete || app.highlighter.is_complete {
                     StepResult::Failed(autocomplete_failure_diagnostics(app, expected))
@@ -323,7 +323,7 @@ impl AutomationController {
                 app.autocomplete_selected_idx = index;
                 app.ensure_autocomplete_visible();
                 app.request_active_autocomplete_detail_for_index(index);
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::ApplyAutocomplete(expected) => {
@@ -361,7 +361,7 @@ impl AutomationController {
             }
             AutomationStep::ClearHover => {
                 app.hover = crate::app::mouse::HoverState::default();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::SetProjectSearchQuery(query) => {
@@ -374,7 +374,7 @@ impl AutomationController {
                 app.ide_panel.project_search.focused =
                     Some(crate::app::project_search::ProjectSearchField::Query);
                 app.ide_panel.project_search.dirty = true;
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::RunProjectSearch => {
@@ -437,7 +437,7 @@ impl AutomationController {
                 if !app.ide_panel.git.graph_open() {
                     app.toggle_git_graph();
                 }
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::WaitGitGraph => {
@@ -579,7 +579,7 @@ impl AutomationController {
                 app.ide_panel.api.input_editor.set_text_clean(needle);
                 app.ide_panel.api.input_editor.cursor = needle.len();
                 app.commit_api_focus();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::WaitApiRouteFilter(needle) => {
@@ -713,7 +713,7 @@ impl AutomationController {
                 app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
                 app.ide_panel.api.input_editor.selection_anchor = None;
                 app.ide_panel.api.input_editor.sync_edits.clear();
-                request_redraw(app);
+                app.request_redraw();
                 let actual = app.ide_panel.api.input_editor.get_full_text();
                 if actual == *value {
                     StepResult::Done
@@ -838,7 +838,7 @@ impl AutomationController {
                     app.ide_panel.api.input_editor.cursor = 0;
                     app.ide_panel.api.input_editor.selection_anchor = None;
                 }
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::Dart(dart_step) => {
@@ -882,12 +882,12 @@ impl AutomationController {
             AutomationStep::ShowSettings(show) => {
                 app.show_settings = *show;
                 app.settings_anim_progress = if *show { 0.0 } else { 1.0 };
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::SetSettingsTab(tab) => {
                 app.settings_tab = *tab;
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::AddSettingsIgnore(pattern) => {
@@ -899,7 +899,7 @@ impl AutomationController {
                     app.ide_ignore_patterns.push((*pattern).to_string());
                     app.save_current_config();
                     app.refresh_file_tree();
-                    request_redraw(app);
+                    app.request_redraw();
                 }
                 if app
                     .ide_ignore_patterns
@@ -924,7 +924,7 @@ impl AutomationController {
                 app.ide_ignore_patterns.remove(index);
                 app.save_current_config();
                 app.refresh_file_tree();
-                request_redraw(app);
+                app.request_redraw();
                 if app
                     .ide_ignore_patterns
                     .iter()
@@ -939,7 +939,7 @@ impl AutomationController {
             }
             AutomationStep::RefreshSettingsTools => {
                 crate::platform::refresh_tool_resolutions();
-                request_redraw(app);
+                app.request_redraw();
                 StepResult::Done
             }
             AutomationStep::WaitUntil { .. }
@@ -954,4 +954,3 @@ impl AutomationController {
         }
     }
 }
-

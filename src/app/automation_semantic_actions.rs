@@ -322,9 +322,11 @@ fn step_failure_context(
     }
 }
 
-pub(super) fn request_redraw(app: &App) {
-    if let Some(window) = app.window.as_ref() {
-        window.request_redraw();
+impl App {
+    pub(super) fn request_redraw(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 }
 
@@ -368,7 +370,7 @@ fn open_panel_semantic(app: &mut App, panel: PanelId) {
         _ => {}
     }
     crate::save_panel_state(&app.ide_panel);
-    request_redraw(app);
+    app.request_redraw();
 }
 
 fn open_file_tree_context_semantic(app: &mut App) -> StepResult {
@@ -402,7 +404,7 @@ fn open_file_tree_context_semantic(app: &mut App) -> StepResult {
         ],
         opened_at: Instant::now(),
     });
-    request_redraw(app);
+    app.request_redraw();
     StepResult::Done
 }
 
@@ -646,7 +648,7 @@ fn show_hover_semantic(
         HoverProgressAction::WaitStable => StepResult::Pending,
         HoverProgressAction::Done => StepResult::Done,
         HoverProgressAction::WaitDraw => {
-            request_redraw(app);
+            app.request_redraw();
             StepResult::Pending
         }
         HoverProgressAction::FailRepeatedClear => StepResult::Failed(format!(
@@ -679,7 +681,7 @@ fn show_hover_semantic(
                 anchor.1,
                 hover_failure_diagnostics(app, Some(byte_offset), *install_attempts, *last_anchor),
             );
-            request_redraw(app);
+            app.request_redraw();
             StepResult::Pending
         }
     }
@@ -774,4 +776,3 @@ fn write_terminal_semantic(app: &mut App, bytes: &[u8]) -> StepResult {
         Err(error) => StepResult::Failed(format!("terminal input failed: {error}")),
     }
 }
-

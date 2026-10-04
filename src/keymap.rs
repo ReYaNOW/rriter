@@ -469,6 +469,7 @@ mod tests {
     fn every_existing_command_has_a_dispatcher_hit() {
         let dispatchers = [
             include_str!("app/keyboard/main_keys.rs"),
+            include_str!("app/keyboard/key_routes.rs"),
             include_str!("app/keyboard/editor_keys.rs"),
             include_str!("app/keyboard.rs"),
             include_str!("app/pdf_tab/input.rs"),

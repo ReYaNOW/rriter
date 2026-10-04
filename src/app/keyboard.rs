@@ -15,7 +15,14 @@ mod editor_keys;
 mod key_input;
 mod main_keys;
 mod commands;
+mod key_routes;
 pub(crate) mod input_owner;
+#[cfg(test)]
+mod key_route_char_a;
+#[cfg(test)]
+mod key_route_char_b;
+#[cfg(test)]
+mod key_route_char_c;
 pub(crate) use editor_keys::paired_editor_insert_text;
 pub(crate) use key_input::{KeyComboHold, KeyInput};
 
@@ -265,9 +272,7 @@ impl App {
         if consumed {
             self.last_action = Instant::now();
             self.last_blink_state = true;
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+            self.request_redraw();
         }
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
@@ -550,7 +555,7 @@ impl App {
             self.update_terminal_search();
             self.jump_to_terminal_search_result();
             self.last_action = std::time::Instant::now();
-            self.window.as_ref().unwrap().request_redraw();
+            self.request_redraw();
             return;
         }
 
@@ -608,7 +613,7 @@ impl App {
             }
         }
         self.last_action = std::time::Instant::now();
-        self.window.as_ref().unwrap().request_redraw();
+        self.request_redraw();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -740,7 +745,7 @@ impl App {
                 self.jump_to_terminal_search_result();
             }
             self.last_action = std::time::Instant::now();
-            self.window.as_ref().unwrap().request_redraw();
+            self.request_redraw();
         }
     }
 
@@ -763,7 +768,7 @@ impl App {
                     self.search_results.clear();
                     self.search_current_idx = None;
                     self.pdf_restart_search_if_open();
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.request_redraw();
                 }
                 _ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::SearchEditorOpen, chord)) => {
                     self.search_editor.select_all();
@@ -881,7 +886,7 @@ impl App {
                 self.jump_to_search_result();
             }
             self.last_action = Instant::now();
-            self.window.as_ref().unwrap().request_redraw();
+            self.request_redraw();
         }
     }
 
@@ -945,9 +950,7 @@ impl App {
             self.start_project_search();
         }
         self.last_action = Instant::now();
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyInput) {
@@ -1035,9 +1038,7 @@ impl App {
                 self.ide_panel.lsp_log_filter_dirty = true;
             }
             self.last_action = Instant::now();
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+            self.request_redraw();
         }
     }
 
@@ -1131,9 +1132,7 @@ impl App {
                 self.ide_panel.git.message_editor.sync_edits.clear();
             }
             self.last_action = Instant::now();
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+            self.request_redraw();
         }
     }
 }

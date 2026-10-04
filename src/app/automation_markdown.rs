@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::app::automation::{AutomationStep, request_redraw};
+use crate::app::automation::AutomationStep;
 use crate::app::{App, MarkdownMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +64,7 @@ pub(super) fn run_step(app: &mut App, step: MarkdownAutomationStep) -> MarkdownS
                 MarkdownStepResult::Done
             } else {
                 app.refresh_markdown_read_model_if_stale();
-                request_redraw(app);
+                app.request_redraw();
                 if app.markdown.read_document(app.editor.version).is_some() {
                     MarkdownStepResult::Done
                 } else {
@@ -87,7 +87,7 @@ pub(super) fn prepare_read_scroll(app: &mut App) -> Result<bool, String> {
         .read_scroll_bounds()
         .is_none_or(|max_scroll| max_scroll <= 0.0)
     {
-        request_redraw(app);
+        app.request_redraw();
         return Ok(false);
     }
     Ok(true)
@@ -108,7 +108,7 @@ pub(super) fn scroll_read(app: &mut App, direction: f32) -> Result<(), String> {
         Some(max_scroll),
         36.0 * direction,
     );
-    request_redraw(app);
+    app.request_redraw();
     Ok(())
 }
 

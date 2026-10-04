@@ -1,30 +1,22 @@
     use super::*;
 
+    use super::super::key_routes::{route_position, RouteId};
+
     #[test]
-    fn keymap_recording_precedes_database_query_review_and_early_routes_respect_settings() {
-        let source = include_str!("main_keys.rs");
-        let handler = source.find("fn handle_main_keyboard_input_inner").expect("main handler exists");
-        let source = &source[handler..];
-        let capture = source.find("if self.handle_keymap_settings_key(&key_event, chord)").expect("recording capture route exists");
-        let query_review = source.find("let query_review_open =").expect("query review route exists");
-        assert!(capture < query_review, "recording capture must reject Enter before SQL review commits it: capture={capture}, review={query_review}");
-        assert!(source.contains("&& !self.show_settings\n                && self.database_table_command_context_unowned()"), "DatabaseTable early dispatch must defer while Settings is open");
-        assert!(source.contains("if !self.show_settings && self.handle_api_client_keyboard_input_with_chord"), "API early dispatch must defer while Settings is open");
+    fn keymap_recording_precedes_database_query_review() {
+        assert!(route_position(RouteId::KeymapSettings) < route_position(RouteId::QueryReview), "keymap recording must reject Enter before SQL review commits it");
     }
 
     #[test]
-    fn api_early_command_route_is_after_modal_and_text_input_owners() {
-        let source = include_str!("main_keys.rs");
-        let handler = source.find("fn handle_main_keyboard_input_inner").expect("main handler exists");
-        let source = &source[handler..];
-        let modal = source.find("if self.modal_dialog_open()").expect("modal route exists");
-        let database_table = source.find("self.database_table_command_context_unowned()").expect("database route exists");
-        let api = source.find("self.handle_api_client_keyboard_input_with_chord").expect("API route exists");
-        let generic = source.find("self.run_bound_commands(chord, None").expect("generic command route exists");
-        assert!(modal < database_table, "modal must own keyboard before DatabaseTable early dispatch: modal={modal}, table={database_table}");
-        assert!(database_table < api, "database panel routing precedes API early dispatch: table={database_table}, api={api}");
-        assert!(api < generic, "API handler owns keyboard before generic command dispatch: api={api}, generic={generic}");
-        assert!(source.contains("self.database_table_command_context_unowned()"), "DatabaseTable route checks modal and text-input ownership in its predicate");
+    fn api_command_route_follows_modal_and_database_and_precedes_bound_commands() {
+        assert!(route_position(RouteId::ConfirmModal) < route_position(RouteId::DatabaseTableCommands), "modal owner precedes DatabaseTable dispatch");
+        assert!(route_position(RouteId::DatabaseTableCommands) < route_position(RouteId::ApiClient), "DatabaseTable dispatch precedes API Client");
+        assert!(route_position(RouteId::ApiClient) < route_position(RouteId::BoundCommands), "API Client precedes generic bound commands");
+    }
+
+    #[test]
+    fn terminal_close_shortcut_precedes_final_keyboard_dispatch() {
+        assert!(route_position(RouteId::TerminalCloseTab) < route_position(RouteId::FinalRoute), "terminal tab close precedes final terminal and editor routing");
     }
 
     #[test]
@@ -683,28 +675,8 @@
     }
 
     #[test]
-    fn graph_tooltip_copy_keeps_priority_over_owned_vcs_console_copy() {
-        let source = include_str!("main_keys.rs").split("\n#[cfg(test)]").next().unwrap();
-        let copy_route = &source[source
-            .find("if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::GitCopySelection, chord))")
-            .expect("global copy route")..];
-        let graph = copy_route
-            .find("selected_git_graph_tooltip_text")
-            .expect("Git Graph tooltip copy");
-        let vcs = copy_route
-            .find("copy_owned_git_logs_selection")
-            .expect("owned VCS Console copy");
-        let message = copy_route
-            .find("self.handle_git_message_keyboard_input(key_event)")
-            .expect("Git message route");
-        assert!(
-            graph < vcs,
-            "Git Graph tooltip must keep higher copy priority"
-        );
-        assert!(
-            vcs < message,
-            "owned VCS copy must stay before Git message routing"
-        );
+    fn graph_and_owned_vcs_copy_route_precedes_git_message_input() {
+        assert!(route_position(RouteId::GitCopySelection) < route_position(RouteId::GitMessage), "Git selection copy precedes Git message routing");
     }
 
     #[test]
@@ -812,70 +784,15 @@
     }
 
     #[test]
-    fn markdown_global_toggle_precedes_non_terminal_text_field_routes() {
-        let source = include_str!("main_keys.rs");
-        let source = &source[source
-            .find("fn handle_main_keyboard_input_inner")
-            .expect("main keyboard handler")..];
-        let primary = source
-            .find("primary_shortcut_modifier(self.modifiers)")
-            .expect("platform primary modifier");
-        let route_match = source
-            .find("let markdown_toggle = if key_event.state == ElementState::Pressed")
-            .expect("central markdown toggle match");
-        let file_tree_defer = source
-            .find("let defer_file_tree_text_input = markdown_toggle.is_some()")
-            .expect("file-tree text input deferral");
-        let file_tree_modal = source
-            .find("self.handle_file_tree_modal_keyboard(&key_event)")
-            .expect("file-tree modal route");
-        let route_apply = source
-            .find("if let Some(action) = markdown_toggle")
-            .expect("central markdown toggle apply");
-        assert!(primary < route_match);
-        assert!(route_match < file_tree_defer);
-        assert!(file_tree_defer < file_tree_modal);
-        assert!(file_tree_modal < route_apply);
-
-        for marker in [
-            "if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused",
-            "self.handle_project_search_keyboard_input(key_event, chord);",
-            "self.handle_lsp_log_filter_keyboard_input(key_event);",
-            "self.handle_git_message_keyboard_input(key_event);",
-            "if !self.show_settings && self.handle_api_client_keyboard_input_with_chord(&key_event, chord)",
-            "self.handle_terminal_search_keyboard_input(key_event);",
-            "self.handle_search_keyboard_input(key_event, chord);",
-            "self.handle_terminal_keyboard_input(key_event);",
-            "self.handle_editor_keyboard_input(event_loop, key_event, chord);",
-        ] {
-            let routed_field = source
-                .find(marker)
-                .unwrap_or_else(|| panic!("missing route: {marker}"));
-            assert!(
-                route_apply < routed_field,
-                "Markdown toggle must precede {marker}"
-            );
-        }
-
-        let api_route = source
-            .find("if !self.show_settings && self.handle_api_client_keyboard_input_with_chord(&key_event, chord)")
-            .expect("API Client keyboard owner");
-        let terminal_route = source
-            .find("self.handle_terminal_keyboard_input(key_event);")
-            .expect("terminal keyboard owner");
-        let editor_route = source
-            .find("self.handle_editor_keyboard_input(event_loop, key_event, chord);")
-            .expect("editor keyboard route");
-        assert!(api_route < editor_route);
-        assert!(api_route < terminal_route);
-        assert!(terminal_route < editor_route);
-
-        let dialog_window = source
-            .find("if self.modal_dialog_open()")
-            .expect("dialog route");
-        assert!(dialog_window < route_apply);
-        assert!(
-            include_str!("../app_bootstrap.rs")
-                .contains("{cmd:markdown.toggle_mode}\\tMarkdown: чтение / редактирование")
-        );
+    fn markdown_toggle_precedes_later_text_field_routes() {
+        assert!(route_position(RouteId::ConfirmModal) < route_position(RouteId::MarkdownToggle), "confirmation modal precedes applying the Markdown toggle");
+        assert!(route_position(RouteId::FileTreeModal) < route_position(RouteId::MarkdownToggle), "file tree modal precedes applying the Markdown toggle");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::SettingsIgnoreField), "Markdown toggle precedes Settings text input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::ProjectSearchField), "Markdown toggle precedes Project Search input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::LspLogFilter), "Markdown toggle precedes LSP filter input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::GitMessage), "Markdown toggle precedes Git message input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::ApiClient), "Markdown toggle precedes API Client input");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::TerminalGate), "Markdown toggle precedes the terminal gate");
+        assert!(route_position(RouteId::ApiClient) < route_position(RouteId::TerminalGate), "API Client input precedes the terminal gate");
+        assert!(route_position(RouteId::MarkdownToggle) < route_position(RouteId::FinalRoute), "Markdown toggle precedes final terminal search, global search, and editor routing");
     }

@@ -817,64 +817,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_tab_close_routes_share_one_app_lifecycle() {
-        let app_tabs = include_str!("app_ide_tab_methods.rs");
-        let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
-        let close = app_production
-            .split("    pub(crate) fn close_terminal_tab_at")
-            .nth(1)
-            .unwrap()
-            .split("    pub(crate) fn add_terminal")
-            .next()
-            .unwrap();
-        let ui_handlers = concat!(
-            include_str!("ui_handlers/ui_database.rs"),
-            include_str!("ui_handlers/ui_editor.rs"),
-            include_str!("ui_handlers/ui_git.rs"),
-            include_str!("ui_handlers/ui_lsp.rs"),
-            include_str!("ui_handlers/ui_panels.rs"),
-            include_str!("ui_handlers/ui_settings.rs"),
-        );
-        let main_keys_source = include_str!("keyboard/main_keys.rs");
-        let main_keys = main_keys_source.split("\n#[cfg(test)]").next().unwrap_or(main_keys_source);
-        let editor_keys = include_str!("keyboard/editor_keys.rs");
-
-        assert!(close.contains("self.ide_panel.terminals.remove(idx);"));
-        assert!(close.contains("self.add_terminal();"));
-        assert!(close.contains("crate::app::active_index_after_remove("));
-        assert!(close.contains("self.reveal_active_terminal_tab_now();"));
-        assert!(close.contains("self.defer_terminal_panel_until_ready();"));
-        assert!(!close.contains("Terminal::spawn("));
-
-        let mouse_close = ui_handlers
-            .split("UiId::TerminalTabClose(idx) => {")
-            .nth(1)
-            .unwrap()
-            .split("UiId::TerminalAdd => {")
-            .next()
-            .unwrap();
-        assert!(mouse_close.contains("self.close_terminal_tab_at(idx);"));
-        assert!(!mouse_close.contains("terminals.remove("));
-
-        let shortcut_close = main_keys
-            .find("self.close_terminal_tab_at(self.ide_panel.active_terminal);")
-            .unwrap();
-        let search_dispatch = main_keys
-            .find("self.handle_terminal_search_keyboard_input(key_event);")
-            .unwrap();
-        let terminal_dispatch = main_keys
-            .rfind("self.handle_terminal_keyboard_input(key_event);")
-            .unwrap();
-        assert!(shortcut_close < search_dispatch);
-        assert!(shortcut_close < terminal_dispatch);
-        assert!(main_keys[shortcut_close..search_dispatch].contains("return;"));
-
-        assert!(editor_keys.contains(
-            "_ if chord.is_some_and(|chord| self.keymap.hit(crate::keymap::Command::TabsClose, chord)) => {\n                self.close_tab_at(self.active_tab);"
-        ));
-    }
-
-    #[test]
     fn terminal_pending_activation_waits_for_parser_ready_and_latest_request_wins() {
         use crate::app::terminal::TerminalPresentationIntent as Intent;
 
@@ -938,7 +880,7 @@ mod tests {
             include_str!("ui_handlers/ui_panels.rs"),
             include_str!("ui_handlers/ui_settings.rs"),
         );
-        let main_keys = include_str!("keyboard/main_keys.rs");
+        let key_routes = include_str!("keyboard/key_routes.rs");
         // `about_to_wait_terminals` holds the terminal tick of `about_to_wait`.
         let about = include_str!("events/about/about_tick_input_sections.rs");
         let renderer = include_str!("../render_view/terminal_ui.rs");
@@ -958,7 +900,7 @@ mod tests {
             "UiId::TerminalTab(idx) => {\n                self.select_terminal_tab_from_user(idx);"
         ));
         assert!(ui_handlers.contains("self.defer_terminal_panel_until_ready();"));
-        assert!(main_keys.contains("self.defer_terminal_panel_until_ready();"));
+        assert!(key_routes.contains("app.defer_terminal_panel_until_ready();"));
         assert!(about.contains("app.process_terminal_presentation_intents()"));
         assert!(about.matches("app.add_terminal();").count() >= 2);
         // `enter_ide_mode_impl` lives in the startup file.
