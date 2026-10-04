@@ -212,6 +212,11 @@ fn resolved_executable(root: &Path, tools: &RustTools, run: &RunCmd) -> Result<P
     if let Some(path) = resolution_path.filter(|_| !resolution_is_proxy) {
         return Ok(path.to_path_buf());
     }
+    if resolution_path.is_none() && tools.resolution.configured_path.is_some() {
+        // An explicit setting or env override that does not resolve must not be silently
+        // replaced by whatever `rustup which` finds in the ambient toolchain.
+        return Err(RustToolError::NotFound);
+    }
 
     let Some(rustup) = tools.rustup.as_deref() else {
         return resolution_path
@@ -348,6 +353,23 @@ mod tests {
         let result = resolve_rust_root_with(Path::new("/crate"), &tools, &run);
         assert_eq!(result.executable, Ok(override_path));
         assert_eq!(*calls.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn resolver_does_not_fall_back_to_rustup_for_unresolved_configured_path() {
+        let tools = RustTools {
+            cargo: None,
+            rustup: Some(PathBuf::from("/cargo/bin/rustup")),
+            resolution: ToolResolution {
+                path: None,
+                configured_path: Some(PathBuf::from("/missing/rust-analyzer")),
+                source: None,
+                sdk_root: None,
+            },
+        };
+        let run = |_: &Path, _: &[&str], _: &Path, _: Duration| Ok("/toolchain/bin/rust-analyzer\n".to_owned());
+        let result = resolve_rust_root_with(Path::new("/crate"), &tools, &run);
+        assert_eq!(result.executable, Err(RustToolError::NotFound));
     }
 
     #[test]
