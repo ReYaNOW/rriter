@@ -398,7 +398,7 @@ impl HeadlessSession {
             &mut app.startup_trace,
         )
         .map_err(|error| egl_failure(format!("Renderer: {error}")))?;
-        renderer.ui = crate::theme::UiPalette::for_id(app.ui_theme_id);
+        renderer.set_themes(app.theme.clone(), app.ui_theme_id, app.system_selection);
         app.startup_trace.mark("renderer");
         renderer.resize(w, h);
         app.window = Some(Arc::new(WindowHost::Headless(HeadlessWindow::new(

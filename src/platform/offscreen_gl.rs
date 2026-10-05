@@ -214,6 +214,7 @@ pub(crate) mod test_support {
         let ctx = OffscreenContext::new(width, height).expect("offscreen EGL context");
         let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
         let mut renderer = crate::renderer::Renderer::new(ctx.glow(), scale, app.theme.clone(), ctx.requested_context(), &mut crate::startup_trace::StartupTrace::disabled()).expect("production Renderer");
+        renderer.set_themes(app.theme.clone(), app.ui_theme_id, app.system_selection);
         renderer.resize(width, height);
         app.renderer = Some(renderer);
         app.window = Some(Arc::new(crate::platform::WindowHost::Headless(

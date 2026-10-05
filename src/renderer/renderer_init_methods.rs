@@ -632,6 +632,7 @@ impl Renderer {
             let icon_logo = load_icon_from_memory(trace.take_logo(crate::startup_trace::LOGO_PNG), "icon");
             trace.mark("logo");
 
+            let ui_theme = theme.clone();
             let mut renderer = Self {
                 gl,
                 graphics_diagnostics: diagnostics,
@@ -660,7 +661,7 @@ impl Renderer {
                 scale_factor,
                 theme,
                 ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
-                ui_theme: Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4]),
+                ui_theme,
                 theme_gen: 0,
                 width: 1000.0,
                 height: 800.0,
