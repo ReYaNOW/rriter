@@ -277,19 +277,25 @@ pub(crate) fn database_table_scrollbar(
     lane: (f32, f32, f32, f32), viewport: f32, content: f32,
     offset: f32, horizontal: bool,
 ) -> crate::render_view::scrollbar_widget::Scrollbar {
-    database_table_scrollbar_with_ui(
-        lane,
-        viewport,
-        content,
-        offset,
-        horizontal,
-        &crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
-    )
+    // Geometry-only callers (hit-testing, drags) never read the colours.
+    database_table_scrollbar_styled(lane, viewport, content, offset, horizontal, None, [0.0; 4])
 }
 
 fn database_table_scrollbar_with_ui(
     lane: (f32, f32, f32, f32), viewport: f32, content: f32,
     offset: f32, horizontal: bool, ui: &crate::theme::UiPalette,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    database_table_scrollbar_styled(
+        lane, viewport, content, offset, horizontal,
+        Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
+        ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+    )
+}
+
+fn database_table_scrollbar_styled(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool,
+    track_color: Option<[f32; 4]>, thumb_color: [f32; 4],
 ) -> crate::render_view::scrollbar_widget::Scrollbar {
     use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
     Scrollbar {
@@ -299,8 +305,8 @@ fn database_table_scrollbar_with_ui(
             track_pad: 0.0,
             min_thumb: if horizontal { 36.0 } else { 28.0 },
             radius: Some(3.0),
-            track_color: Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
-            thumb_color: ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+            track_color,
+            thumb_color,
             thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
             track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },

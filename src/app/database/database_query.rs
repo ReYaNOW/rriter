@@ -324,6 +324,9 @@ pub(crate) struct DatabaseQueryReviewMessageLayoutCache {
     message_count: usize,
     max_text_width_bits: u32,
     scale_bits: u32,
+    /// UI palette the item colours were resolved against; a theme switch changes
+    /// it and so rebuilds the items.
+    palette_roles: Option<[[f32; 4]; crate::theme::UiRole::COUNT]>,
     line_height: f32,
     item_gap: f32,
     total_height: f32,
@@ -337,8 +340,10 @@ impl DatabaseQueryReviewMessageLayoutCache {
         message_count: usize,
         max_text_width: f32,
         scale: f32,
+        palette_roles: &[[f32; 4]; crate::theme::UiRole::COUNT],
     ) -> bool {
         self.valid
+            && self.palette_roles.as_ref() == Some(palette_roles)
             && self.revision == revision
             && self.message_count == message_count
             && self.max_text_width_bits == max_text_width.max(0.0).to_bits()
@@ -352,12 +357,14 @@ impl DatabaseQueryReviewMessageLayoutCache {
         message_count: usize,
         max_text_width: f32,
         scale: f32,
+        palette_roles: [[f32; 4]; crate::theme::UiRole::COUNT],
         line_height: f32,
         item_gap: f32,
         total_height: f32,
         items: Vec<DatabaseQueryReviewMessageLayoutItem>,
     ) {
         self.valid = true;
+        self.palette_roles = Some(palette_roles);
         self.revision = revision;
         self.message_count = message_count;
         self.max_text_width_bits = max_text_width.max(0.0).to_bits();

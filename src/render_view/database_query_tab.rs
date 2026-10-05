@@ -377,7 +377,7 @@ impl Renderer {
             w.round(),
             line_h,
             if hovered || resizing {
-                crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR
+                self.ui.pick(UiRole::ResizeHighlight, crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR)
             } else {
                 self.ui.pick(UiRole::Border, [0.35, 0.38, 0.46, 0.65])
             },
@@ -1419,6 +1419,24 @@ mod tests {
         assert!(ensure_database_query_review_message_layout(
             &state, &crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula), 120.0, 1.25, |_| 8.0
         ));
+    }
+
+    #[test]
+    fn review_message_layout_rebuilds_after_ui_theme_switch() {
+        let state = crate::app::database::DatabaseQueryTabState {
+            messages: vec![crate::app::database::DatabaseQueryMessage {
+                severity: "NOTICE".to_string(),
+                message: "row changed".to_string(),
+                ..crate::app::database::DatabaseQueryMessage::default()
+            }],
+            ..crate::app::database::DatabaseQueryTabState::default()
+        };
+        let dark = crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula);
+        let light = crate::theme::UiPalette::for_id(crate::theme::ThemeId::OneLight);
+        assert!(ensure_database_query_review_message_layout(&state, &dark, 160.0, 1.0, |_| 8.0));
+        assert!(!ensure_database_query_review_message_layout(&state, &dark, 160.0, 1.0, |_| 8.0));
+        assert!(ensure_database_query_review_message_layout(&state, &light, 160.0, 1.0, |_| 8.0));
+        assert!(!ensure_database_query_review_message_layout(&state, &light, 160.0, 1.0, |_| 8.0));
     }
 
     #[test]

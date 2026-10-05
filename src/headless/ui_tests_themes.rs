@@ -163,6 +163,25 @@ fn appearance_api_response_repaints_after_ui_theme_change() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn appearance_light_dark_ui_switch_starts_icon_prewarm_only_when_variant_changes() {
+    let dir = scratch_dir("themes-icon-prewarm");
+    let mut session = session_for_test(1280, 800);
+    session.app.ide_workspaces = vec![dir.clone()];
+    session.app.set_theme_linked(false);
+    session.app.apply_themes(ThemeId::Dracula, ThemeId::Dracula);
+    session.app.file_tree_rx = None;
+
+    // Dark to dark: the icon variant is unchanged, no rescan.
+    session.app.apply_themes(ThemeId::Dracula, ThemeId::OneDark);
+    assert!(session.app.file_tree_rx.is_none());
+
+    // Dark to light: the new variant is prewarmed in the background.
+    session.app.apply_themes(ThemeId::Dracula, ThemeId::OneLight);
+    assert!(session.app.file_tree_rx.is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn api_response_session(
     name: &str,
     editor_theme: ThemeId,

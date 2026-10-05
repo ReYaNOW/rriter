@@ -1048,7 +1048,7 @@ impl Renderer {
                     0.0,
                     1.0,
                     resize_max_y,
-                    crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR,
+                    self.ui.pick(UiRole::ResizeHighlight, crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR),
                 );
             }
         }

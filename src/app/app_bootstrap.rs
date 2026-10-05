@@ -315,6 +315,8 @@ impl App {
             settings_database_scroll: crate::scroll::ScrollState::new(7.0),
             settings_general_max_scroll: 0.0,
             settings_database_max_scroll: 0.0,
+            settings_appearance_scroll: crate::scroll::ScrollState::new(7.0),
+            settings_appearance_max_scroll: 0.0,
 
             ide_panel: crate::app::IdePanelState::default(),
             database_runtime: None,

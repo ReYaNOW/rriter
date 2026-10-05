@@ -478,6 +478,9 @@ pub struct Renderer {
         rustc_hash::FxHashMap<(&'static str, bool), crate::app::file_tree::RasterizedIconState>,
     /// On-demand file icon rasterizations still allowed in this frame; reset at frame start.
     pub(crate) icon_rasterize_budget: u8,
+    /// An icon was skipped this frame because the budget ran out; the frame loop
+    /// requests one more redraw so the rest is rasterized without user input.
+    pub(crate) icon_raster_deferred: bool,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub phys_to_visual_editor_version: u64,

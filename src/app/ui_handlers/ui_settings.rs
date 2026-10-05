@@ -228,6 +228,23 @@ impl App {
                     );
                 }
             }
+            UiId::SettingsAppearanceScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsAppearanceScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(
+                        rect, rect.3, self.settings_appearance_max_scroll,
+                        self.settings_appearance_scroll.current, 6.0, 40.0,
+                        self.renderer.as_ref()
+                            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                            .unwrap_or_default(),
+                    );
+                    let geometry = bar.geometry(s);
+                    crate::app::mouse::press_scrollbar(
+                        &mut self.settings_appearance_scroll, geometry, 0.0, pointer,
+                    );
+                }
+            }
             UiId::SettingsToolPick(idx) => {
                 if !self.tool_installer.is_running()
                     && let Some(kind) = crate::platform::ToolKind::from_index(idx)

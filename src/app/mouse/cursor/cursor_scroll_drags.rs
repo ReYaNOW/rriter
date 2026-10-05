@@ -3,6 +3,15 @@ use super::*;
 use crate::theme::UiRole;
 
 impl App {
+    /// Settings scrollbar thumb colour; a missing renderer yields a transparent default
+    /// instead of a panic in the drag path.
+    fn settings_scrollbar_thumb_color(&self) -> [f32; 4] {
+        self.renderer
+            .as_ref()
+            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+            .unwrap_or_default()
+    }
+
     /// Scrollbar drags and popup/log text selection; `true` = handled.
     #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -214,7 +223,7 @@ impl App {
                 );
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, max_scroll, self.settings_ide_scroll.current,
-                    6.0, 40.0, self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                    6.0, 40.0, self.settings_scrollbar_thumb_color(),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -238,7 +247,7 @@ impl App {
                     .get_faq_max_scroll(&self.faq_editor, rect.3);
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, max_scroll, self.settings_scroll.current,
-                    6.0, 40.0, self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                    6.0, 40.0, self.settings_scrollbar_thumb_color(),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -255,7 +264,7 @@ impl App {
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.settings_general_max_scroll,
                     self.settings_general_scroll.current, 6.0, 40.0,
-                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                    self.settings_scrollbar_thumb_color(),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -272,7 +281,7 @@ impl App {
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.settings_database_max_scroll,
                     self.settings_database_scroll.current, 6.0, 40.0,
-                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                    self.settings_scrollbar_thumb_color(),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -283,13 +292,30 @@ impl App {
             return true;
         }
 
+        if self.settings_appearance_scroll.is_dragging {
+            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsAppearanceScrollY) {
+                let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, self.settings_appearance_max_scroll,
+                    self.settings_appearance_scroll.current, 6.0, 40.0,
+                    self.settings_scrollbar_thumb_color(),
+                );
+                let geometry = bar.geometry(s);
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.settings_appearance_scroll, geometry, 0.0, position.y as f32,
+                );
+            }
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return true;
+        }
+
         if self.keymap_settings.scroll.is_dragging {
             if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsKeymapScrollY) {
                 let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.keymap_settings.max_scroll,
                     self.keymap_settings.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB,
-                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                    self.settings_scrollbar_thumb_color(),
                 );
                 crate::app::mouse::drag_scrollbar(
                     &mut self.keymap_settings.scroll, bar.geometry(s), 0.0, py,

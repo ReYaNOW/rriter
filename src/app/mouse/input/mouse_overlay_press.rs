@@ -409,6 +409,7 @@ impl App {
                 self.settings_ide_scroll.end_drag();
                 self.settings_general_scroll.end_drag();
                 self.settings_database_scroll.end_drag();
+                self.settings_appearance_scroll.end_drag();
                 self.keymap_settings.scroll.end_drag();
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;

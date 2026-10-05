@@ -551,6 +551,7 @@ impl Renderer {
             // At most one synchronous rasterization per frame; the rest retry next frame
             // (or get picked up by the file-tree scan).
             if self.icon_rasterize_budget == 0 {
+                self.icon_raster_deferred = true;
                 return None;
             }
             self.icon_rasterize_budget -= 1;

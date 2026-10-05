@@ -94,3 +94,29 @@ fn headless_settings_editor_ctrl_wheel_clamps_at_maximum() {
     assert_eq!(restored_to_default, crate::CTRL_WHEEL_MULTIPLIER_DEFAULT);
     assert_eq!(restored, initial, "restore shared temporary test profile");
 }
+
+#[test]
+fn headless_settings_appearance_split_lists_scroll_and_hitboxes_follow() {
+    use crate::theme::ThemeId;
+    let mut session = session_for_test(1280, 600);
+    let initial = session.app.theme_selection();
+    session.app.set_theme_linked(false);
+    open_settings_tab(&mut session, 3);
+    let id = "SettingsThemePick(Ui, OneLight)";
+    let before = dump(&mut session);
+    assert!(!has_ui(&before, id), "{id} should be clipped before scrolling: {before}");
+
+    let lines = run_script(&mut session, b"mouse_move 700 300\nwheel 0 -10\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    crate::headless::tests_support::wait_until(&mut session, 5000, "Appearance scroll", |session| {
+        let lines = run_script(session, b"settle 2000\n");
+        lines.iter().any(|line| line.ends_with("settled=true"))
+    });
+    assert!(session.app.settings_appearance_scroll.current > 0.0);
+    assert!(has_ui(&dump(&mut session), id));
+    click_ui(&mut session, id);
+    assert_eq!(session.app.ui_theme_id, ThemeId::OneLight);
+
+    session.app.apply_themes(initial.editor, initial.ui);
+    session.app.set_theme_linked(initial.linked);
+}

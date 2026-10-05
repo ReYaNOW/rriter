@@ -440,8 +440,10 @@ impl Renderer {
         scroll_y: f32,
         general_scroll_y: f32,
         database_scroll_y: f32,
+        appearance_scroll_y: f32,
         general_max_scroll: &mut f32,
         database_max_scroll: &mut f32,
+        appearance_max_scroll: &mut f32,
         ide_workspaces: &[std::path::PathBuf],
         ide_ignore_patterns: &[String],
         settings_ignore_editor: &Editor,
@@ -1041,14 +1043,33 @@ impl Renderer {
             );
         } else if active_tab == 3 {
             self.begin_settings_content_clip(ui_registry, settings_content_clip);
-            super::settings_appearance_ui::draw(
+            let content_bottom = super::settings_appearance_ui::draw(
                 self,
                 content_x,
                 content_y,
                 content_available_w,
+                appearance_scroll_y,
                 theme_selection,
                 ui_registry,
             );
+            *appearance_max_scroll =
+                (content_bottom + (12.0 * s).round() - (iy + ih)).max(0.0);
+            if *appearance_max_scroll > 0.0 {
+                let sb_x = (ix + iw - 14.0 * s).round();
+                let bar = settings_scrollbar(
+                    (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
+                    settings_content_clip.h, *appearance_max_scroll, appearance_scroll_y,
+                    6.0, 40.0,
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                );
+                self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: &mut *ui_registry,
+                    id: crate::ui_system::UiId::SettingsAppearanceScrollY,
+                    mx: self.last_mouse_x,
+                    my: self.last_mouse_y,
+                    blocker: false,
+                }));
+            }
             self.end_settings_content_clip(ui_registry);
         } else if active_tab == 4 {
             self.flush();

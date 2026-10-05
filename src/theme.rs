@@ -218,10 +218,11 @@ pub(crate) enum UiRole {
     MarkdownQuote,
     MarkdownHeading,
     PdfText,
+    ResizeHighlight,
 }
 
 impl UiRole {
-    pub(crate) const COUNT: usize = Self::PdfText as usize + 1;
+    pub(crate) const COUNT: usize = Self::ResizeHighlight as usize + 1;
     pub(crate) const ALL: [Self; Self::COUNT] = [
         Self::BgPanel,
         Self::BgPanelAlt,
@@ -289,6 +290,7 @@ impl UiRole {
         Self::MarkdownQuote,
         Self::MarkdownHeading,
         Self::PdfText,
+        Self::ResizeHighlight,
     ];
 }
 
@@ -385,6 +387,7 @@ impl UiPalette {
                 [0.78,0.75,0.87,1.0],
                 [0.95,0.93,0.98,1.0],
                 [0.972, 0.972, 0.949, 1.0],
+                [0.60, 0.35, 0.85, 0.4],
                 ],
                 dracula: true,
             };
@@ -522,6 +525,7 @@ fn ui_theme_color(
         UiRole::TokenPunctuation => color(SyntaxRole::Delimiter),
         UiRole::MarkdownQuote => color(SyntaxRole::Comment),
         UiRole::PdfText => values.fg,
+        UiRole::ResizeHighlight => alpha(accent, 0.4),
     }
 }
 
@@ -793,6 +797,7 @@ mod tests {
             [1.0, 0.85, 0.2, 0.35], [1.0, 0.55, 0.1, 0.55], [0.50, 0.90, 0.55, 1.0],
             [1.0, 0.67, 0.16, 1.0], [1.0, 0.68, 0.26, 1.0], [0.86, 0.87, 0.91, 1.0],
             [0.78, 0.75, 0.87, 1.0], [0.95, 0.93, 0.98, 1.0], [0.972, 0.972, 0.949, 1.0],
+            [0.60, 0.35, 0.85, 0.4],
         ];
         assert_eq!(
             ui.roles.map(|color| color.map(f32::to_bits)),

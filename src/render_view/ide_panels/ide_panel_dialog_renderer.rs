@@ -124,11 +124,7 @@ impl Renderer {
         // Прозрачность терминала/ляпов (0.0 - полностью прозрачный, 1.0 - непрозрачный)
         let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
 
-        let active_panel = ide_panel
-            .slots
-            .iter()
-            .find(|slot| slot.group == crate::app::PanelGroup::Bottom && slot.open)
-            .map(|slot| slot.id);
+        let active_panel = ide_panel.open_bottom_panel_id();
         let panel_bg = if active_panel == Some(crate::app::PanelId::Terminal) {
             [self.theme.terminal_bg[0], self.theme.terminal_bg[1], self.theme.terminal_bg[2], panel_alpha]
         } else {

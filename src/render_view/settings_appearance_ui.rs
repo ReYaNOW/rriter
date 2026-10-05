@@ -3,15 +3,21 @@ use crate::renderer::Theme;
 use crate::theme::{SyntaxPalette, SyntaxRole, ThemeId, ThemeSelection};
 use crate::ui_system::{ThemeTarget, UiId, UiRegistry};
 
+/// Draws the tab shifted up by `scroll_y` (rounded, so hit-boxes follow the
+/// pixels) and returns the unscrolled y of the content bottom for the caller's
+/// max-scroll computation.
 pub(super) fn draw(
     renderer: &mut Renderer,
     x: f32,
     y: f32,
     width: f32,
+    scroll_y: f32,
     selection: ThemeSelection,
     ui: &mut UiRegistry,
-) {
+) -> f32 {
     let s = renderer.scale_factor;
+    let scroll = scroll_y.round();
+    let y = (y - scroll).round();
     let palette = renderer.ui;
     let linked_h = (30.0 * s).round().max(1.0);
     let linked_hovered = ui.register_rect(
@@ -101,4 +107,5 @@ pub(super) fn draw(
         row_y = (row_y + row_h + row_gap).round();
         }
     }
+    row_y + scroll
 }

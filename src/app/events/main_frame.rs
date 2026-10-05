@@ -530,8 +530,10 @@ impl App {
                         self.settings_scroll.current,
                         self.settings_general_scroll.current,
                         self.settings_database_scroll.current,
+                        self.settings_appearance_scroll.current,
                         &mut self.settings_general_max_scroll,
                         &mut self.settings_database_max_scroll,
+                        &mut self.settings_appearance_max_scroll,
                         &self.ide_workspaces,
                         &self.ide_ignore_patterns,
                         &self.settings_ignore_editor,
@@ -560,6 +562,8 @@ impl App {
                         .clamp_target(0.0, self.settings_general_max_scroll);
                     self.settings_database_scroll
                         .clamp_target(0.0, self.settings_database_max_scroll);
+                    self.settings_appearance_scroll
+                        .clamp_target(0.0, self.settings_appearance_max_scroll);
                     if settings_cursor_mode == 1 {
                         wants_pointer = true;
                     }
@@ -985,6 +989,15 @@ impl App {
 
                 if self.autocomplete_active && self.autocomplete_anim_progress < 1.0 {
                     self.window.as_ref().unwrap().request_redraw();
+                }
+
+                // Icons left unrasterized by the per-frame budget (e.g. after a light/dark UI
+                // switch) need another frame; nothing else would schedule it.
+                if let Some(renderer) = self.renderer.as_mut()
+                    && std::mem::take(&mut renderer.icon_raster_deferred)
+                    && let Some(window) = self.window.as_ref()
+                {
+                    window.request_redraw();
                 }
 
                 if let Some(log) = self.pending_key_log.take() {

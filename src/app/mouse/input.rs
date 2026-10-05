@@ -343,6 +343,7 @@ impl App {
         self.settings_ide_scroll.end_drag();
         self.settings_general_scroll.end_drag();
         self.settings_database_scroll.end_drag();
+        self.settings_appearance_scroll.end_drag();
         self.autocomplete_scroll.end_drag();
         self.ide_panel.explorer_scroll.end_drag();
         self.ide_panel.project_search.scroll.end_drag();

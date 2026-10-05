@@ -255,6 +255,12 @@ fn about_to_wait_settings_scrolls(app: &mut App, dt: f32) -> bool {
     {
         needs_redraw = true;
     }
+    if app.show_settings
+        && app.settings_tab == 3
+        && app.settings_appearance_scroll.update(dt)
+    {
+        needs_redraw = true;
+    }
     if app.show_settings && app.settings_tab == 6 && app.keymap_settings.scroll.update(dt) {
         needs_redraw = true;
     }
