@@ -56,11 +56,8 @@ impl Renderer {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
-            if let Some(g) = self.get_ui_glyph(c) {
-                let (q_x, q_y, q_w, q_h) =
-                    crate::renderer::glyph_quad_rect(draw_x, y, g, scale);
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                draw_x += Self::snapped_text_advance(g.advance, scale);
+            if let Some(advance) = self.push_ui_glyph_at_scale(c, draw_x, y, scale, color, false) {
+                draw_x += advance;
             }
         }
     }
@@ -73,9 +70,9 @@ impl Renderer {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
-            if let Some(g) = self.get_ui_glyph(c) {
-                let glyph_top = -g.offset_y * scale;
-                let glyph_bottom = (g.height - g.offset_y) * scale;
+            if let Some(g) = self.ui_glyph_at_scale(c, scale) {
+                let glyph_top = g.top();
+                let glyph_bottom = g.bottom();
                 if seen {
                     top = top.min(glyph_top);
                     bottom = bottom.max(glyph_bottom);
@@ -832,7 +829,7 @@ impl Renderer {
                 if lsp_has_issues {
                     Some(self.ui.pick(UiRole::Warning, [1.0, 0.8, 0.1, 1.0]))
                 } else {
-                    Some(self.ui.pick(UiRole::TextSecondary, [0.69, 0.745, 0.773, 1.0]))
+                    Some(self.ui.pick(UiRole::TextMuted, [0.69, 0.745, 0.773, 1.0]))
                 }
             } else if slot.id == crate::app::PanelId::Database {
                 Some(self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]))
@@ -871,7 +868,7 @@ impl Renderer {
                         if lsp_has_issues {
                             Some(self.ui.pick(UiRole::Warning, [1.0, 0.8, 0.1, 1.0]))
                         } else {
-                            Some(self.ui.pick(UiRole::TextSecondary, [0.69, 0.745, 0.773, 1.0]))
+                            Some(self.ui.pick(UiRole::TextMuted, [0.69, 0.745, 0.773, 1.0]))
                         }
                     } else if slot.id == crate::app::PanelId::Database {
                         Some(self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]))

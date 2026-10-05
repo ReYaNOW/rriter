@@ -21,6 +21,21 @@ PATTERNS = (
     ("git-command", re.compile(r"\bCommand\s*::\s*new\s*\(\s*\"git\"")),
 )
 RENDER_ACCUMULATION = re.compile(r"\b(?:cy|y|row_y)\s*\+=\s*[^;\n]*\*\s*s\b")
+# Glyph bitmaps must be placed through the core_text helpers (`push_ui_glyph_at_scale`,
+# `push_scaled_glyph`, ...): they draw the glyph rasterized at the final pixel size 1:1.
+# Scaling a glyph quad or its metrics by hand resamples the bitmap and rounds each glyph's
+# top differently (letters jump vertically at fractional display scales). Only the helper
+# modules may do it; elsewhere a deliberate exception needs the marker on the line or the
+# line above, e.g. `// lint: subpixel-glyph-ok hover zoom animation`.
+SCALED_GLYPH_EXEMPT = {
+    "src/render_view/core_text.rs",
+    "src/render_view/core_text_editor_helpers.rs",
+    "src/renderer/geometry.rs",
+}
+SUBPIXEL_GLYPH_MARKER = "lint: subpixel-glyph-ok"
+GLYPH_RECT_CALL = re.compile(r"(?<!fn )\b(?:glyph_quad_rect|pixel_stable_glyph_rect)\s*\(")
+GLYPH_METRIC = re.compile(r"\boffset_[xy]\b|\b(?:g|gi|glyph|\w+_glyph|glyph_\w+)\.(?:width|height)\b")
+MULTIPLY_BEFORE = re.compile(r"[\w)\]]\s*\*$")
 
 
 def run(args, *, text=True):
@@ -80,6 +95,94 @@ def added_lines(base, untracked):
         else:
             fresh.append(entry)
     return fresh
+
+
+def _code_part(line):
+    return line.split("//", 1)[0]
+
+
+def _is_multiplied(code, start, end):
+    """True when code[start:end] is a `*` operand, directly or inside an enclosing (...) group."""
+    while start > 0 and (code[start - 1].isalnum() or code[start - 1] in "_."):
+        start -= 1
+    spans = [(start, end)]
+    depth = 0
+    for index in range(start - 1, -1, -1):
+        if code[index] == ")":
+            depth += 1
+        elif code[index] == "(":
+            if depth:
+                depth -= 1
+                continue
+            close, inner = len(code), 0
+            for probe in range(index, len(code)):
+                if code[probe] == "(":
+                    inner += 1
+                elif code[probe] == ")":
+                    inner -= 1
+                    if inner == 0:
+                        close = probe + 1
+                        break
+            open_at = index
+            # `foo(..)` / `a.max(..)` is one operand together with its callee path.
+            while open_at > 0 and (code[open_at - 1].isalnum() or code[open_at - 1] in "_.:"):
+                open_at -= 1
+            spans.append((open_at, close))
+    return any(
+        code[span_end:].lstrip().startswith("*") or MULTIPLY_BEFORE.search(code[:span_start].rstrip())
+        for span_start, span_end in spans
+    )
+
+
+def _call_args(text, open_paren):
+    """Top-level arguments of the call whose `(` is at `open_paren`, and the index after `)`."""
+    args, depth, current = [], 0, []
+    for index in range(open_paren, len(text)):
+        char = text[index]
+        if char in "([{":
+            depth += 1
+            if depth == 1:
+                continue
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                args.append("".join(current))
+                return [arg.strip() for arg in args if arg.strip()], index + 1
+        elif char == "," and depth == 1:
+            args.append("".join(current))
+            current = []
+            continue
+        if depth >= 1:
+            current.append(char)
+    return None, len(text)
+
+
+def scaled_glyph_violations(path, lines, added):
+    """`(line_no, message)` for hand-scaled glyph placement touching the `added` line numbers."""
+    if not path.startswith("src/") or path in SCALED_GLYPH_EXEMPT:
+        return []
+
+    def allowed(line_no, last_line_no=None):
+        window = lines[max(line_no - 2, 0):(last_line_no or line_no)]
+        return any(SUBPIXEL_GLYPH_MARKER in line for line in window)
+
+    found = []
+    for line_no in sorted(added):
+        if not 0 < line_no <= len(lines):
+            continue
+        code = _code_part(lines[line_no - 1])
+        if any(_is_multiplied(code, m.start(), m.end()) for m in GLYPH_METRIC.finditer(code)) and not allowed(line_no):
+            found.append((line_no, "glyph metric scaled by hand; use ui_glyph_at_scale / ScaledGlyph metrics"))
+    text = "\n".join(_code_part(line) for line in lines)
+    for match in GLYPH_RECT_CALL.finditer(text):
+        args, end = _call_args(text, match.end() - 1)
+        if not args or args[-1] == "1.0":
+            continue
+        first = text.count("\n", 0, match.start()) + 1
+        last = text.count("\n", 0, end) + 1
+        if any(first <= line_no <= last for line_no in added) and not allowed(first, last):
+            found.append((first, "glyph quad scaled by hand; use push_ui_glyph_at_scale / push_scaled_glyph"))
+    return found
 
 
 def source_line_counts():
@@ -197,7 +300,18 @@ def main():
     untracked = set(run(["git", "ls-files", "--others", "--exclude-standard"]).stdout.splitlines())
     pattern_counts = {}
     pattern_locations = {}
-    for path, line_no, text in added_lines(base, untracked):
+    fresh_lines = added_lines(base, untracked)
+    added_by_path = {}
+    for path, line_no, _ in fresh_lines:
+        added_by_path.setdefault(path, set()).add(line_no)
+    for path, added in added_by_path.items():
+        try:
+            lines = (ROOT / path).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            continue
+        for line_no, message in scaled_glyph_violations(path, lines, added):
+            violations.append((path, line_no, "scaled-glyph-placement", message))
+    for path, line_no, text in fresh_lines:
         if path.startswith("src/"):
             for index in (0, 1):
                 if PATTERNS[index][1].search(text):

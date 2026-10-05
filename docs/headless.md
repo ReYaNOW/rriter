@@ -152,7 +152,7 @@ quit
 Take the center of `rect`, then `mouse_move cx cy` and `click`. `hover` shows
 what the cursor is over after `mouse_move`.
 
-Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
+Other `dump` keys: `size`, `scale`, `atlas` (`alpha_resets`, `color_resets` — glyph atlas resets since start, `alpha_fill_y` — used rows of the alpha atlas), `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
 markdown, `markdown_media` (always an array, empty unless the tab is a Markdown tab in Read mode with a layout; otherwise one object per laid-out media element: `key` (file path, URL or `mermaid:<hash>`), `state` = `pending|ready|failed:<MediaError variant>`, laid-out rectangle `x`/`y`/`w`/`h` in document pixels, `null` for an element drawn without a media rectangle such as a failed Mermaid block), `kind` (`normal|git_diff|api_client|database_table|database_query|pdf`)), `markdown_media_stats` (`media_gen`, `loads_started`, `texture_bytes`, `visible_texture_bytes` of the shared media cache), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
 highlight version and byte-range spans), `ide_panel` (`active`, `open`, `width`, `problem_rows` — rows of the Problems list, `problems_scroll`), `diagnostics` (`errors`, `warnings`, `generation` of the LSP diagnostics store, `null` without LSP), `overlays`,

@@ -116,6 +116,11 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         return json!(null);
     };
     let scale = renderer.scale_factor;
+    let atlas_stats = (
+        renderer.alpha_atlas_resets,
+        renderer.color_atlas_resets,
+        renderer.atlas_y + renderer.max_row_h,
+    );
     let mode = if app.show_welcome {
         "welcome"
     } else if app.is_ide_mode {
@@ -179,6 +184,11 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "editor": app.editor_theme_id.key(),
             "ui": app.ui_theme_id.key(),
             "linked": app.theme_linked,
+        },
+        "atlas": {
+            "alpha_resets": atlas_stats.0,
+            "color_resets": atlas_stats.1,
+            "alpha_fill_y": atlas_stats.2,
         },
         "tabs": tabs_json(app),
         "markdown_media_stats": {

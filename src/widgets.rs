@@ -173,7 +173,7 @@ impl<'a> ButtonView<'a> {
         let hovered = enabled && self.is_pixel_snapped_hovered(mx, my);
 
         let standard = ButtonStyle {
-            border: renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel),
+            border: renderer.ui.pick(UiRole::ControlBorder, renderer.ui_theme.sel),
             background: renderer.ui.pick(UiRole::BgPanelAlt, [0.22, 0.24, 0.26, 1.0]),
             hover_background: renderer.ui.pick(UiRole::RowHover, [0.28, 0.30, 0.33, 1.0]),
             pressed_background: renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel),
@@ -359,8 +359,16 @@ impl IconButton {
         let accent_hover = ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 1.0]);
         let selection = ui.pick(UiRole::Selection, theme.sel);
         let row_hover = ui.pick(UiRole::RowHover, [0.26, 0.28, 0.30, 1.0]);
-        let icon_on_accent = ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]);
-        let icon_plain = ui.pick(UiRole::Icon, theme.fg);
+        let icon_on_accent = if self.active_square_width.is_some() {
+            ui.pick(UiRole::TextOnAccent, [1.0, 1.0, 1.0, 1.0])
+        } else {
+            ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
+        };
+        let icon_plain = if self.active_square_width.is_some() {
+            ui.pick(UiRole::TextMuted, theme.fg)
+        } else {
+            ui.pick(UiRole::Icon, theme.fg)
+        };
 
         if self.is_active {
             if let Some(sq_w) = self.active_square_width {
@@ -377,14 +385,14 @@ impl IconButton {
                 let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
                 let offset = (self.size - icon_render_size) / 2.0;
                 if let Some(icon_type) = self.icon {
-                    let icon_col = self.custom_color.unwrap_or(icon_on_accent);
-                    renderer.draw_atlas_icon(
-                        icon_type,
-                        (self.x + offset).round(),
-                        (self.y + offset).round(),
-                        icon_render_size,
-                        icon_col,
-                    );
+                    let (x, y) = ((self.x + offset).round(), (self.y + offset).round());
+                    // A custom color is a status tint (Problems warning, Database) and must
+                    // recolor even colored SVGs, so it keeps the multiply path.
+                    if let Some(color) = self.custom_color {
+                        renderer.draw_atlas_icon(icon_type, x, y, icon_render_size, color);
+                    } else {
+                        renderer.draw_rail_icon(icon_type, x, y, icon_render_size, icon_on_accent);
+                    }
                 }
                 return false;
             }
@@ -429,13 +437,12 @@ impl IconButton {
             } else {
                 icon_plain
             };
-            renderer.draw_atlas_icon(
-                icon_type,
-                (self.x + offset).round(),
-                (self.y + offset).round(),
-                icon_render_size,
-                icon_color,
-            );
+            let (x, y) = ((self.x + offset).round(), (self.y + offset).round());
+            if self.active_square_width.is_some() && self.custom_color.is_none() {
+                renderer.draw_rail_icon(icon_type, x, y, icon_render_size, icon_color);
+            } else {
+                renderer.draw_atlas_icon(icon_type, x, y, icon_render_size, icon_color);
+            }
         }
 
         hovered

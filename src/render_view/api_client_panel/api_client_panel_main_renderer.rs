@@ -21,7 +21,7 @@ impl Renderer {
             label,
             x + (w - text_w) * 0.5,
             api_panel_row_text_y(y, h, s),
-            self.ui.pick(UiRole::TextOnAccent, [1.0, 1.0, 1.0, 1.0]),
+            crate::theme::text_on_fill(color),
             text_scale,
         );
     }

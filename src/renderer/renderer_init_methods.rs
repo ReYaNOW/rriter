@@ -239,6 +239,8 @@ impl Renderer {
         self.atlas_x = 2;
         self.atlas_y = 2;
         self.max_row_h = 0;
+        self.color_atlas_width = COLOR_ATLAS_SIZE_W;
+        self.color_atlas_height = COLOR_ATLAS_SIZE_H;
         self.color_atlas_x = 2;
         self.color_atlas_y = 2;
         self.color_max_row_h = 0;
@@ -263,8 +265,8 @@ impl Renderer {
                     glow::TEXTURE_2D,
                     0,
                     glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
+                    self.color_atlas_width,
+                    self.color_atlas_height,
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
@@ -656,6 +658,8 @@ impl Renderer {
                 color_atlas_x: 2,
                 color_atlas_y: 2,
                 color_max_row_h: 0,
+                alpha_atlas_resets: 0,
+                color_atlas_resets: 0,
                 color_atlas_width: COLOR_ATLAS_SIZE_W,
                 color_atlas_height: COLOR_ATLAS_SIZE_H,
                 font_size: 18.0 * scale_factor,

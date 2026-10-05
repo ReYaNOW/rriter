@@ -10,8 +10,12 @@ pub(crate) use geometry::{
 };
 
 pub const MAX_VERTICES: usize = 32_768;
-pub const ATLAS_SIZE_W: i32 = 1024;
-pub const ATLAS_SIZE_H: i32 = 1024;
+/// Alpha atlas side. UI text at each scale is rasterized at its own final pixel size
+/// (`push_ui_glyph_at_scale`), and an overflow drops every glyph and icon
+/// (`reset_texture_atlas`); at 2x display scale a 1024 atlas reached 923 rows after
+/// visiting seven screens. 2048x2048 R8 costs 4 MB.
+pub const ATLAS_SIZE_W: i32 = 2048;
+pub const ATLAS_SIZE_H: i32 = 2048;
 pub(crate) const COLOR_ATLAS_SIZE_W: i32 = 512;
 pub(crate) const COLOR_ATLAS_SIZE_H: i32 = 512;
 /// The color atlas doubles on overflow up to this side, then resets in place.
@@ -422,6 +426,10 @@ pub struct Renderer {
     pub color_atlas_x: i32,
     pub color_atlas_y: i32,
     pub color_max_row_h: i32,
+    /// Overflow resets of the alpha / color atlas (each drops every cached glyph and
+    /// icon); exposed in headless `dump` as `atlas`.
+    pub alpha_atlas_resets: u32,
+    pub color_atlas_resets: u32,
     pub color_atlas_width: i32,
     pub color_atlas_height: i32,
     pub font_size: f32,

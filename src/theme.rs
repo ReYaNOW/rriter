@@ -165,6 +165,7 @@ pub(crate) enum UiRole {
     BgMedia,
     BgPdfPaper,
     Border,
+    ControlBorder,
     TextPrimary,
     TextSecondary,
     TextMuted,
@@ -230,6 +231,7 @@ impl UiRole {
         Self::BgMedia,
         Self::BgPdfPaper,
         Self::Border,
+        Self::ControlBorder,
         Self::TextPrimary,
         Self::TextSecondary,
         Self::TextMuted,
@@ -320,6 +322,7 @@ impl UiPalette {
                 [0.11,0.12,0.15,0.96],
                 [0.11,0.12,0.13,1.0],
                 [0.32, 0.34, 0.42, 1.0],
+                [0.60, 0.35, 0.85, 1.0],
                 [1.0,1.0,1.0,1.0],
                 [0.68, 0.7, 0.78, 1.0],
                 [0.55,0.57,0.64,1.0],
@@ -445,6 +448,13 @@ fn contrast(a: [f32; 4], b: [f32; 4]) -> f64 {
     (lighter + 0.05) / (darker + 0.05)
 }
 
+/// Label color for text drawn on a filled chip whose color is not the theme accent.
+pub(crate) fn text_on_fill(fill: [f32; 4]) -> [f32; 4] {
+    let dark = [0.04, 0.05, 0.07, 1.0];
+    let white = [1.0, 1.0, 1.0, 1.0];
+    if contrast(dark, fill) >= contrast(white, fill) { dark } else { white }
+}
+
 fn ui_theme_color(
     role: UiRole,
     id: ThemeId,
@@ -473,7 +483,8 @@ fn ui_theme_color(
         UiRole::BgCode => bg_code,
         UiRole::BgMedia => bg_panel_alt,
         UiRole::BgPdfPaper => [0.972, 0.972, 0.949, 1.0],
-        UiRole::Border => mix(values.bg, values.fg, 0.12),
+        UiRole::Border => mix(values.bg, values.fg, if luminance(values.bg) > 0.5 { 0.24 } else { 0.12 }),
+        UiRole::ControlBorder => mix(bg_panel, accent, 0.40),
         UiRole::TextPrimary => values.fg,
         UiRole::TextSecondary | UiRole::Icon => mix(values.fg, values.bg, 0.15),
         UiRole::TextMuted => mix(values.fg, values.bg, 0.28),
@@ -756,7 +767,7 @@ mod tests {
             [0.13, 0.14, 0.18, 1.0], [0.08, 0.09, 0.12, 1.0], [0.0, 0.0, 0.0, 0.42],
             [0.2, 0.18, 0.29, 1.0], [0.28, 0.24, 0.34, 1.0], [0.224, 0.231, 0.251, 1.0],
             [0.075, 0.078, 0.098, 1.0], [0.11, 0.12, 0.15, 0.96], [0.11, 0.12, 0.13, 1.0],
-            [0.32, 0.34, 0.42, 1.0], [1.0, 1.0, 1.0, 1.0], [0.68, 0.7, 0.78, 1.0],
+            [0.32, 0.34, 0.42, 1.0], [0.60, 0.35, 0.85, 1.0], [1.0, 1.0, 1.0, 1.0], [0.68, 0.7, 0.78, 1.0],
             [0.55, 0.57, 0.64, 1.0], [1.0, 1.0, 1.0, 1.0], [0.6, 0.35, 0.85, 1.0],
             [0.6, 0.35, 0.85, 0.8], [0.6, 0.35, 0.85, 0.14], [0.60, 0.35, 0.85, 0.24],
             [0.55, 0.36, 0.90, 0.36], [0.7, 0.33, 0.54, 1.0], [1.0, 1.0, 1.0, 1.0],
@@ -825,6 +836,30 @@ mod tests {
             }
             previous = ui;
         }
+    }
+
+    #[test]
+    fn control_and_dialog_borders_meet_contrast_targets() {
+        for id in [ThemeId::OneDark, ThemeId::Forest, ThemeId::Sepia, ThemeId::OneLight] {
+            let ui = UiPalette::for_id(id);
+            assert!(
+                contrast(ui.roles[UiRole::ControlBorder as usize], ui.roles[UiRole::BgPanel as usize]) >= 1.6,
+                "{id:?} control border contrast: {:.3}",
+                contrast(ui.roles[UiRole::ControlBorder as usize], ui.roles[UiRole::BgPanel as usize]),
+            );
+        }
+
+        for id in [ThemeId::Sepia, ThemeId::OneLight] {
+            let ui = UiPalette::for_id(id);
+            assert!(
+                contrast(ui.roles[UiRole::Border as usize], ui.roles[UiRole::BgDialog as usize]) >= 1.4,
+                "{id:?} dialog border contrast: {:.3}",
+                contrast(ui.roles[UiRole::Border as usize], ui.roles[UiRole::BgDialog as usize]),
+            );
+        }
+
+        assert_eq!(text_on_fill([0.35, 0.75, 1.0, 1.0]), [0.04, 0.05, 0.07, 1.0]);
+        assert_eq!(text_on_fill([0.34, 0.44, 0.10, 1.0]), [1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]

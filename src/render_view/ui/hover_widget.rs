@@ -1303,6 +1303,7 @@ impl Renderer {
                                 }
                             }
                             let glyph_x = (draw_x + g.offset_x * scale_mul).round();
+                            // lint: subpixel-glyph-ok hover zoom animation keeps sub-pixel Y; snapping here causes visible stepping.
                             let glyph_y = text_y - g.offset_y * scale_mul;
                             if fixed_visible_size {
                                 self.push_quad_subpixel_y(
