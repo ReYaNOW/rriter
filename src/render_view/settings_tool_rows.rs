@@ -1,4 +1,5 @@
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct EditorCtrlWheelLayout {
@@ -157,27 +158,28 @@ fn tool_status_text(
 }
 
 fn tool_status_color(
+    ui: &crate::theme::UiPalette,
     kind: crate::platform::ToolKind,
     resolution: &crate::platform::ToolResolution,
     dart_state: &crate::app::tool_installer::DartToolState,
 ) -> [f32; 4] {
     if kind == crate::platform::ToolKind::Dart {
         return match dart_state.status() {
-            crate::app::tool_installer::DartToolStatus::Ready => [0.46, 0.82, 0.58, 1.0],
+            crate::app::tool_installer::DartToolStatus::Ready => ui.pick(UiRole::Success, [0.46, 0.82, 0.58, 1.0]),
             crate::app::tool_installer::DartToolStatus::Checking
             | crate::app::tool_installer::DartToolStatus::Installing
             | crate::app::tool_installer::DartToolStatus::Updating
             | crate::app::tool_installer::DartToolStatus::Cancelling => {
-                [0.72, 0.72, 0.82, 1.0]
+                ui.pick(UiRole::TextSecondary, [0.72, 0.72, 0.82, 1.0])
             }
             crate::app::tool_installer::DartToolStatus::NotFound
-            | crate::app::tool_installer::DartToolStatus::Error => [0.90, 0.52, 0.52, 1.0],
+            | crate::app::tool_installer::DartToolStatus::Error => ui.pick(UiRole::Error, [0.90, 0.52, 0.52, 1.0]),
         };
     }
     if resolution.is_ready() {
-        [0.46, 0.82, 0.58, 1.0]
+        ui.pick(UiRole::Success, [0.46, 0.82, 0.58, 1.0])
     } else {
-        [0.90, 0.52, 0.52, 1.0]
+        ui.pick(UiRole::Error, [0.90, 0.52, 0.52, 1.0])
     }
 }
 
@@ -209,7 +211,7 @@ impl Renderer {
             "Внешние инструменты",
             content_x.round(),
             content_y,
-            [0.82, 0.82, 0.86, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.82, 0.82, 0.86, 1.0]),
             1.0,
         );
         let refresh_w = (102.0 * s).min(content_available_w);
@@ -240,7 +242,7 @@ impl Renderer {
             "Явный путь имеет приоритет над PATH. Переменные RRITER_*_PATH — выше настроек.",
             content_x.round(),
             content_y,
-            [0.44, 0.46, 0.54, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.44, 0.46, 0.54, 1.0]),
             0.76,
         );
         content_y = (content_y + (18.0 * s).round()).round();
@@ -248,7 +250,7 @@ impl Renderer {
             "uv, Ruff и Ty ставятся управляемо; Dart выбирается из custom, Flutter, managed или PATH.",
             content_x.round(),
             content_y,
-            [0.44, 0.46, 0.54, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.44, 0.46, 0.54, 1.0]),
             0.72,
         );
         content_y = (content_y + (18.0 * s).round()).round();
@@ -282,21 +284,21 @@ impl Renderer {
                 content_available_w.round(),
                 panel_h,
                 5.0 * s,
-                [0.10, 0.11, 0.15, 1.0],
+                self.ui.pick(UiRole::BgPanelAlt, [0.10, 0.11, 0.15, 1.0]),
             );
             let heading = format!("{} · {}", target.label(), tool_installer.phase().label());
             self.draw_string_scaled_stable(
                 &heading,
                 (content_x + 10.0 * s).round(),
                 (content_y + (18.0 * s).round()).round(),
-                [0.84, 0.84, 0.90, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.84, 0.84, 0.90, 1.0]),
                 0.80,
             );
             self.draw_string_scaled_stable(
                 &super::settings_ui::compact_settings_text(tool_installer.detail(), 58),
                 (content_x + 10.0 * s).round(),
                 (content_y + (36.0 * s).round()).round(),
-                [0.56, 0.58, 0.68, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.56, 0.58, 0.68, 1.0]),
                 0.70,
             );
             let logs = tool_installer.logs();
@@ -306,16 +308,16 @@ impl Renderer {
             for (line_idx, line) in logs[start..].iter().enumerate() {
                 let color = match line.kind {
                     crate::app::tool_installer::ToolInstallLogKind::Error => {
-                        [0.92, 0.50, 0.50, 1.0]
+                        self.ui.pick(UiRole::Error, [0.92, 0.50, 0.50, 1.0])
                     }
                     crate::app::tool_installer::ToolInstallLogKind::Success => {
-                        [0.46, 0.82, 0.58, 1.0]
+                        self.ui.pick(UiRole::Success, [0.46, 0.82, 0.58, 1.0])
                     }
                     crate::app::tool_installer::ToolInstallLogKind::Info => {
-                        [0.62, 0.64, 0.72, 1.0]
+                        self.ui.pick(UiRole::Info, [0.62, 0.64, 0.72, 1.0])
                     }
                     crate::app::tool_installer::ToolInstallLogKind::Output => {
-                        [0.74, 0.74, 0.78, 1.0]
+                        self.ui.pick(UiRole::TextSecondary, [0.74, 0.74, 0.78, 1.0])
                     }
                 };
                 self.draw_string_scaled_stable(
@@ -384,7 +386,7 @@ impl Renderer {
             "Каталоги RRiter",
             content_x,
             content_y,
-            [0.82, 0.82, 0.86, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.82, 0.82, 0.86, 1.0]),
             0.92,
         );
         content_y = (content_y + (13.0 * s).round()).round();
@@ -430,7 +432,7 @@ impl Renderer {
             "Графика",
             content_x,
             content_y,
-            [0.82, 0.82, 0.86, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.82, 0.82, 0.86, 1.0]),
             0.92,
         );
         content_y = (content_y + (18.0 * s).round()).round();
@@ -444,7 +446,7 @@ impl Renderer {
             &super::settings_ui::compact_settings_text(&graphics_summary, 66),
             content_x,
             content_y,
-            [0.56, 0.58, 0.66, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.56, 0.58, 0.66, 1.0]),
             0.74,
         );
         let copy_w = (114.0 * s).min(content_available_w);
@@ -478,7 +480,7 @@ impl Renderer {
             let bar = super::settings_ui::settings_scrollbar(
                 (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
                 settings_content_clip.h, *general_max_scroll, general_scroll_y,
-                6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                6.0, 40.0, self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
             );
             self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                 ui: &mut *ui_registry,
@@ -509,7 +511,7 @@ impl Renderer {
             content_x.round(),
             Self::tree_row_text_y(row_y, row_h, scale),
             layout.label_w,
-            [0.82, 0.82, 0.86, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.82, 0.82, 0.86, 1.0]),
             0.86,
             &mut label_scratch,
         );
@@ -545,7 +547,7 @@ impl Renderer {
             value_w,
             row_h,
             5.0 * scale,
-            [0.20, 0.21, 0.26, 1.0],
+            self.ui.pick(UiRole::BgInput, [0.20, 0.21, 0.26, 1.0]),
         );
         let value = ctrl_wheel_multiplier_label(multiplier);
         let text_w = self.measure_ui_width(&value, 0.78);
@@ -553,7 +555,7 @@ impl Renderer {
             &value,
             (value_x + (value_w - text_w) * 0.5).round(),
             Self::tree_row_text_y(row_y, row_h, scale),
-            [0.92, 0.92, 0.95, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.92, 0.92, 0.95, 1.0]),
             0.78,
         );
         let mx = self.last_mouse_x;
@@ -614,7 +616,7 @@ impl Renderer {
             rust_row,
             compact_path_chars,
         );
-        let status_color = tool_status_color(kind, &resolution, dart_tool_state);
+        let status_color = tool_status_color(&self.ui, kind, &resolution, dart_tool_state);
 
         self.push_rounded_rect(
             content_x,
@@ -622,7 +624,7 @@ impl Renderer {
             content_available_w.round(),
             (row_h - (4.0 * scale).round()).max(1.0),
             5.0 * scale,
-            [0.12, 0.13, 0.17, 1.0],
+            self.ui.pick(UiRole::BgPanelAlt, [0.12, 0.13, 0.17, 1.0]),
         );
         let rust_archive_supported = kind != crate::platform::ToolKind::RustAnalyzer
             || crate::lsp::rust_analyzer_archive_for_platform().is_some();
@@ -678,7 +680,7 @@ impl Renderer {
             text_x,
             (row_y + (17.0 * scale).round()).round(),
             text_w,
-            [0.88, 0.88, 0.92, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.88, 0.88, 0.92, 1.0]),
             0.88,
             &mut clip_scratch,
         );
@@ -709,7 +711,7 @@ impl Renderer {
                     })
                 .round(),
                 row_text_w,
-                [0.50, 0.52, 0.60, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.50, 0.52, 0.60, 1.0]),
                 0.64,
                 &mut clip_scratch,
             );
