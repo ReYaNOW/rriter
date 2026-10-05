@@ -125,8 +125,7 @@ impl Renderer {
         let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
 
         let panel_bg = [self.theme.terminal_bg[0], self.theme.terminal_bg[1], self.theme.terminal_bg[2], panel_alpha];
-        // Ручка ресайза (1px линия вверху панели)
-        self.push_rect(panel_x, panel_y, panel_w, 1.0, self.ui.ink(0.15));
+        // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
         self.push_rect(
             panel_x,
             panel_y + 1.0,
