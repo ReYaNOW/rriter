@@ -472,10 +472,10 @@ pub struct Renderer {
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, IconAtlasEntry>,
     pub icon_logo: Option<glow::Texture>,
-    /// Кэш SVG-иконок для дерева файлов. Ключ = &'static str из file_icons_map.
-    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, IconAtlasEntry>,
+    /// Кэш SVG-иконок для дерева файлов. Ключ содержит вариант темы.
+    pub file_icon_cache: rustc_hash::FxHashMap<(&'static str, bool), IconAtlasEntry>,
     pub(crate) rasterized_file_icons:
-        rustc_hash::FxHashMap<&'static str, crate::app::file_tree::RasterizedIconState>,
+        rustc_hash::FxHashMap<(&'static str, bool), crate::app::file_tree::RasterizedIconState>,
     /// On-demand file icon rasterizations still allowed in this frame; reset at frame start.
     pub(crate) icon_rasterize_budget: u8,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,

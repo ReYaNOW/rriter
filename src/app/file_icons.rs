@@ -83,11 +83,11 @@ pub fn folder_icon_key(name: &str) -> &'static str {
 }
 
 /// Байты SVG для ключа файла.
-pub fn svg_for_key(key: &str, is_folder: bool) -> &'static [u8] {
+pub fn svg_for_key(key: &str, is_folder: bool, is_dark: bool) -> &'static [u8] {
     if is_folder {
         folder_svg(key)
     } else {
-        file_svg(key)
+        file_svg(key, is_dark)
     }
 }
 
@@ -339,8 +339,8 @@ mod tests {
         assert_eq!(file_icon_key("unknown.rriter-no-icon"), "default_file");
         assert_eq!(file_icon_key_for_name("MAIN.PY"), file_icon_key("main.py"));
 
-        assert!(!svg_for_key(file_icon_key("main.py"), false).is_empty());
-        assert!(!svg_for_key("default_file", false).is_empty());
+        assert!(!svg_for_key(file_icon_key("main.py"), false, false).is_empty());
+        assert!(!svg_for_key("default_file", false, false).is_empty());
     }
 
     #[test]
@@ -351,9 +351,9 @@ mod tests {
         // rasterization in `Renderer::draw_file_icon`; it needs a resolvable key and a
         // renderable svg asset.
         assert_eq!(file_icon_key_for_name("Report.PDF"), "pdf");
-        assert!(!svg_for_key("pdf", false).is_empty());
+        assert!(!svg_for_key("pdf", false, false).is_empty());
         assert!(matches!(
-            pre_rasterize_icon("pdf", false),
+            pre_rasterize_icon("pdf", false, false),
             RasterizedIconState::Ready(_)
         ));
     }
@@ -365,8 +365,24 @@ mod tests {
         assert_eq!(folder_icon_key("rriter-no-icon-folder"), "default");
         assert_eq!(folder_icon_key_for_name("SRC"), folder_icon_key("src"));
 
-        assert!(!svg_for_key(folder_icon_key("src"), true).is_empty());
-        assert!(!svg_for_key("default", true).is_empty());
+        assert!(!svg_for_key(folder_icon_key("src"), true, false).is_empty());
+        assert!(!svg_for_key("default", true, false).is_empty());
+    }
+
+    #[test]
+    fn file_icon_svg_variants_follow_ui_theme_and_cache_key() {
+        let light = file_svg("justfile", false);
+        let dark = file_svg("justfile", true);
+        assert_ne!(light, dark);
+        assert_eq!(file_svg("python", false), file_svg("python", true));
+        assert_eq!(file_svg("unknown-file-icon-key", false), file_svg("default_file", false));
+        // The pre-rasterized pixels differ per variant too, so a result for the other
+        // variant cannot stand in for the current one.
+        let raster = |is_dark| match crate::app::file_tree::pre_rasterize_icon("justfile", false, is_dark) {
+            crate::app::file_tree::RasterizedIconState::Ready(data) => data,
+            crate::app::file_tree::RasterizedIconState::Missing => panic!("justfile must rasterize"),
+        };
+        assert_ne!(raster(false), raster(true));
     }
 
     #[test]

@@ -545,35 +545,38 @@ impl Renderer {
         // the workspace (or in a collapsed folder) asks for a key nobody rasterized, so
         // rasterize it here, once. `Missing` stays in the map as a negative cache, otherwise
         // an absent asset would be re-rasterized every frame.
-        if !self.rasterized_file_icons.contains_key(key) {
+        let is_dark = self.ui.is_dark;
+        let cache_key = (key, is_dark);
+        if !self.rasterized_file_icons.contains_key(&cache_key) {
             // At most one synchronous rasterization per frame; the rest retry next frame
             // (or get picked up by the file-tree scan).
             if self.icon_rasterize_budget == 0 {
                 return None;
             }
             self.icon_rasterize_budget -= 1;
-            let mut state = crate::app::file_tree::pre_rasterize_icon(key, false);
+            let mut state = crate::app::file_tree::pre_rasterize_icon(key, false, is_dark);
             if matches!(state, RasterizedIconState::Missing) {
                 // Callers pass an unreliable `is_folder`; folder-only keys live in another set.
-                state = crate::app::file_tree::pre_rasterize_icon(key, true);
+                state = crate::app::file_tree::pre_rasterize_icon(key, true, is_dark);
             }
-            self.rasterized_file_icons.insert(key, state);
+            self.rasterized_file_icons.insert(cache_key, state);
         }
         if !matches!(
-            self.rasterized_file_icons.get(key),
+            self.rasterized_file_icons.get(&cache_key),
             Some(RasterizedIconState::Ready(_))
         ) {
             return None;
         }
-        let Some(RasterizedIconState::Ready(data)) = self.rasterized_file_icons.remove(key) else {
+        let Some(RasterizedIconState::Ready(data)) = self.rasterized_file_icons.remove(&cache_key)
+        else {
             return None;
         };
         let Some(entry) = self.upload_icon_rgba(64, 64, &data) else {
             // A failed atlas upload must not re-rasterize the svg every frame.
-            self.rasterized_file_icons.insert(key, RasterizedIconState::Missing);
+            self.rasterized_file_icons.insert(cache_key, RasterizedIconState::Missing);
             return None;
         };
-        self.file_icon_cache.insert(key, entry);
+        self.file_icon_cache.insert(cache_key, entry);
         Some(entry)
     }
 
@@ -587,7 +590,7 @@ impl Renderer {
         y: f32,
         size: f32,
     ) {
-        let entry = if let Some(&entry) = self.file_icon_cache.get(key) {
+        let entry = if let Some(&entry) = self.file_icon_cache.get(&(key, self.ui.is_dark)) {
             entry
         } else {
             let Some(entry) = self.upload_file_icon_from_pending_raster(key) else {

@@ -306,7 +306,7 @@ fn main() {
                     pub static FILE_ICON_FALLBACKS: &[(&str, &str)] = &[];\n\
                     pub static FOLDER_ICON_FALLBACKS: &[(&str, &str)] = &[];\n";
         fs::write(gen_dir.join("file_icons_map.rs"), stub).unwrap();
-        let stub2 = "pub fn file_svg(key: &str) -> &'static [u8] { b\"\" }\n\
+        let stub2 = "pub fn file_svg(key: &str, _is_dark: bool) -> &'static [u8] { b\"\" }\n\
                      pub fn folder_svg(key: &str) -> &'static [u8] { b\"\" }\n";
         fs::write(gen_dir.join("file_icons_bytes.rs"), stub2).unwrap();
         return;
@@ -502,7 +502,7 @@ fn main() {
         "b\"\"".to_string()
     };
 
-    writeln!(bytes_out, "pub fn file_svg(key: &str) -> &'static [u8] {{").unwrap();
+    writeln!(bytes_out, "pub fn file_svg(key: &str, is_dark: bool) -> &'static [u8] {{").unwrap();
     writeln!(bytes_out, "    match key {{").unwrap();
     // Только те стемы, SVG которых реально лежат на диске.
     // _dark-файлы не являются самостоятельными ключами — они используются как замена
@@ -513,19 +513,23 @@ fn main() {
         .collect();
     file_stems.sort();
     for stem in &file_stems {
-        // Если есть _dark-вариант, встраиваем его байты вместо оригинала
         let dark_stem = format!("{}_dark", stem);
-        let svg_file = if existing_files.contains(&dark_stem) {
-            dark_stem
-        } else {
-            stem.to_string()
-        };
+        if existing_files.contains(&dark_stem) {
+            writeln!(
+                bytes_out,
+                "        \"{}\" if is_dark => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
+                escape(stem),
+                escape(&manifest),
+                escape(&dark_stem)
+            )
+            .unwrap();
+        }
         writeln!(
             bytes_out,
             "        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
             escape(stem),
             escape(&manifest),
-            escape(&svg_file)
+            escape(stem)
         )
         .unwrap();
     }

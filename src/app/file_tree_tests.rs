@@ -264,6 +264,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
         expanded,
         vec!["skip*".to_string()],
         FxHashSet::default(),
+        true,
         &crate::ui_waker::UiWaker::counting(),
     );
 
@@ -271,7 +272,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
     assert!(!first_message.is_terminal());
     let first = match first_message {
         FileTreeScanMessage::Nodes(nodes) => nodes,
-        FileTreeScanMessage::Icon(_, _) => panic!("scan must send nodes before icon data"),
+        FileTreeScanMessage::Icon(..) => panic!("scan must send nodes before icon data"),
         FileTreeScanMessage::IconsReady => panic!("scan must send nodes before icon signal"),
         FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
     };
@@ -282,7 +283,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
             assert!(matches!(message, FileTreeScanMessage::IconsReady));
             break;
         }
-        assert!(matches!(message, FileTreeScanMessage::Icon(_, _)));
+        assert!(matches!(message, FileTreeScanMessage::Icon(..)));
     }
     assert!(matches!(
         rx.recv_timeout(std::time::Duration::from_millis(50)),
@@ -313,6 +314,7 @@ fn second_file_tree_scan_skips_known_icon_keys() {
             expanded.clone(),
             Vec::new(),
             known_icons,
+            true,
             &crate::ui_waker::UiWaker::counting(),
         )
     };
@@ -321,8 +323,8 @@ fn second_file_tree_scan_skips_known_icon_keys() {
     loop {
         match first.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
             FileTreeScanMessage::Nodes(_) => {}
-            FileTreeScanMessage::Icon(key, _) => {
-                known_icons.insert(key);
+            FileTreeScanMessage::Icon(key, is_dark, _) => {
+                known_icons.insert((key, is_dark));
             }
             FileTreeScanMessage::IconsReady => break,
             FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
@@ -334,8 +336,8 @@ fn second_file_tree_scan_skips_known_icon_keys() {
     loop {
         match second.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
             FileTreeScanMessage::Nodes(_) => {}
-            FileTreeScanMessage::Icon(key, _) => {
-                assert!(!known_icons.contains(key));
+            FileTreeScanMessage::Icon(key, is_dark, _) => {
+                assert!(!known_icons.contains(&(key, is_dark)));
             }
             FileTreeScanMessage::IconsReady => break,
             FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
