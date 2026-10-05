@@ -33,7 +33,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.file_tree_create_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s).min(self.width - 32.0 * s);
             let h = 178.0 * s;
             let x = ((self.width - w) / 2.0).round();
@@ -44,7 +44,7 @@ impl Renderer {
                 dialog.kind.title(),
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
 
@@ -63,7 +63,7 @@ impl Renderer {
                 &path_prefix,
                 x + side_pad,
                 input_y + 23.0 * s,
-                [0.55, 0.57, 0.64, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]),
                 path_scale,
             );
             ui_registry.register_text_input(
@@ -101,7 +101,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     input_y + input_h + 20.0 * s,
-                    self.theme.diag_error,
+                    self.ui.pick(UiRole::Error, self.theme.diag_error),
                     0.8,
                 );
             }
@@ -134,7 +134,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.file_tree_rename_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let base_w = (crate::app::file_tree::FILE_TREE_DIALOG_W * s)
                 .min(self.width - 32.0 * s);
             let path_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
@@ -170,7 +170,7 @@ impl Renderer {
                 "Переименовать",
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
 
@@ -193,7 +193,7 @@ impl Renderer {
                     &path_prefix,
                     x + side_pad,
                     input_y + 23.0 * s,
-                    [0.55, 0.57, 0.64, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]),
                     path_scale,
                 );
             }
@@ -220,7 +220,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     input_y + input_h + 20.0 * s,
-                    self.theme.diag_error,
+                    self.ui.pick(UiRole::Error, self.theme.diag_error),
                     0.8,
                 );
             }
@@ -253,7 +253,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.file_tree_move_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 154.0 * s;
@@ -265,7 +265,7 @@ impl Renderer {
                 "Подтвердить перемещение",
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
             let message = crate::app::file_tree::file_tree_move_dialog_message(
@@ -276,7 +276,7 @@ impl Renderer {
                 &message,
                 x + side_pad,
                 y + 74.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.88,
             );
             if let Some(error) = &dialog.error {
@@ -284,7 +284,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     y + 100.0 * s,
-                    self.theme.diag_error,
+                    self.ui.pick(UiRole::Error, self.theme.diag_error),
                     0.8,
                 );
             }
@@ -317,7 +317,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.file_tree_delete_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 154.0 * s;
@@ -329,7 +329,7 @@ impl Renderer {
                 "Удалить в корзину",
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
             let message = crate::app::file_tree::file_tree_delete_dialog_message(&dialog.paths);
@@ -337,7 +337,7 @@ impl Renderer {
                 &message,
                 x + side_pad,
                 y + 74.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.88,
             );
             if let Some(error) = &dialog.error {
@@ -345,7 +345,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     y + 100.0 * s,
-                    self.theme.diag_error,
+                    self.ui.pick(UiRole::Error, self.theme.diag_error),
                     0.8,
                 );
             }
@@ -378,7 +378,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.api.spec_remove_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 204.0 * s;
@@ -390,14 +390,14 @@ impl Renderer {
                 "Удалить OpenAPI",
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
             self.draw_string_scaled(
                 "Удалить импортированную спецификацию?",
                 x + side_pad,
                 y + 70.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.86,
             );
             let label = if dialog.title.is_empty() {
@@ -410,7 +410,7 @@ impl Renderer {
                 x + side_pad,
                 y + 94.0 * s,
                 w - side_pad * 2.0,
-                [0.72, 0.76, 0.88, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 1.0]),
                 0.82,
                 &mut label_scratch,
             );
@@ -420,7 +420,7 @@ impl Renderer {
                     x + side_pad,
                     y + 120.0 * s,
                     w - side_pad * 2.0,
-                    [0.58, 0.61, 0.70, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.58, 0.61, 0.70, 1.0]),
                     0.74,
                     &mut label_scratch,
                 );
@@ -454,7 +454,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.api.mock_contract_field_delete_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 158.0 * s;
@@ -466,14 +466,14 @@ impl Renderer {
                 "Удалить переменную",
                 x + side_pad,
                 y + 38.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 1.0,
             );
             self.draw_string_scaled(
                 "Удалить переменную из контракта мока?",
                 x + side_pad,
                 y + 70.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.86,
             );
             self.draw_tree_label_clipped(
@@ -481,7 +481,7 @@ impl Renderer {
                 x + side_pad,
                 y + 94.0 * s,
                 w - side_pad * 2.0,
-                [0.72, 0.76, 0.88, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 1.0]),
                 0.82,
                 &mut label_scratch,
             );
@@ -514,7 +514,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.api.mock_route_reset_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 20.0) * s).min(self.width - 32.0 * s);
             let h = 166.0 * s;
@@ -522,12 +522,12 @@ impl Renderer {
             let y = ((self.height - h) / 2.0).round();
             let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
             self.draw_file_tree_dialog_shell(x, y, w, h, s);
-            self.draw_string_scaled("Сбросить мок", x + side_pad, y + 38.0 * s, self.theme.fg, 1.0);
+            self.draw_string_scaled("Сбросить мок", x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.0);
             self.draw_string_scaled(
                 "Удалить все настройки мока для route?",
                 x + side_pad,
                 y + 70.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.86,
             );
             self.draw_tree_label_clipped(
@@ -535,7 +535,7 @@ impl Renderer {
                 x + side_pad,
                 y + 94.0 * s,
                 w - side_pad * 2.0,
-                [0.72, 0.76, 0.88, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 1.0]),
                 0.82,
                 &mut label_scratch,
             );
@@ -568,7 +568,7 @@ impl Renderer {
         }
 
         if let Some(dialog) = &ide_panel.git.confirm_dialog {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+            self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
             let w =
                 ((crate::app::file_tree::FILE_TREE_DIALOG_W + 40.0) * s).min(self.width - 32.0 * s);
             let visible_files = dialog.files.len().min(7);
@@ -585,12 +585,12 @@ impl Renderer {
                     "Откатить",
                 ),
             };
-            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.theme.fg, 1.0);
+            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.0);
             self.draw_string_scaled(
                 message,
                 x + side_pad,
                 y + 70.0 * s,
-                [0.75, 0.76, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.75, 0.76, 0.82, 1.0]),
                 0.86,
             );
 
@@ -603,7 +603,7 @@ impl Renderer {
                     list_x,
                     list_y + idx as f32 * 20.0 * s,
                     list_w,
-                    [0.72, 0.76, 0.88, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 1.0]),
                     0.82,
                     &mut label_scratch,
                 );
@@ -614,7 +614,7 @@ impl Renderer {
                     &more,
                     list_x,
                     list_y + visible_files as f32 * 20.0 * s,
-                    [0.55, 0.57, 0.64, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]),
                     0.8,
                 );
             }

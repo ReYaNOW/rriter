@@ -22,7 +22,7 @@ impl Renderer {
             layout.w,
             layout.h,
             6.0 * s,
-            self.theme.sel,
+            self.ui.pick(UiRole::Selection, self.theme.sel),
         );
         self.push_rounded_rect(
             layout.x + 1.0,
@@ -30,12 +30,12 @@ impl Renderer {
             (layout.w - 2.0).max(0.0),
             (layout.h - 2.0).max(0.0),
             5.0 * s,
-            [
+            self.ui.pick(UiRole::BgTooltip, [
                 self.theme.minimap_bg[0],
                 self.theme.minimap_bg[1],
                 self.theme.minimap_bg[2],
                 0.98,
-            ],
+            ]),
         );
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
         self.draw_tree_label_clipped(
@@ -43,7 +43,7 @@ impl Renderer {
             layout.x + pad_x,
             (layout.y + layout.h * 0.5 + 5.0 * s).round(),
             layout.text_w,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
             tooltip_scale,
             &mut scratch,
         );
@@ -649,7 +649,7 @@ impl Renderer {
                             line_top.round(),
                             adv.ceil() + 1.0,
                             line_h.ceil(),
-                            self.theme.sel,
+                            self.ui.pick(UiRole::Selection, self.theme.sel),
                         );
                     }
                 }
@@ -843,8 +843,8 @@ impl Renderer {
             tooltip_h,
             7.0 * s,
             (1.0 * s).round().max(1.0),
-            self.theme.sel,
-            [0.11, 0.12, 0.16, 0.98],
+            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::BgTooltip, [0.11, 0.12, 0.16, 0.98]),
         );
 
         let mut line_top = tooltip_y + pad_y;
@@ -861,8 +861,8 @@ impl Renderer {
             + date_icon_extra_drop)
             .round();
         let author_x = (content_x + title_icon_size + title_icon_gap).round();
-        let title_count_color = self.theme.sel;
-        let title_count_text_color = [1.0, 1.0, 1.0, 1.0];
+        let title_count_color = self.ui.pick(UiRole::Selection, self.theme.sel);
+        let title_count_text_color = self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]);
         let (newest_count, oldest_count) =
             git_graph_tooltip_branch_counts(commits, target.commit_idx);
         scratch.clear();
@@ -880,7 +880,7 @@ impl Renderer {
             content_x.round(),
             author_icon_y,
             title_icon_size,
-            self.theme.sel,
+            self.ui.pick(UiRole::Selection, self.theme.sel),
         );
         let row_start = self.push_git_graph_tooltip_text_row(
             &commit.author_name,
@@ -894,7 +894,7 @@ impl Renderer {
             &commit.author_name,
             author_x,
             author_text_y,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
             title_scale,
             row_start,
             author_row_top,
@@ -923,7 +923,7 @@ impl Renderer {
             content_x.round(),
             date_icon_y,
             title_icon_size,
-            self.theme.sel,
+            self.ui.pick(UiRole::Selection, self.theme.sel),
         );
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(
@@ -943,7 +943,7 @@ impl Renderer {
             scratch,
             date_x,
             date_text_y,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
             title_scale,
             row_start,
             date_row_top,
@@ -974,13 +974,13 @@ impl Renderer {
             content_x,
             line_top,
             20.0 * s,
-            [0.86, 0.90, 1.0, 1.0],
+            self.ui.pick(UiRole::GitCommit, [0.86, 0.90, 1.0, 1.0]),
             0.9,
             inner_w,
         );
 
         line_top += 1.0 * s;
-        self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+        self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, self.ui.ink(0.12));
         line_top += 5.0 * s;
         scratch.clear();
         if let Some(stats) = commit.stats {
@@ -1001,7 +1001,7 @@ impl Renderer {
             scratch,
             content_x,
             line_top + 18.0 * s * 0.68,
-            [0.78, 0.82, 0.92, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.78, 0.82, 0.92, 1.0]),
             0.82,
             stats_start,
             line_top,
@@ -1026,7 +1026,7 @@ impl Renderer {
             scratch,
             stat_x,
             line_top + 18.0 * s * 0.68,
-            [0.52, 0.82, 0.58, 1.0],
+            self.ui.pick(UiRole::GitHunkAdded, [0.52, 0.82, 0.58, 1.0]),
             0.82,
             stats_end,
             line_top,
@@ -1051,7 +1051,7 @@ impl Renderer {
             scratch,
             stat_x,
             line_top + 18.0 * s * 0.68,
-            [0.95, 0.42, 0.46, 1.0],
+            self.ui.pick(UiRole::GitHunkDeleted, [0.95, 0.42, 0.46, 1.0]),
             0.82,
             stats_end,
             line_top,
@@ -1062,7 +1062,7 @@ impl Renderer {
 
         if let Some(branch_name) = &commit.branch_name {
             line_top += 1.0 * s;
-            self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+            self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, self.ui.ink(0.12));
             line_top += 5.0 * s;
             let pill_h = 18.0 * s;
             let scale = 0.82;
@@ -1077,8 +1077,8 @@ impl Renderer {
                 pill_w,
                 pill_h,
                 4.0 * s,
-                [0.28, 0.24, 0.40, 1.0],
-                [0.86, 0.90, 1.0, 1.0],
+                self.ui.pick(UiRole::GitGraphNode, [0.28, 0.24, 0.40, 1.0]),
+                self.ui.pick(UiRole::GitCommit, [0.86, 0.90, 1.0, 1.0]),
                 scale,
                 6.0 * s,
                 true,
@@ -1088,7 +1088,7 @@ impl Renderer {
         }
 
         line_top += 1.0 * s;
-        self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, [1.0, 1.0, 1.0, 0.12]);
+        self.push_rect(tooltip_x, line_top, tooltip_w, 1.0, self.ui.ink(0.12));
         line_top += 5.0 * s;
         let hash_w = self.measure_git_graph_tooltip_mono_width(&commit.short_oid, 0.86);
         let hash_x = content_x;
@@ -1104,7 +1104,7 @@ impl Renderer {
             &commit.short_oid,
             hash_x,
             line_top + 18.0 * s * 0.62,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
             0.86,
             row_start,
             line_top,
@@ -1133,11 +1133,11 @@ impl Renderer {
             copy_y,
             copy_size,
             if copied {
-                [0.3, 0.9, 0.4, 1.0]
+                self.ui.pick(UiRole::Success, [0.3, 0.9, 0.4, 1.0])
             } else if copy_hovered {
-                [1.0, 1.0, 1.0, 1.0]
+                self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
             } else {
-                [0.38, 0.62, 1.0, 0.86]
+                self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 0.86])
             },
         );
         let sep_x = copy_x + copy_size + 12.0 * s;
@@ -1146,7 +1146,7 @@ impl Renderer {
             line_top - 1.0 * s,
             1.0,
             18.0 * s,
-            [1.0, 1.0, 1.0, 0.28],
+            self.ui.ink(0.28),
         );
         let open_icon_size = 14.0 * s;
         let open_icon_x = sep_x + 14.0 * s;
@@ -1168,13 +1168,13 @@ impl Renderer {
             open_icon_x,
             open_icon_y,
             open_icon_size,
-            [0.38, 0.62, 1.0, 1.0],
+            self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]),
         );
         self.draw_string_scaled(
             open_text,
             open_x,
             line_top + 18.0 * s * 0.62,
-            [0.38, 0.62, 1.0, 1.0],
+            self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]),
             0.86,
         );
     }

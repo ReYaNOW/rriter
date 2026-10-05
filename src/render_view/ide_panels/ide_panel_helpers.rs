@@ -3,6 +3,7 @@ use crate::render_view::{
     language_display_name_for_ext, selected_char_count,
 };
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::widgets::{Button, IconButton};
 use glow::HasContext;
 
@@ -356,7 +357,7 @@ impl Renderer {
             language,
             layout.language_x,
             text_y,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
             text_scale,
         );
 
@@ -368,7 +369,7 @@ impl Renderer {
             })
             .filter(|(_, x)| *x > left_limit + 8.0 * scale);
         if let Some((label, x)) = encoding_layout {
-            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+            self.draw_string_scaled(label, x, text_y, self.ui.pick(UiRole::TextPrimary, self.theme.fg), text_scale);
             x
         } else {
             layout.group_left
@@ -393,10 +394,10 @@ impl Renderer {
         text_scale: f32,
     ) {
         if let Some(x) = layout.language_x {
-            self.draw_string_scaled(language, x, text_y, self.theme.fg, text_scale);
+            self.draw_string_scaled(language, x, text_y, self.ui.pick(UiRole::TextPrimary, self.theme.fg), text_scale);
         }
         if let (Some(label), Some(x)) = (encoding_label, layout.encoding_x) {
-            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+            self.draw_string_scaled(label, x, text_y, self.ui.pick(UiRole::TextPrimary, self.theme.fg), text_scale);
         }
         if let Some(rect) = layout.mode_rect {
             let hovered = ui_registry.register_rect_clipped(
@@ -416,7 +417,7 @@ impl Renderer {
                 rect.w,
                 rect.h,
                 5.0 * scale,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha],
+                self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha]),
             );
             let visible_label = if layout.compact_mode {
                 "↔"
@@ -430,7 +431,7 @@ impl Renderer {
             let label_w = self.measure_ui_width(visible_label, mode_scale).round();
             debug_assert!(label_w <= rect.w + 0.5);
             let label_x = (rect.x + (rect.w - label_w) * 0.5).round();
-            self.draw_string_scaled(visible_label, label_x, text_y, self.theme.fg, mode_scale);
+            self.draw_string_scaled(visible_label, label_x, text_y, self.ui.pick(UiRole::TextPrimary, self.theme.fg), mode_scale);
             if toggle_id == crate::ui_system::UiId::MarkdownModeToggle {
                 let toc_w = (26.0 * scale).round();
                 let toc_x = (rect.x - (4.0 * scale).round() - toc_w).round();
@@ -453,13 +454,13 @@ impl Renderer {
                         toc_rect.w,
                         toc_rect.h,
                         5.0 * scale,
-                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha],
+                        self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha]),
                     );
                     self.draw_string_scaled_stable(
                         "≡",
                         toc_rect.x + (9.0 * scale).round(),
                         text_y.round(),
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                         0.9,
                     );
                 }
@@ -702,8 +703,8 @@ fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) 
         h,
         radius,
         border_w,
-        [0.60, 0.35, 0.85, 0.34],
-        [0.18, 0.19, 0.22, 0.74],
+        renderer.ui.pick(UiRole::AccentSoft, [0.60, 0.35, 0.85, 0.34]),
+        renderer.ui.pick(UiRole::BgPanelAlt, [0.18, 0.19, 0.22, 0.74]),
     );
     let text_w = if button.text.is_empty() {
         0.0
@@ -724,7 +725,7 @@ fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) 
             content_x,
             y + (h - icon_size) / 2.0,
             icon_size,
-            [1.0, 1.0, 1.0, 0.34],
+            renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 0.34]),
         );
         content_x += icon_size + icon_gap;
     }
@@ -733,7 +734,7 @@ fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) 
             &button.text,
             content_x,
             y + h / 2.0 + 5.0 * s,
-            [1.0, 1.0, 1.0, 0.34],
+            renderer.ui.ink(0.34),
             button.text_scale,
         );
     }
@@ -752,11 +753,11 @@ fn render_git_graph_button(
     let h = button.h.round();
     let radius = 4.0 * s;
     let border_w = (1.0 * s).round().max(1.0);
-    let border_color = renderer.theme.sel;
+    let border_color = renderer.ui.pick(UiRole::Selection, renderer.theme.sel);
     let bg_color = if hovered {
-        [0.28, 0.30, 0.33, 1.0]
+        renderer.ui.pick(UiRole::RowHover, [0.28, 0.30, 0.33, 1.0])
     } else {
-        [0.22, 0.24, 0.26, 1.0]
+        renderer.ui.pick(UiRole::BgPanelAlt, [0.22, 0.24, 0.26, 1.0])
     };
     renderer.push_rounded_rect_border(x, y, w, h, radius, border_w, border_color, bg_color);
     if active {
@@ -788,7 +789,7 @@ fn render_git_graph_button(
             icon_x,
             y + (h - icon_size) / 2.0,
             icon_size,
-            [1.0, 1.0, 1.0, 1.0],
+            renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
         );
         text_x += icon_size + icon_gap;
     }
@@ -797,7 +798,7 @@ fn render_git_graph_button(
             &button.text,
             text_x,
             y + h / 2.0 + 3.7 * s,
-            renderer.theme.fg,
+            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
             button.text_scale,
         );
     }
@@ -1536,13 +1537,13 @@ impl Renderer {
             rect.h,
             6.0 * s,
             1.0,
-            self.theme.sel,
-            [
+            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::BgTooltip, [
                 self.theme.minimap_bg[0],
                 self.theme.minimap_bg[1],
                 self.theme.minimap_bg[2],
                 1.0,
-            ],
+            ]),
         );
         let text_layout = crate::render_view::standard_tooltip_text_layout(
             rect.x,
@@ -1557,7 +1558,7 @@ impl Renderer {
                 &text[start..end],
                 text_layout,
                 line,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 text_scale,
             );
         }
