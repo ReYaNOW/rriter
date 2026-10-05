@@ -71,7 +71,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
     assert_keyword_pixel(
         &mut session,
-        &dir.join("active-theme.png"),
+        &theme_shot_path("active-theme.png"),
         crate::theme::SyntaxPalette::for_id(ThemeId::Sepia)
             .color(crate::theme::SyntaxRole::KeywordControl),
     );
@@ -82,7 +82,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         .any(|span| span.role == crate::theme::SyntaxRole::KeywordControl));
     assert_keyword_pixel(
         &mut session,
-        &dir.join("inactive-theme.png"),
+        &theme_shot_path("inactive-theme.png"),
         crate::theme::SyntaxPalette::for_id(ThemeId::Sepia)
             .color(crate::theme::SyntaxRole::KeywordControl),
     );
@@ -92,6 +92,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     assert_eq!(session.app.renderer.as_ref().expect("renderer").theme_gen, changed_theme_gen);
 
     session.app.pdf_dark_pages = true;
+    session.app.set_theme_linked(false);
     session.app.apply_themes(ThemeId::Sepia, ThemeId::OneDark);
     assert!(session.app.pdf_dark_pages);
     assert_eq!(session.app.renderer.as_ref().expect("renderer").theme_gen, changed_theme_gen + 1);
@@ -102,11 +103,38 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
     assert_eq!(session.app.ui_theme_id, ThemeId::OneDark);
 }
 
+#[test]
+fn appearance_theme_link_can_split_and_rejoin_editor_and_ui_palettes() {
+    let mut session = session_for_test(1280, 800);
+    open_settings_tab(&mut session, 3);
+    click_ui(&mut session, "SettingsThemeLinked");
+    click_ui(&mut session, "SettingsThemePick(Ui, OneLight)");
+    let state = dump(&mut session);
+    assert_eq!(state["themes"]["editor"], "dracula");
+    assert_eq!(state["themes"]["ui"], "one_light");
+    assert_eq!(state["themes"]["linked"], false);
+    let renderer = session.app.renderer.as_ref().expect("renderer");
+    assert_eq!(renderer.theme.syntax, crate::theme::SyntaxPalette::for_id(ThemeId::Dracula));
+    assert_eq!(renderer.ui.syntax, crate::theme::SyntaxPalette::for_id(ThemeId::OneLight));
+
+    click_ui(&mut session, "SettingsThemeLinked");
+    let state = dump(&mut session);
+    assert_eq!(state["themes"]["editor"], "dracula");
+    assert_eq!(state["themes"]["ui"], "dracula");
+    assert_eq!(state["themes"]["linked"], true);
+}
+
 fn switch_to_tab(session: &mut crate::headless::HeadlessSession, tab: usize) {
     click_ui(session, &format!("EditorTab({tab})"));
     wait_until(session, 5000, "switched tab highlight", |session| {
         session.app.active_tab == tab && session.app.is_highlight_complete
     });
+}
+
+fn theme_shot_path(name: &str) -> std::path::PathBuf {
+    let dir = std::path::Path::new("/tmp/rriter-themes");
+    std::fs::create_dir_all(dir).expect("create theme screenshot directory");
+    dir.join(format!("{}-{name}", std::process::id()))
 }
 
 fn assert_keyword_pixel(

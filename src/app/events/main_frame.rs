@@ -521,10 +521,11 @@ impl App {
                     // find_overlay_at() будет искать только среди них.
                     self.ui_registry.mark_overlay_start();
                     let rust_row = self.lsp.as_ref().map(crate::lsp::LspManager::rust_row_info);
+                    let theme_selection = self.theme_selection();
                     settings_cursor_mode =self.renderer.as_mut().unwrap().draw_settings(
                         self.settings_anim_progress,
                         self.settings_tab,
-                        self.editor_theme_id,
+                        theme_selection,
                         &self.faq_editor,
                         self.settings_scroll.current,
                         self.settings_general_scroll.current,
