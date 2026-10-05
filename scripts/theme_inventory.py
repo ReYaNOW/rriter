@@ -138,7 +138,7 @@ def is_pick_second_arg(source: str, offset: int) -> bool:
             if depth:
                 depth -= 1
             elif char == "(" and re.search(r"\.pick\s*$", source[max(0, i - 40):i]):
-                return re.match(r"\s*UiRole::[A-Za-z_][A-Za-z_0-9]*\s*,", source[i + 1:offset]) is not None
+                return re.match(r"\s*(?:crate::theme::)?UiRole::[A-Za-z_][A-Za-z_0-9]*\s*,", source[i + 1:offset]) is not None
         elif char in ";{}" and not depth:
             return False
     return False
@@ -173,7 +173,7 @@ def role_catalog():
 
 def pick_representatives(files: list[Path]):
     picks: dict[str, Counter] = {}
-    pick_pattern = re.compile(r"\.pick\s*\(\s*UiRole::([A-Za-z_][A-Za-z_0-9]*)\s*,")
+    pick_pattern = re.compile(r"\.pick\s*\(\s*(?:crate::theme::)?UiRole::([A-Za-z_][A-Za-z_0-9]*)\s*,")
     for path in files:
         if not path.is_file() or is_test_file(path):
             continue

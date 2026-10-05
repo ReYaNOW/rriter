@@ -1,6 +1,7 @@
 use crate::app::TocPopup;
 use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiId, UiRegistry};
 use glow::HasContext;
 
@@ -71,15 +72,15 @@ impl Renderer {
             height,
             8.0 * s,
             (1.0 * s).round(),
-            self.theme.sel,
-            [0.075, 0.082, 0.12, 0.98],
+            self.ui.pick(UiRole::Border, self.theme.sel),
+            self.ui.pick(UiRole::BgDialog, [0.075, 0.082, 0.12, 0.98]),
         );
-        self.push_rect(x, content_y.round(), width, (1.0 * s).round(), [1.0, 1.0, 1.0, 0.10]);
+        self.push_rect(x, content_y.round(), width, (1.0 * s).round(), self.ui.ink(0.10));
         self.draw_string_scaled_stable(
             "Содержание",
             (x + (14.0 * s).round()).round(),
             (y + (24.0 * s).round()).round(),
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
             0.96,
         );
 
@@ -100,7 +101,7 @@ impl Renderer {
                 "нет заголовков",
                 (x + (14.0 * s).round()).round(),
                 (content_y + (24.0 * s).round()).round(),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 0.9,
             );
         } else {
@@ -126,7 +127,7 @@ impl Renderer {
                             visible_y,
                             width - (4.0 * s).round(),
                             visible_bottom - visible_y,
-                            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55],
+                            self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55]),
                         );
                     } else if hovered {
                         self.push_rect(
@@ -134,7 +135,7 @@ impl Renderer {
                             visible_y,
                             width - (4.0 * s).round(),
                             visible_bottom - visible_y,
-                            [1.0, 1.0, 1.0, 0.08],
+                            self.ui.ink(0.08),
                         );
                     }
                     wants_pointer |= hovered;
@@ -146,7 +147,7 @@ impl Renderer {
                         &label,
                         text_x,
                         (row_y.round() + (row_h * 0.5).round() + (5.0 * s).round()).round(),
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                         0.9,
                     );
                 }

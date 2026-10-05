@@ -1,4 +1,5 @@
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IconType {
@@ -172,20 +173,20 @@ impl<'a> ButtonView<'a> {
         let hovered = enabled && self.is_pixel_snapped_hovered(mx, my);
 
         let standard = ButtonStyle {
-            border: renderer.theme.sel,
-            background: [0.22, 0.24, 0.26, 1.0],
-            hover_background: [0.28, 0.30, 0.33, 1.0],
-            pressed_background: renderer.theme.sel,
-            content: renderer.theme.fg,
+            border: renderer.ui.pick(UiRole::Selection, renderer.theme.sel),
+            background: renderer.ui.pick(UiRole::BgPanelAlt, [0.22, 0.24, 0.26, 1.0]),
+            hover_background: renderer.ui.pick(UiRole::RowHover, [0.28, 0.30, 0.33, 1.0]),
+            pressed_background: renderer.ui.pick(UiRole::Selection, renderer.theme.sel),
+            content: renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
         };
         let style = style.unwrap_or(standard);
         let border_color = if enabled {
             style.border
         } else {
-            [1.0, 1.0, 1.0, 0.07]
+            renderer.ui.ink(0.07)
         };
         let bg_color = if !enabled {
-            [0.10, 0.105, 0.13, 1.0]
+            renderer.ui.pick(UiRole::BgPanel, [0.10, 0.105, 0.13, 1.0])
         } else if hovered && pressed {
             style.pressed_background
         } else if hovered {
@@ -203,7 +204,7 @@ impl<'a> ButtonView<'a> {
         let content_color = if enabled {
             style.content
         } else {
-            [0.40, 0.42, 0.48, 1.0]
+            renderer.ui.pick(UiRole::TextMuted, [0.40, 0.42, 0.48, 1.0])
         };
         let icon_y = (y + (h - icon_size) * 0.5).round();
         let text_y = Renderer::tree_row_text_y(y, h, scale);
@@ -260,23 +261,23 @@ impl CheckboxView<'_> {
         let box_y = (y + (h - box_size) * 0.5).round();
         let border = if self.enabled {
             if hovered {
-                renderer.theme.sel
+                renderer.ui.pick(UiRole::Selection, renderer.theme.sel)
             } else {
-                [1.0, 1.0, 1.0, 0.22]
+                renderer.ui.ink(0.22)
             }
         } else {
-            [1.0, 1.0, 1.0, 0.08]
+            renderer.ui.ink(0.08)
         };
         let bg = if self.checked {
             if self.enabled {
-                renderer.theme.sel
+                renderer.ui.pick(UiRole::Selection, renderer.theme.sel)
             } else {
-                [0.28, 0.24, 0.34, 1.0]
+                renderer.ui.pick(UiRole::RowActive, [0.28, 0.24, 0.34, 1.0])
             }
         } else if hovered && self.enabled {
-            [0.16, 0.17, 0.21, 1.0]
+            renderer.ui.pick(UiRole::RowHover, [0.16, 0.17, 0.21, 1.0])
         } else {
-            [0.095, 0.10, 0.13, 1.0]
+            renderer.ui.pick(UiRole::BgInput, [0.095, 0.10, 0.13, 1.0])
         };
         renderer.push_rounded_rect_border(
             box_x,
@@ -296,9 +297,9 @@ impl CheckboxView<'_> {
                 (box_y + (box_size - icon_size) * 0.5).round(),
                 icon_size,
                 if self.enabled {
-                    [1.0, 1.0, 1.0, 1.0]
+                    renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
                 } else {
-                    [0.62, 0.62, 0.68, 1.0]
+                    renderer.ui.pick(UiRole::TextMuted, [0.62, 0.62, 0.68, 1.0])
                 },
             );
         }
@@ -307,9 +308,9 @@ impl CheckboxView<'_> {
             (box_x + box_size + 7.0 * scale).round(),
             Renderer::tree_row_text_y(y, h, scale),
             if self.enabled {
-                renderer.theme.fg
+                renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg)
             } else {
-                [0.46, 0.47, 0.52, 1.0]
+                renderer.ui.pick(UiRole::TextMuted, [0.46, 0.47, 0.52, 1.0])
             },
             0.86,
         );
@@ -355,18 +356,18 @@ impl IconButton {
                 let icon_center = self.y + self.size / 2.0;
                 let sq_h = sq_w;
                 let sq_y = (icon_center - sq_h / 2.0).round();
-                let bg_color = [0.35, 0.26, 0.48, 1.0];
+                let bg_color = renderer.ui.pick(UiRole::Accent, [0.35, 0.26, 0.48, 1.0]);
                 renderer.push_rect(0.0, sq_y, sq_w, sq_h, bg_color);
 
                 // Вертикальная акцентная полоска у левого края
                 let stripe_w = (3.0 * scale).max(2.0);
-                let stripe_color = [0.60, 0.35, 0.85, 1.0];
+                let stripe_color = renderer.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 1.0]);
                 renderer.push_rect(0.0, sq_y, stripe_w, sq_h, stripe_color);
 
                 let icon_render_size = self.icon_size.unwrap_or(20.0 * scale);
                 let offset = (self.size - icon_render_size) / 2.0;
                 if let Some(icon_type) = self.icon {
-                    let icon_col = self.custom_color.unwrap_or([1.0, 1.0, 1.0, 1.0]);
+                    let icon_col = self.custom_color.unwrap_or(renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]));
                     renderer.draw_atlas_icon(
                         icon_type,
                         (self.x + offset).round(),
@@ -384,14 +385,14 @@ impl IconButton {
         let mut radius = 4.0 * scale;
 
         if self.is_active {
-            bg_color = renderer.theme.sel;
+            bg_color = renderer.ui.pick(UiRole::Selection, renderer.theme.sel);
             draw_bg = true;
         } else if hovered {
             if pressed {
-                bg_color = renderer.theme.sel;
+                bg_color = renderer.ui.pick(UiRole::Selection, renderer.theme.sel);
                 radius = 4.0 * scale;
             } else {
-                bg_color = [0.26, 0.28, 0.30, 1.0];
+                bg_color = renderer.ui.pick(UiRole::RowHover, [0.26, 0.28, 0.30, 1.0]);
                 radius = self.size / 2.0;
             }
             draw_bg = true;
@@ -414,9 +415,9 @@ impl IconButton {
             let icon_color = if let Some(color) = self.custom_color {
                 color
             } else if self.is_active {
-                [1.0, 1.0, 1.0, 1.0]
+                renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
             } else {
-                renderer.theme.fg
+                renderer.ui.pick(UiRole::Icon, renderer.theme.fg)
             };
             renderer.draw_atlas_icon(
                 icon_type,

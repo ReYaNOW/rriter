@@ -1,4 +1,5 @@
 use crate::renderer::{IconAtlasEntry, Renderer};
+use crate::theme::UiRole;
 use glow::HasContext;
 use std::borrow::Cow;
 
@@ -512,7 +513,7 @@ impl Renderer {
             entry
         };
         let color = if icon == crate::widgets::IconType::Api {
-            [1.0, 1.0, 1.0, 1.0]
+            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
         } else {
             color
         };
@@ -603,7 +604,7 @@ impl Renderer {
             entry.v,
             entry.uw,
             entry.vh,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
             if entry.color {
                 crate::renderer::COLOR_ATLAS_MODE
             } else {
@@ -688,14 +689,14 @@ impl Renderer {
                 current_h + border_width * 2.0,
                 6.0 * scale,
                 border_width,
-                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
-                [0.15, 0.16, 0.20, 1.0],
+                self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]),
+                self.ui.pick(UiRole::BgPanel, [0.15, 0.16, 0.20, 1.0]),
             );
             self.draw_string_scaled(
                 "Начните набирать",
                 x + 12.0 * scale,
                 y + 23.0 * scale,
-                [0.62, 0.64, 0.70, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.62, 0.64, 0.70, 1.0]),
                 0.9,
             );
             return (x, y, max_w, current_h);
@@ -759,12 +760,12 @@ impl Renderer {
                 max_w + offset * 2.0,
                 current_h + offset * 2.0,
                 6.0 * scale,
-                [0.0, 0.0, 0.0, alpha],
+                self.ui.shadow_alpha(alpha),
             );
         }
 
-        let bg_color = [0.15, 0.16, 0.20, 1.0];
-        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+        let bg_color = self.ui.pick(UiRole::BgPanel, [0.15, 0.16, 0.20, 1.0]);
+        let border_color = self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]);
         self.push_rounded_rect_border(
             x - border_width,
             y - border_width,
@@ -816,7 +817,7 @@ impl Renderer {
                     text_bg_w,
                     step,
                     4.0 * scale,
-                    [0.25, 0.27, 0.35, 1.0],
+                    self.ui.pick(UiRole::RowActive, [0.25, 0.27, 0.35, 1.0]),
                     row_edges,
                 );
             } else if Some(i) == hovered_idx {
@@ -826,7 +827,7 @@ impl Renderer {
                     text_bg_w,
                     step,
                     4.0 * scale,
-                    [0.20, 0.21, 0.28, 1.0],
+                    self.ui.pick(UiRole::RowHover, [0.20, 0.21, 0.28, 1.0]),
                     row_edges,
                 );
             }
@@ -890,9 +891,9 @@ impl Renderer {
                     }
 
                     let color = if matches.contains(&j) {
-                        [1.0, 0.474, 0.776, 1.0]
+                        self.ui.pick(UiRole::AccentHover, [1.0, 0.474, 0.776, 1.0])
                     } else {
-                        self.theme.fg
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg)
                     };
 
                     self.push_quad(
@@ -912,7 +913,7 @@ impl Renderer {
             }
 
             if truncated {
-                self.draw_string_scaled("...", cx.round(), cy.round(), [0.5, 0.5, 0.55, 1.0], 1.0);
+                self.draw_string_scaled("...", cx.round(), cy.round(), self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.55, 1.0]), 1.0);
             }
 
             if let Some(module) = module_metrics {
@@ -920,7 +921,7 @@ impl Renderer {
                     &module.text,
                     module.x.round(),
                     (cy - 1.5 * scale).round(),
-                    [0.50, 0.72, 0.82, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.50, 0.72, 0.82, 1.0]),
                     module_scale,
                 );
             }
@@ -961,8 +962,8 @@ impl Renderer {
         let box_x = 0.0;
         let box_y = 0.0;
 
-        let top_color = [0.26, 0.20, 0.36, 1.0];
-        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+        let top_color = self.ui.pick(UiRole::Accent, [0.26, 0.20, 0.36, 1.0]);
+        let bottom_color = self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.22, 1.0]);
 
         self.push_vertical_gradient(box_x, box_y, box_w, box_h, top_color, bottom_color);
 
@@ -981,7 +982,7 @@ impl Renderer {
             content_w + 2.0,
             content_h + 2.0,
             8.0 * s,
-            [0.224, 0.231, 0.251, 0.8],
+            self.ui.pick(UiRole::Border, [0.224, 0.231, 0.251, 0.8]),
         );
         self.push_rounded_rect(
             content_x,
@@ -989,7 +990,7 @@ impl Renderer {
             content_w,
             content_h,
             8.0 * s,
-            [0.15, 0.16, 0.20, 1.0],
+            self.ui.pick(UiRole::BgDialog, [0.15, 0.16, 0.20, 1.0]),
         );
 
         let keymap_reset = action == crate::app::PendingAction::ResetKeymap;
@@ -1008,11 +1009,11 @@ impl Renderer {
             icon_x,
             icon_y,
             icon_sz,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
         );
 
         let text_x = icon_x + icon_sz + gap;
-        let fg = self.theme.fg;
+        let fg = self.ui.pick(UiRole::TextPrimary, self.theme.fg);
         let text_scale = 1.05;
         let line_h = 28.0 * s;
         let text_block_h = line_h * 2.0;
@@ -1023,7 +1024,7 @@ impl Renderer {
             msg2,
             text_x,
             text_y_start + line_h,
-            [0.75, 0.75, 0.80, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.75, 0.75, 0.80, 1.0]),
             text_scale,
         );
 
@@ -1090,8 +1091,8 @@ impl Renderer {
     ) -> bool {
         let scale = self.scale_factor;
 
-        let top_color = [0.26, 0.20, 0.36, 1.0];
-        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+        let top_color = self.ui.pick(UiRole::Accent, [0.26, 0.20, 0.36, 1.0]);
+        let bottom_color = self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.22, 1.0]);
 
         unsafe {
             self.gl.bind_vertex_array(Some(self.vao));
@@ -1118,8 +1119,8 @@ impl Renderer {
         let content_w = self.width - 80.0 * scale;
         let content_h = self.height - 80.0 * scale;
 
-        let card_bg = [0.169, 0.176, 0.188, 0.95];
-        let card_border = [0.224, 0.231, 0.251, 1.0];
+        let card_bg = self.ui.pick(UiRole::BgPanelAlt, [0.169, 0.176, 0.188, 0.95]);
+        let card_border = self.ui.pick(UiRole::Border, [0.224, 0.231, 0.251, 1.0]);
 
         self.push_rounded_rect(
             content_x - 1.0,
@@ -1161,7 +1162,7 @@ impl Renderer {
             "Добро пожаловать в RRiter",
             (title_x + 130.0 * scale).round(),
             y,
-            [0.741, 0.576, 0.976, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.741, 0.576, 0.976, 1.0]),
             1.0,
         );
         y += (40.0 * scale).round();
@@ -1169,7 +1170,7 @@ impl Renderer {
             "Молниеносный текстовый редактор с GPU-рендерингом",
             (title_x + 130.0 * scale).round(),
             y,
-            [0.7, 0.7, 0.75, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.7, 0.7, 0.75, 1.0]),
             1.0,
         );
 
@@ -1214,7 +1215,7 @@ impl Renderer {
             "Недавние файлы",
             title_x,
             y,
-            [0.741, 0.576, 0.976, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.741, 0.576, 0.976, 1.0]),
             1.0,
         );
 
@@ -1224,7 +1225,7 @@ impl Renderer {
             line_y,
             content_w - 80.0 * scale,
             1.0,
-            [1.0, 1.0, 1.0, 0.08],
+            self.ui.ink(0.08),
         );
 
         y += (35.0 * scale).round();
@@ -1258,7 +1259,7 @@ impl Renderer {
                     content_w - 60.0 * scale,
                     item_h,
                     6.0 * scale,
-                    [1.0, 1.0, 1.0, 0.05],
+                    self.ui.ink(0.05),
                 );
             }
 
@@ -1268,13 +1269,13 @@ impl Renderer {
                 .unwrap_or(std::path::Path::new(""))
                 .to_string_lossy();
 
-            self.draw_string_scaled(&name, title_x, y + 25.0 * scale, [0.9, 0.9, 0.9, 1.0], 1.0);
+            self.draw_string_scaled(&name, title_x, y + 25.0 * scale, self.ui.pick(UiRole::TextPrimary, [0.9, 0.9, 0.9, 1.0]), 1.0);
             let name_w = self.measure_ui_width(&name, 1.0);
             self.draw_string_scaled(
                 &full_dir,
                 title_x + name_w + 15.0 * scale,
                 y + 25.0 * scale,
-                [0.5, 0.5, 0.5, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.5, 1.0]),
                 0.95,
             );
 
@@ -1283,7 +1284,7 @@ impl Renderer {
                 y + item_h - 1.0,
                 content_w - 80.0 * scale,
                 1.0,
-                [1.0, 1.0, 1.0, 0.04],
+                self.ui.ink(0.04),
             );
 
             y += item_h;
@@ -1300,9 +1301,9 @@ impl Renderer {
         let hint_x = content_x + content_w - hint_total_w - 30.0 * scale;
         let hint_y = content_y + content_h - 30.0 * scale;
 
-        let kbd_bg = [0.224, 0.231, 0.251, 1.0];
-        let kbd_border = [0.306, 0.3176, 0.341, 1.0];
-        let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
+        let kbd_bg = self.ui.pick(UiRole::BgChip, [0.224, 0.231, 0.251, 1.0]);
+        let kbd_border = self.ui.pick(UiRole::Border, [0.306, 0.3176, 0.341, 1.0]);
+        let kbd_text_color = self.ui.pick(UiRole::TextSecondary, [0.875, 0.882, 0.902, 1.0]);
 
         let kbd_h = 22.0 * scale;
         let kbd_draw_y = hint_y - 16.0 * scale;
@@ -1329,7 +1330,7 @@ impl Renderer {
             hint_str_2,
             hint_x + w1,
             hint_y,
-            [0.5, 0.5, 0.55, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.55, 1.0]),
             scale_hint,
         );
 
@@ -1399,7 +1400,7 @@ impl Renderer {
                     continue;
                 };
                 let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-                self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_warn);
+                self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Warning, self.theme.diag_warn));
             }
         }
 
@@ -1409,7 +1410,7 @@ impl Renderer {
                 continue;
             };
             let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-            self.push_rect(bar_x, y, bar_w, indicator_h, self.theme.diag_error);
+            self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Error, self.theme.diag_error));
         }
     }
     /// Рисует весёлый cowsay-экран когда в IDE-режиме нет открытых вкладок.
@@ -1511,7 +1512,7 @@ impl Renderer {
         let sep_y = start_y + art_total_h + hint_gap / 2.0;
         let sep_w = 200.0 * s;
         let sep_x = editor_x + (editor_w - sep_w) / 2.0;
-        self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.06]);
+        self.push_rect(sep_x, sep_y, sep_w, 1.0, self.ui.ink(0.06));
 
         // Подсказки
         let hint_y_start = start_y + art_total_h + hint_gap;
@@ -1519,7 +1520,7 @@ impl Renderer {
             let lw = self.measure_ui_width(line, 0.9);
             let lx = (editor_x + (editor_w - lw) / 2.0).round();
             let ly = (hint_y_start + i as f32 * (line_h + 4.0 * s) + line_h * 0.75).round();
-            self.draw_string_scaled(line, lx, ly, [0.45, 0.45, 0.52, 1.0], 0.9);
+            self.draw_string_scaled(line, lx, ly, self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.52, 1.0]), 0.9);
         }
 
         self.flush();

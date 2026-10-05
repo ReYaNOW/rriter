@@ -1,5 +1,6 @@
 use crate::editor::Editor;
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::widgets::IconButton;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,7 +99,7 @@ impl Renderer {
             search_w,
             search_h,
             6.0 * s,
-            [0.18, 0.20, 0.22, 1.0],
+            self.ui.pick(UiRole::Border, [0.18, 0.20, 0.22, 1.0]),
         );
         self.push_rounded_rect(
             search_x - 1.0,
@@ -106,7 +107,10 @@ impl Renderer {
             search_w + 2.0,
             search_h + 2.0,
             6.0 * s,
-            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
+            self.ui.pick(
+                UiRole::Selection,
+                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
+            ),
         );
 
         self.push_rounded_rect(
@@ -115,12 +119,15 @@ impl Renderer {
             search_w,
             search_h,
             6.0 * s,
-            [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                1.0,
-            ],
+            self.ui.pick(
+                UiRole::BgInput,
+                [
+                    self.theme.minimap_bg[0],
+                    self.theme.minimap_bg[1],
+                    self.theme.minimap_bg[2],
+                    1.0,
+                ],
+            ),
         );
 
         let input_x = search_x + 10.0 * s;
@@ -230,17 +237,20 @@ impl Renderer {
         let temp_res_text = std::mem::take(&mut self.search_res_string);
 
         let (res_text, text_color) = if !show_search {
-            ("", [0.6, 0.6, 0.6, 1.0])
+            ("", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
         } else if search_count == 0 {
             if search_editor.get_full_text().is_empty() {
-                ("", [0.6, 0.6, 0.6, 1.0])
+                ("", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
             } else if search_pending {
-                ("...", [0.6, 0.6, 0.6, 1.0])
+                ("...", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
             } else {
-                ("Нет", [0.95, 0.35, 0.45, 1.0])
+                ("Нет", self.ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]))
             }
         } else {
-            (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
+            (
+                temp_res_text.as_str(),
+                self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]),
+            )
         };
 
         if counter_reserve > 0.0 && !res_text.is_empty() {

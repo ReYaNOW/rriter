@@ -537,7 +537,7 @@ impl Renderer {
                     &status_text,
                     x + pad,
                     cy + 18.0 * s,
-                    api_status_color(response.status),
+                    api_status_color(&self.ui, response.status),
                     0.92,
                 );
                 self.draw_string_scaled_stable(

@@ -2,10 +2,10 @@
 impl Renderer {
     fn draw_fps_overlay(&mut self, minimap_w: f32) {
         let center_x = (self.width - minimap_w) / 2.0;
-        self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
+        self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, self.ui.pick(crate::theme::UiRole::BgPanelAlt, [0.1, 0.1, 0.1, 0.8]));
 
         let fps_text = std::mem::take(&mut self.fps_string);
-        self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
+        self.draw_string(&fps_text, center_x - 40.0, 24.0, self.ui.pick(crate::theme::UiRole::Info, [0.0, 1.0, 0.0, 1.0]));
         self.fps_string = fps_text;
     }
 

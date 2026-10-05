@@ -1,5 +1,6 @@
 //! Cursor-move phase: scrollbar drags and popup/log text selection.
 use super::*;
+use crate::theme::UiRole;
 
 impl App {
     /// Scrollbar drags and popup/log text selection; `true` = handled.
@@ -213,7 +214,7 @@ impl App {
                 );
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, max_scroll, self.settings_ide_scroll.current,
-                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    6.0, 40.0, self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -237,7 +238,7 @@ impl App {
                     .get_faq_max_scroll(&self.faq_editor, rect.3);
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, max_scroll, self.settings_scroll.current,
-                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    6.0, 40.0, self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -254,7 +255,7 @@ impl App {
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.settings_general_max_scroll,
                     self.settings_general_scroll.current, 6.0, 40.0,
-                    [0.7, 0.33, 0.54, 1.0],
+                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -271,7 +272,7 @@ impl App {
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.settings_database_max_scroll,
                     self.settings_database_scroll.current, 6.0, 40.0,
-                    [0.7, 0.33, 0.54, 1.0],
+                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 let geometry = bar.geometry(s);
                 crate::app::mouse::drag_scrollbar(
@@ -288,7 +289,7 @@ impl App {
                 let bar = crate::render_view::settings_ui::settings_scrollbar(
                     rect, rect.3, self.keymap_settings.max_scroll,
                     self.keymap_settings.scroll.current, 6.0, crate::render_view::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB,
-                    [0.7, 0.33, 0.54, 1.0],
+                    self.renderer.as_ref().unwrap().ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 crate::app::mouse::drag_scrollbar(
                     &mut self.keymap_settings.scroll, bar.geometry(s), 0.0, py,

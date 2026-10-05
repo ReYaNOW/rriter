@@ -1,3 +1,5 @@
+use crate::theme::UiRole;
+
 #[inline(always)]
 fn editor_horizontal_track_color(bg: [f32; 4]) -> [f32; 4] {
     [bg[0], bg[1], bg[2], 1.0]
@@ -283,7 +285,13 @@ impl Renderer {
     ) {
         let anim_w = self.width - gutter_x;
         let anim_h = self.height - panel_bottom_h;
-        self.push_rect(gutter_x, 0.0, anim_w, anim_h, [0.173, 0.180, 0.224, 1.0]);
+        self.push_rect(
+            gutter_x,
+            0.0,
+            anim_w,
+            anim_h,
+            self.ui.pick(UiRole::BgPanelAlt, [0.173, 0.180, 0.224, 1.0]),
+        );
 
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
@@ -326,7 +334,7 @@ impl Renderer {
             sub_text,
             draw_x,
             draw_y + 30.0 * s,
-            [0.5, 0.5, 0.6, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.6, 1.0]),
             scale_sub,
         );
         self.flush();
@@ -406,7 +414,14 @@ impl Renderer {
         let h = 32.0 * s;
         let x = ((self.width - w) * 0.5).max(8.0 * s).round();
         let y = (tab_bar_h + 10.0 * s).round();
-        self.push_rounded_rect(x, y, w, h, 6.0 * s, [0.10, 0.11, 0.14, 0.94]);
+        self.push_rounded_rect(
+            x,
+            y,
+            w,
+            h,
+            6.0 * s,
+            self.ui.pick(UiRole::BgTooltip, [0.10, 0.11, 0.14, 0.94]),
+        );
         self.push_rounded_rect_border(
             x,
             y,
@@ -414,10 +429,16 @@ impl Renderer {
             h,
             6.0 * s,
             (1.0 * s).max(1.0),
-            [1.0, 1.0, 1.0, 0.16],
-            [0.10, 0.11, 0.14, 0.94],
+            self.ui.ink(0.16),
+            self.ui.pick(UiRole::BgTooltip, [0.10, 0.11, 0.14, 0.94]),
         );
-        self.draw_string_scaled(text, x + pad_x, y + h * 0.5 + 5.0 * s, self.theme.fg, 1.0);
+        self.draw_string_scaled(
+            text,
+            x + pad_x,
+            y + h * 0.5 + 5.0 * s,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            1.0,
+        );
     }
 
     fn register_editor_horizontal_scrollbar(
@@ -481,7 +502,13 @@ impl Renderer {
 
     fn draw_dialog_dim_if_open(&mut self, dialog_window_open: bool) {
         if dialog_window_open {
-            self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.6]);
+            self.push_rect(
+                0.0,
+                0.0,
+                self.width,
+                self.height,
+                self.ui.shadow_alpha(0.6),
+            );
         }
     }
 

@@ -1,5 +1,6 @@
 use crate::editor::Editor;
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use glow::HasContext;
 
 pub(crate) const EXTERNAL_TAB_TITLE_COLOR: [f32; 4] = [1.0, 0.55, 0.18, 1.0];
@@ -42,7 +43,6 @@ fn tab_icon_rect(
 pub(crate) const STANDARD_TAB_PAD: f32 = 16.0;
 pub(crate) const STANDARD_TAB_CLOSE_SIZE: f32 = 20.0;
 pub(crate) const STANDARD_TAB_CLOSE_HIT_PAD: f32 = 4.0;
-const STANDARD_TAB_ACTIVE_ACCENT: [f32; 4] = [0.60, 0.35, 0.85, 1.0];
 const TAB_STRIP_EDGE_FADE_ALPHA: f32 = 0.4;
 const TAB_STRIP_EDGE_FADE_WIDTH: f32 = 40.0;
 
@@ -221,11 +221,11 @@ impl Renderer {
         let (left_alpha, right_alpha) = tab_strip_edge_fade_alphas(scroll_x, max_scroll_x, s);
 
         if left_alpha > 0.001 {
-            let shadow_color = [0.0, 0.0, 0.0, left_alpha];
+            let shadow_color = self.ui.shadow_alpha(left_alpha);
             self.push_horizontal_gradient(x, y, fade_w, h, shadow_color, transparent);
         }
         if right_alpha > 0.001 {
-            let shadow_color = [0.0, 0.0, 0.0, right_alpha];
+            let shadow_color = self.ui.shadow_alpha(right_alpha);
             self.push_horizontal_gradient(
                 x + w - fade_w,
                 y,
@@ -249,14 +249,14 @@ impl Renderer {
         draw_separator: bool,
     ) {
         let bg_color = if is_active {
-            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0]
+            self.ui.pick(UiRole::BgPanel, [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0])
         } else if is_hovered {
-            [
+            self.ui.pick(UiRole::BgPanelAlt, [
                 self.theme.bg[0] + 0.02,
                 self.theme.bg[1] + 0.02,
                 self.theme.bg[2] + 0.02,
                 1.0,
-            ]
+            ])
         } else {
             [0.0, 0.0, 0.0, 0.0]
         };
@@ -270,13 +270,13 @@ impl Renderer {
                 y + h - 2.0 * scale,
                 w,
                 2.0 * scale,
-                STANDARD_TAB_ACTIVE_ACCENT,
+                self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0]),
             );
         }
         if draw_separator {
             let sep_h = h * 0.4;
             let sep_y = y + (h - sep_h) * 0.5;
-            let sep_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
+            let sep_color = self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15]);
             self.push_rect(x + w - 1.0, sep_y, 1.0, sep_h, sep_color);
         }
     }
@@ -340,7 +340,7 @@ impl Renderer {
         api: &crate::app::api_client::ApiClientState,
         ide_workspaces: &[std::path::PathBuf],
     ) -> Option<(String, f32, f32)> {
-        let tab_bar_bg = self.theme.minimap_bg;
+        let tab_bar_bg = self.ui.pick(UiRole::BgPanelAlt, self.theme.minimap_bg);
         self.push_rect(x, y, w, h, tab_bar_bg);
 
         self.begin_tab_strip_scissor(x, y, w, h);
@@ -498,7 +498,7 @@ impl Renderer {
                     slot_x.round(),
                     icon_y,
                     icon_size_tab.round(),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::Icon, self.theme.fg),
                 );
             } else if tab.kind.is_api_client() {
                 self.draw_atlas_icon(
@@ -506,7 +506,7 @@ impl Renderer {
                     slot_x.round(),
                     icon_y,
                     icon_size_tab.round(),
-                    [1.0, 1.0, 1.0, 1.0],
+                    self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
                 );
             } else if tab.kind.is_database_table() {
                 let (icon_x, icon_y, icon_size) = tab_icon_rect(
@@ -522,7 +522,7 @@ impl Renderer {
                     icon_x,
                     icon_y,
                     icon_size,
-                    [0.22, 0.84, 0.78, 1.0],
+                    self.ui.pick(UiRole::Icon, [0.22, 0.84, 0.78, 1.0]),
                 );
             } else if tab.kind.is_database_query() {
                 let (icon_x, icon_y, icon_size) = tab_icon_rect(
@@ -538,7 +538,7 @@ impl Renderer {
                     icon_x,
                     icon_y,
                     icon_size,
-                    [1.0, 0.67, 0.16, 1.0],
+                    self.ui.pick(UiRole::Icon, [1.0, 0.67, 0.16, 1.0]),
                 );
             } else {
                 let icon_key = if is_active {
@@ -561,11 +561,11 @@ impl Renderer {
 
             let mut text_color =
                 if path_for_tab(i).is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
-                    EXTERNAL_TAB_TITLE_COLOR
+                    self.ui.pick(UiRole::Warning, EXTERNAL_TAB_TITLE_COLOR)
                 } else if is_active {
-                    self.theme.fg
+                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
                 } else {
-                    self.theme.line_num
+                    self.ui.pick(UiRole::TextMuted, self.theme.line_num)
             };
             if tab.deleted {
                 // Dimmed title next to the `DELETED_TAB_TITLE_SUFFIX` suffix.
@@ -611,9 +611,9 @@ impl Renderer {
                     let title_w =
                         (tab_w - (tab_pad * 2.0 + icon_size_tab + 8.0 * s + 30.0 * s)).max(0.0);
                     let color = match severity {
-                        crate::lsp::DiagSeverity::Error => self.theme.diag_error,
-                        crate::lsp::DiagSeverity::Warning => self.theme.diag_warn,
-                        _ => self.theme.diag_warn,
+                        crate::lsp::DiagSeverity::Error => self.ui.pick(UiRole::Error, self.theme.diag_error),
+                        crate::lsp::DiagSeverity::Warning => self.ui.pick(UiRole::Warning, self.theme.diag_warn),
+                        _ => self.ui.pick(UiRole::Warning, self.theme.diag_warn),
                     };
                     self.push_squiggle(
                         text_x,
@@ -661,7 +661,7 @@ impl Renderer {
                             "●",
                             close_x + close_size / 2.0 - 4.0 * s,
                             close_y + close_size / 2.0 + 4.0 * s,
-                            [0.9, 0.9, 0.9, 1.0],
+                            self.ui.pick(UiRole::TextOnAccent, [0.9, 0.9, 0.9, 1.0]),
                             0.8,
                         );
                     } else {
@@ -672,13 +672,13 @@ impl Renderer {
                                 close_rect_w,
                                 close_rect_h,
                                 4.0 * s,
-                                [1.0, 1.0, 1.0, 0.1],
+                                self.ui.ink(0.1),
                             );
                         }
                         let icon_col = if close_hovered {
-                            [1.0, 1.0, 1.0, 1.0]
+                            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
                         } else {
-                            [1.0, 1.0, 1.0, 0.8]
+                            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 0.8])
                         };
                         self.draw_atlas_icon(
                             crate::widgets::IconType::Close,
@@ -757,13 +757,13 @@ impl Renderer {
 
         let tooltip_y = hovered_tab_y + 8.0 * s;
 
-        let border_col = self.theme.sel;
-        let bg_col = [
+        let border_col = self.ui.pick(UiRole::Selection, self.theme.sel);
+        let bg_col = self.ui.pick(UiRole::BgTooltip, [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
             self.theme.minimap_bg[2],
             0.98,
-        ];
+        ]);
 
         self.push_rounded_rect(
             tooltip_x,
@@ -793,7 +793,7 @@ impl Renderer {
             &path_str,
             text_layout,
             0,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
             tooltip_scale,
         );
     }
