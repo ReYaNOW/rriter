@@ -159,11 +159,12 @@ fn draw_query_button(
                 s,
                 false,
                 ButtonStyle {
-                    border: renderer.ui.pick(UiRole::Success, [0.32, 0.76, 0.43, 1.0]),
-                    background: renderer.ui.pick(UiRole::Success, [0.16, 0.48, 0.26, 1.0]),
-                    hover_background: renderer.ui.pick(UiRole::Success, [0.20, 0.58, 0.31, 1.0]),
-                    pressed_background: renderer.ui.pick(UiRole::Success, [0.12, 0.40, 0.22, 1.0]),
-                    content: renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
+                    // Accent fill pairs with TextOnAccent; Dracula keeps its green literals.
+                    border: renderer.ui.pick(UiRole::AccentHover, [0.32, 0.76, 0.43, 1.0]),
+                    background: renderer.ui.pick(UiRole::Accent, [0.16, 0.48, 0.26, 1.0]),
+                    hover_background: renderer.ui.pick(UiRole::AccentHover, [0.20, 0.58, 0.31, 1.0]),
+                    pressed_background: renderer.ui.pick(UiRole::Accent, [0.12, 0.40, 0.22, 1.0]),
+                    content: renderer.ui.pick(UiRole::TextOnAccent, renderer.ui_theme.fg),
                 },
             );
         } else {

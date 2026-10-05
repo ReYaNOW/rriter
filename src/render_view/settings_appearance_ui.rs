@@ -38,7 +38,14 @@ pub(super) fn draw(
     } else {
         &[(ThemeTarget::Editor, selection.editor, "Тема редактора"), (ThemeTarget::Ui, selection.ui, "Тема интерфейса")]
     };
-    for &(target, active_theme, title) in lists {
+    // The title is drawn on a baseline, so its glyphs rise above `row_y`; for
+    // every list after the first, push the title down by its text height so it
+    // clears the last row of the previous list at any UI scale.
+    let title_clearance = (18.0 * s).round();
+    for (list_index, &(target, active_theme, title)) in lists.iter().enumerate() {
+        if list_index > 0 {
+            row_y = (row_y + title_clearance).round();
+        }
         renderer.draw_string_scaled(title, x.round(), row_y.round(), palette.text, 1.0);
         row_y = (row_y + (22.0 * s).round()).round();
         for theme_id in ThemeId::ALL {
