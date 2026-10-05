@@ -416,7 +416,7 @@ impl Renderer {
                 order.last() != Some(&i),
             );
 
-            let text_color = if is_active { self.theme.fg } else { self.theme.line_num };
+            let text_color = if is_active { self.ui_theme.fg } else { self.ui_theme.line_num };
             let can_show_close = tab_w >= 56.0 * s;
             let show_close = can_show_close && (is_active || is_hovered);
             let close = show_close.then(|| {
@@ -457,13 +457,13 @@ impl Renderer {
                         close.hit_w,
                         close.hit_h,
                         4.0 * s,
-                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.1],
+                        [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.1],
                     );
                 }
                 let icon_color = if close_hovered {
-                    self.theme.terminal_close_hover
+                    self.ui_theme.terminal_close_hover
                 } else {
-                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.8]
+                    [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.8]
                 };
                 self.draw_atlas_icon(
                     crate::widgets::IconType::Close,
@@ -501,7 +501,7 @@ impl Renderer {
                 add_sz + 4.0 * s,
                 add_sz + 4.0 * s,
                 2.0 * s,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.1],
+                [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.1],
             );
         }
         self.draw_atlas_icon(
@@ -509,7 +509,7 @@ impl Renderer {
             add_x,
             add_y,
             add_sz,
-            self.theme.fg,
+            self.ui_theme.fg,
         );
         ui_registry.register_rect(
             crate::ui_system::UiId::TerminalAdd,
@@ -823,7 +823,7 @@ impl Renderer {
                 search_w,
                 search_h,
                 6.0 * s,
-                self.theme.terminal_search_bg,
+                self.ui_theme.terminal_search_bg,
             );
             self.push_rounded_rect(
                 search_x - 1.0,
@@ -831,7 +831,7 @@ impl Renderer {
                 search_w + 2.0,
                 search_h + 2.0,
                 6.0 * s,
-                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
+                [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.6],
             );
             self.push_rounded_rect(
                 search_x,
@@ -840,9 +840,9 @@ impl Renderer {
                 search_h,
                 6.0 * s,
                 [
-                    self.theme.minimap_bg[0],
-                    self.theme.minimap_bg[1],
-                    self.theme.minimap_bg[2],
+                    self.ui_theme.minimap_bg[0],
+                    self.ui_theme.minimap_bg[1],
+                    self.ui_theme.minimap_bg[2],
                     1.0,
                 ],
             );
@@ -995,7 +995,7 @@ impl Renderer {
                         "Нет",
                         input_x + input_w + 10.0 * s,
                         text_y,
-                        self.theme.terminal_text_dim,
+                        self.ui_theme.terminal_text_dim,
                         0.9,
                     );
                 }
@@ -1014,7 +1014,7 @@ impl Renderer {
                     &scratch,
                     input_x + input_w + 10.0 * s,
                     text_y,
-                    self.theme.terminal_text_dim,
+                    self.ui_theme.terminal_text_dim,
                     0.9,
                 );
                 self.scratch_buffer = scratch;

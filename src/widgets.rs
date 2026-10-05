@@ -173,11 +173,11 @@ impl<'a> ButtonView<'a> {
         let hovered = enabled && self.is_pixel_snapped_hovered(mx, my);
 
         let standard = ButtonStyle {
-            border: renderer.ui.pick(UiRole::Selection, renderer.theme.sel),
+            border: renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel),
             background: renderer.ui.pick(UiRole::BgPanelAlt, [0.22, 0.24, 0.26, 1.0]),
             hover_background: renderer.ui.pick(UiRole::RowHover, [0.28, 0.30, 0.33, 1.0]),
-            pressed_background: renderer.ui.pick(UiRole::Selection, renderer.theme.sel),
-            content: renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+            pressed_background: renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel),
+            content: renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         };
         let style = style.unwrap_or(standard);
         let border_color = if enabled {
@@ -261,7 +261,7 @@ impl CheckboxView<'_> {
         let box_y = (y + (h - box_size) * 0.5).round();
         let border = if self.enabled {
             if hovered {
-                renderer.ui.pick(UiRole::Selection, renderer.theme.sel)
+                renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel)
             } else {
                 renderer.ui.ink(0.22)
             }
@@ -270,7 +270,7 @@ impl CheckboxView<'_> {
         };
         let bg = if self.checked {
             if self.enabled {
-                renderer.ui.pick(UiRole::Selection, renderer.theme.sel)
+                renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel)
             } else {
                 renderer.ui.pick(UiRole::RowActive, [0.28, 0.24, 0.34, 1.0])
             }
@@ -308,7 +308,7 @@ impl CheckboxView<'_> {
             (box_x + box_size + 7.0 * scale).round(),
             Renderer::tree_row_text_y(y, h, scale),
             if self.enabled {
-                renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg)
+                renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg)
             } else {
                 renderer.ui.pick(UiRole::TextMuted, [0.46, 0.47, 0.52, 1.0])
             },
@@ -385,11 +385,11 @@ impl IconButton {
         let mut radius = 4.0 * scale;
 
         if self.is_active {
-            bg_color = renderer.ui.pick(UiRole::Selection, renderer.theme.sel);
+            bg_color = renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel);
             draw_bg = true;
         } else if hovered {
             if pressed {
-                bg_color = renderer.ui.pick(UiRole::Selection, renderer.theme.sel);
+                bg_color = renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel);
                 radius = 4.0 * scale;
             } else {
                 bg_color = renderer.ui.pick(UiRole::RowHover, [0.26, 0.28, 0.30, 1.0]);
@@ -417,7 +417,7 @@ impl IconButton {
             } else if self.is_active {
                 renderer.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
             } else {
-                renderer.ui.pick(UiRole::Icon, renderer.theme.fg)
+                renderer.ui.pick(UiRole::Icon, renderer.ui_theme.fg)
             };
             renderer.draw_atlas_icon(
                 icon_type,

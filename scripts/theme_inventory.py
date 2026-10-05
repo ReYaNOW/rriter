@@ -36,12 +36,11 @@ CHANNEL = re.compile(
 BYTE_CHANNEL = re.compile(r"(?:[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?)(?:\s*/\s*255\.0)")
 WHITE = re.compile(r"\[\s*1\.0\s*,\s*1\.0\s*,\s*1\.0\s*,\s*([^\]]+)\]")
 THEME_FIELD = re.compile(r"\btheme\.([A-Za-z_][A-Za-z_0-9]*)")
-EDITOR_THEME_ACCESS = re.compile(r"(?<![A-Za-z_0-9])(?:self\.)?theme\.([A-Za-z_][A-Za-z_0-9]*)")
-EDITOR_THEME_PASS = re.compile(r"&\s*(?:self\.)?theme\b")
+EDITOR_THEME_ACCESS = re.compile(r"(?<![A-Za-z_0-9])(?:self\.|renderer\.)?theme\.([A-Za-z_][A-Za-z_0-9]*)")
+EDITOR_THEME_PASS = re.compile(r"&\s*(?:self\.|renderer\.)?theme\b")
 EDITOR_THEME_WHOLE_FILE_EXCEPTIONS = {
     "src/render_view/editor_text_layer.rs": "Editor text, syntax, selection, search and diff rendering",
     "src/render_view/minimap_ui.rs": "Editor minimap rendering",
-    "src/render_view/terminal_ui.rs": "Terminal surface uses editor theme by design",
     "src/render_view/markdown_read.rs": "Markdown Reader content uses editor theme by design",
     "src/render_view/markdown_read_interaction.rs": "Markdown Reader interaction surfaces",
     "src/render_view/markdown_read_media.rs": "Markdown Reader media surfaces",
@@ -50,10 +49,13 @@ EDITOR_THEME_WHOLE_FILE_EXCEPTIONS = {
     "src/render_view/markdown_toc.rs": "Markdown Reader table of contents",
 }
 EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("src/renderer/renderer_init_methods.rs", "theme.clone"): "Initial renderer UI palette is synchronized with its editor palette before theme selection is applied",
     ("src/render_view/root_frame_layout_renderer.rs", "self.theme.surface_bg"): "Window surface background",
     ("src/render_view/ide_panels/ide_panel_dialog_renderer.rs", "self.theme.terminal_bg"): "Bottom panel under the Terminal tab uses editor theme by design",
 }
 EDITOR_THEME_FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("src/render_view/terminal_ui.rs", "draw_terminal_panel"): "Terminal cell content, ANSI colors, cursor, selection and terminal search surfaces use the editor theme by design",
+    ("src/render_view/terminal_ui.rs", "terminal_default_cell_text_uses_theme_ansi_seven"): "Test of terminal text using the editor theme's ANSI palette",
     ("src/render_view/root_helpers.rs", "mod_interval_color"): "Editor git gutter colors",
     ("src/render_view/root_helpers.rs", "git_gutter_uses_existing_theme_tokens_for_each_change_kind"): "Test of the editor git gutter colors",
     ("src/render_view/root_frame_editor_chrome_renderer.rs", "draw_root_editor_chrome"): "Editor gutter and scrollbar chrome",
@@ -296,7 +298,7 @@ def rust_functions(source: str):
 
 def editor_theme_reads(path: Path):
     rel = path.relative_to(ROOT).as_posix()
-    if not (rel.startswith("src/render_view/") or rel == "src/renderer.rs" or rel.startswith("src/renderer/")):
+    if not (rel.startswith("src/render_view/") or rel == "src/renderer.rs" or rel.startswith("src/renderer/") or rel == "src/widgets.rs"):
         return
     if is_test_file(path):
         return
