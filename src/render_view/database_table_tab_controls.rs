@@ -33,11 +33,11 @@ fn draw_database_table_button(
                 s,
                 false,
                 ButtonStyle {
-                    border: [0.24, 0.58, 0.86, 0.75],
-                    background: [0.10, 0.15, 0.21, 1.0],
-                    hover_background: [0.13, 0.23, 0.32, 1.0],
-                    pressed_background: [0.16, 0.31, 0.44, 1.0],
-                    content: [0.35, 0.72, 0.98, 1.0],
+                    border: renderer.ui.pick(UiRole::Border, [0.24, 0.58, 0.86, 0.75]),
+                    background: renderer.ui.pick(UiRole::BgPanel, [0.10, 0.15, 0.21, 1.0]),
+                    hover_background: renderer.ui.pick(UiRole::RowHover, [0.13, 0.23, 0.32, 1.0]),
+                    pressed_background: renderer.ui.pick(UiRole::RowActive, [0.16, 0.31, 0.44, 1.0]),
+                    content: renderer.ui.pick(UiRole::Info, [0.35, 0.72, 0.98, 1.0]),
                 },
             );
             ui.register_rect(id, button.x, button.y, button.w, button.h, mx, my);
@@ -76,8 +76,8 @@ fn draw_database_table_nav_button(
         h,
         (4.0 * s).round(),
         (1.0 * s).round().max(1.0),
-        if hovered { renderer.theme.sel } else { [1.0, 1.0, 1.0, 0.10] },
-        if active { [0.15, 0.16, 0.20, 1.0] } else { [0.10, 0.105, 0.13, 1.0] },
+        if hovered { renderer.ui.pick(UiRole::Selection, renderer.theme.sel) } else { renderer.ui.ink(0.10) },
+        if active { renderer.ui.pick(UiRole::RowActive, [0.15, 0.16, 0.20, 1.0]) } else { renderer.ui.pick(UiRole::BgPanelAlt, [0.10, 0.105, 0.13, 1.0]) },
     );
     let text_scale = 1.08;
     let text_w = renderer.measure_ui_width(text, text_scale);
@@ -85,7 +85,7 @@ fn draw_database_table_nav_button(
         text,
         (x + (w - text_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, h, s),
-        if active { renderer.theme.fg } else { [0.40, 0.42, 0.48, 1.0] },
+        if active { renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg) } else { renderer.ui.pick(UiRole::TextMuted, [0.40, 0.42, 0.48, 1.0]) },
         text_scale,
     );
 }
@@ -225,7 +225,7 @@ fn draw_database_calendar_footer_button(
             w - 6.0,
             h - 6.0,
             (5.0 * s).round(),
-            [0.20, 0.18, 0.29, 1.0],
+            renderer.ui.pick(UiRole::RowHover, [0.20, 0.18, 0.29, 1.0]),
         );
     }
     let text_w = renderer.measure_ui_width(label, scale).round();
@@ -233,9 +233,91 @@ fn draw_database_calendar_footer_button(
         label,
         (x + (w - text_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, h, s),
-        renderer.theme.fg,
+        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
         scale,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_database_table_scrollbars(
+    renderer: &mut Renderer,
+    ui: &mut UiRegistry,
+    layout: &crate::app::database::DatabaseGridLayout,
+    metadata: &crate::app::database::DatabaseTableMetadata,
+    state: &crate::app::database::DatabaseTableTabState,
+    mx: f32,
+    my: f32,
+    s: f32,
+) {
+    let (vertical_rect, horizontal_rect) = database_table_scrollbar_rects(layout);
+    if let Some(rect) = vertical_rect {
+        let total_h = state.grid.logical_row_count() as f32
+            * crate::app::database::database_grid_row_height_px(s);
+        let bar = database_table_scrollbar_with_ui(
+            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.h, total_h,
+            state.grid.scroll_y.current * s, false, &renderer.ui,
+        );
+        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: &mut *ui, id: UiId::DatabaseTableScrollY, mx, my, blocker: false,
+        }));
+    }
+    if let Some(rect) = horizontal_rect {
+        let content_w = (state.grid.content_width(metadata) * s).round();
+        let bar = database_table_scrollbar_with_ui(
+            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.w, content_w,
+            state.grid.scroll_x.current * s, true, &renderer.ui,
+        );
+        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: &mut *ui, id: UiId::DatabaseTableScrollX, mx, my, blocker: false,
+        }));
+    }
+}
+
+pub(crate) fn database_table_scrollbar(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    database_table_scrollbar_with_ui(
+        lane,
+        viewport,
+        content,
+        offset,
+        horizontal,
+        &crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+    )
+}
+
+fn database_table_scrollbar_with_ui(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool, ui: &crate::theme::UiPalette,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 0.0,
+            edge_gap: Some(2.0),
+            track_pad: 0.0,
+            min_thumb: if horizontal { 36.0 } else { 28.0 },
+            radius: Some(3.0),
+            track_color: Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
+            thumb_color: ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+        },
+        axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
+        lane,
+        extent: ScrollbarExtent::new(viewport, content, offset),
+    }
+}
+
+fn database_table_scrollbar_rects(
+    layout: &crate::app::database::DatabaseGridLayout,
+) -> (
+    Option<crate::app::database::DatabaseGridRect>,
+    Option<crate::app::database::DatabaseGridRect>,
+) {
+    (
+        layout.vertical_scrollbar_rect,
+        layout.horizontal_scrollbar_rect,
+    )
 }
 
 fn draw_database_refresh_overlay(
@@ -246,7 +328,7 @@ fn draw_database_refresh_overlay(
     h: f32,
     s: f32,
 ) {
-    renderer.push_rect(x, y, w, h, [0.02, 0.025, 0.04, 0.34]);
+    renderer.push_rect(x, y, w, h, renderer.ui.shadow_alpha(0.34));
     let cx = (x + w * 0.5).round();
     let cy = (y + h * 0.5).round();
     let radius = (15.0 * s).round();
@@ -308,15 +390,15 @@ fn draw_database_table_error_hint(
         hint_h,
         (5.0 * s).round(),
         1.0,
-        [0.95, 0.38, 0.42, 0.95],
-        [0.19, 0.06, 0.09, 0.98],
+        renderer.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 0.95]),
+        renderer.ui.pick(UiRole::BgPanelAlt, [0.19, 0.06, 0.09, 0.98]),
     );
     renderer.draw_tree_label_clipped(
         error,
         hint_x + (10.0 * s).round(),
         Renderer::tree_row_text_y(hint_y, hint_h, s),
         (hint_w - 20.0 * s).max(8.0),
-        [0.99, 0.76, 0.78, 1.0],
+        renderer.ui.pick(UiRole::Error, [0.99, 0.76, 0.78, 1.0]),
         0.82,
         &mut String::new(),
     );
@@ -349,8 +431,8 @@ fn draw_database_date_picker(
             h,
             (5.0 * s).round(),
             1.0,
-            if hovered { renderer.theme.sel } else { [0.32, 0.34, 0.42, 1.0] },
-            if hovered { [0.18, 0.20, 0.28, 1.0] } else { [0.13, 0.14, 0.18, 1.0] },
+            if hovered { renderer.ui.pick(UiRole::Selection, renderer.theme.sel) } else { renderer.ui.pick(UiRole::Border, [0.32, 0.34, 0.42, 1.0]) },
+            if hovered { renderer.ui.pick(UiRole::RowHover, [0.18, 0.20, 0.28, 1.0]) } else { renderer.ui.pick(UiRole::BgPanelAlt, [0.13, 0.14, 0.18, 1.0]) },
         );
         let label = "Сейчас UTC";
         let scale = 0.86;
@@ -359,7 +441,7 @@ fn draw_database_date_picker(
             label,
             (x + (w - text_w) * 0.5).round(),
             Renderer::tree_row_text_y(y, h, s),
-            renderer.theme.fg,
+            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
             scale,
         );
         return;
@@ -384,8 +466,8 @@ fn draw_database_date_picker(
         height,
         (6.0 * s).round(),
         1.0,
-        [0.32, 0.34, 0.42, 1.0],
-        [0.095, 0.10, 0.13, 1.0],
+        renderer.ui.pick(UiRole::Border, [0.32, 0.34, 0.42, 1.0]),
+        renderer.ui.pick(UiRole::BgInput, [0.095, 0.10, 0.13, 1.0]),
     );
 
     let arrow_w = (40.0 * s).round();
@@ -416,7 +498,7 @@ fn draw_database_date_picker(
                 arrow_w - 6.0,
                 header_h - 6.0,
                 (5.0 * s).round(),
-                [0.20, 0.18, 0.29, 1.0],
+                renderer.ui.pick(UiRole::RowHover, [0.20, 0.18, 0.29, 1.0]),
             );
         }
     }
@@ -427,7 +509,7 @@ fn draw_database_date_picker(
             label,
             (button_x + (arrow_w - text_w) * 0.5).round(),
             Renderer::tree_row_text_y(y, header_h, s),
-            renderer.theme.fg,
+            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
             arrow_scale,
         );
     }
@@ -443,7 +525,7 @@ fn draw_database_date_picker(
         &title,
         (x + (width - title_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, header_h, s),
-        renderer.theme.fg,
+        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
         title_scale,
     );
 
@@ -455,7 +537,7 @@ fn draw_database_date_picker(
             label,
             (x + index as f32 * cell_w + (cell_w - label_w) * 0.5).round(),
             Renderer::tree_row_text_y(weekdays_y, weekday_h, s),
-            renderer.theme.line_num,
+            renderer.ui.pick(UiRole::TextMuted, renderer.theme.line_num),
             weekday_scale,
         );
     }
@@ -490,7 +572,7 @@ fn draw_database_date_picker(
         if hovered {
             let (hx, hy, hw, hh) =
                 database_calendar_centered_square(dx, dy, cell_w, cell_h, hover_size);
-            renderer.push_rounded_rect(hx, hy, hw, hh, (4.0 * s).round(), [0.22, 0.18, 0.32, 1.0]);
+            renderer.push_rounded_rect(hx, hy, hw, hh, (4.0 * s).round(), renderer.ui.pick(UiRole::RowHover, [0.22, 0.18, 0.32, 1.0]));
         }
         let day_text = day.to_string();
         let day_w = renderer.measure_ui_width(&day_text, day_scale).round();
@@ -498,7 +580,7 @@ fn draw_database_date_picker(
             &day_text,
             (dx + (cell_w - day_w) * 0.5).round(),
             Renderer::tree_row_text_y(dy, cell_h, s),
-            renderer.theme.fg,
+            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
             day_scale,
         );
     }
