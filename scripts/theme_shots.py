@@ -591,6 +591,7 @@ def capture(out: Path, theme_editor: str, theme_ui: str, linked: bool) -> list[s
 
 
 def main() -> int:
+    global SIZE, SCALE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--theme", choices=sorted(THEMES))
     parser.add_argument("--editor", choices=sorted(THEMES))
@@ -598,7 +599,11 @@ def main() -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--compare", nargs=2, type=Path, metavar=("DIR_A", "DIR_B"))
     parser.add_argument("--exclude", nargs="*", default=[])
+    # MASKS are framebuffer coordinates for the default size and scale only.
+    parser.add_argument("--size", default=SIZE, metavar="WxH")
+    parser.add_argument("--scale", default=SCALE)
     args = parser.parse_args()
+    SIZE, SCALE = args.size, args.scale
     if args.compare:
         return compare(*args.compare, set(args.exclude))
     editor = args.editor or args.theme or "dracula"
