@@ -393,12 +393,13 @@ impl UiPalette {
         let values = theme_values(id);
         let syntax = SyntaxPalette::for_id(id);
         let text = values.fg;
-        let text_dim = values.fg;
-        let bg_panel = mix(values.bg, text, 0.04);
-        let bg_panel_alt = mix(values.bg, text, 0.06);
-        let bg_dialog = mix(values.bg, text, 0.04);
-        let bg_input = mix(values.bg, text, 0.02);
-        let bg_tooltip = mix(values.bg, text, 0.03);
+        let text_dim = mix(values.fg, values.bg, 0.22);
+        let away = if id.is_dark() { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] };
+        let bg_panel = mix(values.bg, away, 0.04);
+        let bg_panel_alt = mix(values.bg, away, 0.06);
+        let bg_dialog = mix(values.bg, away, 0.04);
+        let bg_input = mix(values.bg, away, 0.02);
+        let bg_tooltip = mix(values.bg, away, 0.03);
         let bg_code = values.surface_bg;
         let accent = if matches!(id, ThemeId::OneDark | ThemeId::OneLight) {
             values.function
@@ -449,6 +450,19 @@ fn mix(from: [f32; 4], to: [f32; 4], amount: f32) -> [f32; 4] {
     ]
 }
 
+fn luminance(color: [f32; 4]) -> f64 {
+    let channel = |value: f32| {
+        let value = f64::from(value);
+        if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
+}
+
+fn contrast(a: [f32; 4], b: [f32; 4]) -> f64 {
+    let (lighter, darker) = { let x = luminance(a); let y = luminance(b); if x >= y { (x, y) } else { (y, x) } };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
 fn ui_theme_color(
     role: UiRole,
     id: ThemeId,
@@ -478,23 +492,27 @@ fn ui_theme_color(
         UiRole::BgMedia => bg_panel_alt,
         UiRole::BgPdfPaper => [0.972, 0.972, 0.949, 1.0],
         UiRole::Border => mix(values.bg, values.fg, 0.12),
-        UiRole::TextPrimary | UiRole::TextSecondary => values.fg,
+        UiRole::TextPrimary => values.fg,
+        UiRole::TextSecondary | UiRole::Icon => mix(values.fg, values.bg, 0.15),
         UiRole::TextMuted => mix(values.fg, values.bg, 0.28),
-        UiRole::TextOnAccent => if id.is_dark() { [0.98, 0.98, 0.98, 1.0] } else { values.bg },
+        UiRole::TextOnAccent => {
+            let black = [0.0, 0.0, 0.0, 1.0];
+            let white = [1.0, 1.0, 1.0, 1.0];
+            if contrast(black, accent) >= contrast(white, accent) { black } else { white }
+        }
         UiRole::Accent => accent,
         UiRole::AccentHover => mix(accent, values.fg, 0.16),
         UiRole::AccentSoft => alpha(accent, 0.24),
         UiRole::Selection | UiRole::InputSelection => alpha(values.selection, 0.42),
         UiRole::ScrollbarThumb => alpha(mix(values.fg, values.bg, 0.40), 0.72),
         UiRole::ScrollbarThumbHover => alpha(mix(values.fg, values.bg, 0.22), 0.90),
-        UiRole::Icon => values.fg,
         UiRole::Error | UiRole::Danger | UiRole::HttpStatusError | UiRole::GitDeleted => values.diag_error,
-        UiRole::Warning => values.diag_warn,
+        UiRole::Warning | UiRole::GitModified => values.diag_warn,
         UiRole::Success | UiRole::HttpStatusSuccess | UiRole::GitAdded | UiRole::DatabaseConnected => values.modified_saved,
         UiRole::Info | UiRole::HttpStatusRedirect | UiRole::GitBranch | UiRole::GitGraphNode | UiRole::GitGraphEdge => color(SyntaxRole::Keyword),
         UiRole::Link => color(SyntaxRole::Function),
         UiRole::GitCommit | UiRole::GitHunkAdded | UiRole::GitRenamed | UiRole::HttpGet | UiRole::HttpPut | UiRole::HttpPatch | UiRole::DatabaseDisconnected | UiRole::LspRunning | UiRole::LspStarting => color(SyntaxRole::Function),
-        UiRole::GitHunkDeleted | UiRole::GitModified | UiRole::HttpDelete | UiRole::LspCrashed => values.diag_error,
+        UiRole::GitHunkDeleted | UiRole::HttpDelete | UiRole::LspCrashed => values.diag_error,
         UiRole::HttpPost | UiRole::LspMissing => color(SyntaxRole::KeywordControl),
         UiRole::LspDisabled => color(SyntaxRole::Comment),
         UiRole::SearchMatch | UiRole::PdfSearchMatch => alpha(values.diag_warn, 0.30),
@@ -680,19 +698,6 @@ impl Theme {
 mod tests {
     use super::*;
 
-    fn luminance(color: [f32; 4]) -> f64 {
-        let channel = |value: f32| {
-            let value = f64::from(value);
-            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
-    }
-
-    fn contrast(a: [f32; 4], b: [f32; 4]) -> f64 {
-        let (lighter, darker) = { let x = luminance(a); let y = luminance(b); if x >= y { (x, y) } else { (y, x) } };
-        (lighter + 0.05) / (darker + 0.05)
-    }
-
     #[test]
     fn ids_round_trip_and_fallback() {
         for id in ThemeId::ALL { assert_eq!(ThemeId::from_key(id.key()), id); }
@@ -832,6 +837,12 @@ mod tests {
                 let bg = ui.roles[role as usize];
                 assert!(contrast(ui.text, bg) >= 4.5, "{id:?} text/{role:?}: {:.2}", contrast(ui.text, bg));
                 assert!(contrast(ui.text_dim, bg) >= 3.0, "{id:?} text_dim/{role:?}: {:.2}", contrast(ui.text_dim, bg));
+                if id != ThemeId::Dracula {
+                    for text_role in [UiRole::TextMuted, UiRole::TextSecondary] {
+                        let color = ui.roles[text_role as usize];
+                        assert!(contrast(color, bg) >= 3.0, "{id:?} {text_role:?}/{role:?}: {:.2}", contrast(color, bg));
+                    }
+                }
             }
             previous = ui;
         }

@@ -36,6 +36,38 @@ CHANNEL = re.compile(
 BYTE_CHANNEL = re.compile(r"(?:[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?)(?:\s*/\s*255\.0)")
 WHITE = re.compile(r"\[\s*1\.0\s*,\s*1\.0\s*,\s*1\.0\s*,\s*([^\]]+)\]")
 THEME_FIELD = re.compile(r"\btheme\.([A-Za-z_][A-Za-z_0-9]*)")
+EDITOR_THEME_ACCESS = re.compile(r"(?:self\.)?theme\.([A-Za-z_][A-Za-z_0-9]*)")
+EDITOR_THEME_PASS = re.compile(r"&\s*(?:self\.)?theme\b")
+EDITOR_THEME_WHOLE_FILE_EXCEPTIONS = {
+    "src/render_view/editor_text_layer.rs": "Editor text, syntax, selection, search and diff rendering",
+    "src/render_view/minimap_ui.rs": "Editor minimap rendering",
+    "src/render_view/terminal_ui.rs": "Terminal surface uses editor theme by design",
+    "src/render_view/markdown_read.rs": "Markdown Reader content uses editor theme by design",
+    "src/render_view/markdown_read_interaction.rs": "Markdown Reader interaction surfaces",
+    "src/render_view/markdown_read_media.rs": "Markdown Reader media surfaces",
+    "src/render_view/markdown_read_text_layout.rs": "Markdown Reader content layout",
+    "src/render_view/markdown_code_scroll.rs": "Markdown Reader code blocks",
+    "src/render_view/markdown_toc.rs": "Markdown Reader table of contents",
+}
+EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("src/render_view/root_frame_layout_renderer.rs", "self.theme.surface_bg"): "Window surface background",
+}
+EDITOR_THEME_FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("src/render_view/root_frame_editor_chrome_renderer.rs", "draw_root_editor_chrome"): "Editor gutter and scrollbar chrome",
+    ("src/render_view/root_frame_editor_chrome_renderer.rs", "draw_root_editor_vertical_scrollbar"): "Editor scrollbar",
+    ("src/render_view/root_frame_editor_text_renderer.rs", "draw_root_editor_text"): "Editor text surface",
+    ("src/render_view/root_frame_editor_text_renderer.rs", "draw_root_editor_overlays"): "Editor selection, search and diff overlays",
+    ("src/render_view/root_frame_editor_text_renderer.rs", "draw_root_editor_gutter"): "Editor gutter and diagnostics",
+    ("src/render_view/root_frame_overlay_helpers.rs", "draw_empty_ide_frame"): "Blank editor surface background",
+    ("src/render_view/root_frame_overlay_helpers.rs", "draw_blank_editor_area"): "Blank editor surface background",
+    ("src/render_view/root_frame_overlay_helpers.rs", "draw_editor_horizontal_scrollbar"): "Editor horizontal scrollbar",
+    ("src/render_view/root_frame_helpers.rs", "draw_inline_git_popup_panel"): "Inline editor diff overlay",
+    ("src/render_view/root_frame_helpers.rs", "draw_inline_git_text_line"): "Inline editor diff text",
+    ("src/render_view/root_frame_helpers.rs", "draw_git_diff_hunk_panel"): "Editor diff overlay",
+    ("src/render_view/ui.rs", "draw_empty_ide"): "Empty editor surface background",
+    ("src/render_view/search.rs", "draw_search_panel"): "Editor text search overlay",
+    ("src/render_view/sticky.rs", "draw_sticky_lines"): "Sticky editor context lines",
+}
 EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/markdown_code_scroll.rs", "theme.syntax"): "Task 13 D: code block in editor theme",
     ("src/render_view/markdown_read_media.rs", "theme.line_num"): "Task 13 D: editor-themed media frame",
@@ -242,6 +274,64 @@ def is_pick_second_arg(source: str, offset: int) -> bool:
     return False
 
 
+def rust_functions(source: str):
+    """Yield (name, start, end) spans for functions, using brace depth."""
+    for match in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z_0-9]*)\b", source):
+        opening = source.find("{", match.end())
+        if opening < 0:
+            continue
+        depth = 0
+        for index in range(opening, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    yield match.group(1), match.start(), index + 1
+                    break
+
+
+def editor_theme_reads(path: Path):
+    rel = path.relative_to(ROOT).as_posix()
+    if not (rel.startswith("src/render_view/") or rel == "src/renderer.rs" or rel.startswith("src/renderer/")):
+        return
+    if is_test_file(path):
+        return
+    source = path.read_text(encoding="utf-8")
+    functions = list(rust_functions(source))
+    aliases_by_function: dict[str, set[str]] = {}
+    alias_decl = re.compile(r"\blet\s+([A-Za-z_][A-Za-z_0-9]*)\s*=\s*&?\s*self\.theme\b")
+    for name, start, end in functions:
+        aliases_by_function[name] = {match.group(1) for match in alias_decl.finditer(source, start, end)}
+
+    access_pattern = EDITOR_THEME_ACCESS
+    candidates = []
+    for match in access_pattern.finditer(source):
+        candidates.append((match.start(), match.group(0)))
+    for name, start, end in functions:
+        aliases = aliases_by_function.get(name, ())
+        for alias in aliases:
+            for match in re.finditer(rf"\b{re.escape(alias)}\.([A-Za-z_][A-Za-z_0-9]*)", source[start:end]):
+                candidates.append((start + match.start(), match.group(0)))
+            for match in re.finditer(rf"(?<![.\w])&?\s*{re.escape(alias)}\b(?!\s*\.)", source[start:end]):
+                if not re.match(r"\s*=", source[start + match.end():]):
+                    candidates.append((start + match.start(), match.group(0).strip()))
+    # A theme passed by reference to a helper is a theme read even without a field access.
+    for match in EDITOR_THEME_PASS.finditer(source):
+        candidates.append((match.start(), match.group(0)))
+
+    for offset, expression in sorted(set(candidates)):
+        containing = next((name for name, start, end in functions if start <= offset < end), "<module>")
+        if rel in EDITOR_THEME_WHOLE_FILE_EXCEPTIONS:
+            continue
+        if (rel, containing) in EDITOR_THEME_FUNCTION_EXCEPTIONS:
+            continue
+        if (rel, expression) in EDITOR_THEME_EXPRESSION_EXCEPTIONS:
+            continue
+        line = source.count("\n", 0, offset) + 1
+        yield rel, line, containing, expression
+
+
 def numeric_color(value: str) -> tuple[float, ...] | None:
     if not is_color_array(value):
         return None
@@ -292,10 +382,16 @@ def pick_representatives(files: list[Path]):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--report-editor-theme-reads", action="store_true")
     parser.add_argument("--files", nargs="*")
     args = parser.parse_args()
     files = [ROOT / item for item in args.files] if args.files else sorted(SRC.rglob("*.rs"))
     records = [record for path in files if path.is_file() for record in scan_file(path)]
+    editor_reads = [read for path in files if path.is_file() for read in editor_theme_reads(path)]
+    if args.report_editor_theme_reads:
+        for rel, line, function, expression in editor_reads:
+            print(f"{rel}:{line}: {function}: {expression}")
+        return 0
     if args.check:
         remaining = []
         for rel, line, value, context, kind, offset in records:
@@ -353,7 +449,8 @@ def main() -> int:
         for role, expected, most_frequent, count in mismatches:
             print(f"representative: {role} roles={expected} most_frequent={most_frequent} ({count} calls)")
         print(f"--check summary: remaining={len(remaining) + len(white)} unused_roles={len(unused)} representative_mismatches={len(mismatches)}")
-        return 1 if remaining or white or unused or mismatches else 0
+        print(f"editor_theme_reads={len(editor_reads)}")
+        return 1 if remaining or white or unused or mismatches or editor_reads else 0
     for rel, line, value, context, kind, _offset in records:
         print(f"{rel}:{line}: {value} | {context}")
     return 0

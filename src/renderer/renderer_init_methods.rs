@@ -40,6 +40,17 @@ fn required_graphics_attribute(
 }
 
 impl Renderer {
+    pub(crate) fn set_themes(
+        &mut self,
+        editor: Theme,
+        ui: crate::theme::ThemeId,
+        system_selection: [f32; 4],
+    ) {
+        self.theme = editor;
+        self.ui = crate::theme::UiPalette::for_id(ui);
+        self.ui_theme = Theme::for_id(ui, system_selection);
+    }
+
     pub fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
         let texture = unsafe { self.gl.create_texture().ok()? };
         unsafe {
@@ -649,6 +660,7 @@ impl Renderer {
                 scale_factor,
                 theme,
                 ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                ui_theme: Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4]),
                 theme_gen: 0,
                 width: 1000.0,
                 height: 800.0,

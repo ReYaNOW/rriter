@@ -290,7 +290,7 @@ fn bootstrap(app: &mut App,event_loop: &ActiveEventLoop) -> Result<BootstrappedW
     )
     .map_err(|error| format!("RRiter renderer initialization failed: {error}"))?;
     let mut renderer = renderer;
-    renderer.ui = crate::theme::UiPalette::for_id(app.ui_theme_id);
+    renderer.set_themes(app.theme.clone(), app.ui_theme_id, app.system_selection);
     app.startup_trace.mark("renderer");
     Ok(BootstrappedWindow {
         window: Arc::new(window),

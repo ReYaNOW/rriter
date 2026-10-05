@@ -428,6 +428,7 @@ pub struct Renderer {
 
     pub theme: Theme,
     pub ui: crate::theme::UiPalette,
+    pub ui_theme: Theme,
     pub theme_gen: u64,
     pub width: f32,
     pub height: f32,

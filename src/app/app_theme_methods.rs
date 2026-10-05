@@ -20,8 +20,7 @@ impl App {
         self.ui_theme_id = ui;
         self.theme = crate::renderer::Theme::for_id(editor, self.system_selection);
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.theme = self.theme.clone();
-            renderer.ui = crate::theme::UiPalette::for_id(ui);
+            renderer.set_themes(self.theme.clone(), ui, self.system_selection);
             renderer.theme_gen = renderer.theme_gen.wrapping_add(1);
         }
         if editor_changed {
