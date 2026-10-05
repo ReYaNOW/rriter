@@ -124,16 +124,7 @@ impl Renderer {
         // Прозрачность терминала/ляпов (0.0 - полностью прозрачный, 1.0 - непрозрачный)
         let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
 
-        let panel_bg = if ide_panel.open_bottom_panel_id() == Some(crate::app::PanelId::Terminal) {
-            [self.theme.terminal_bg[0], self.theme.terminal_bg[1], self.theme.terminal_bg[2], panel_alpha]
-        } else {
-            [
-                self.theme.terminal_bg[0],
-                self.theme.terminal_bg[1],
-                self.theme.terminal_bg[2],
-                panel_alpha,
-            ]
-        };
+        let panel_bg = [self.theme.terminal_bg[0], self.theme.terminal_bg[1], self.theme.terminal_bg[2], panel_alpha];
         // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
         self.push_rect(
             panel_x,
