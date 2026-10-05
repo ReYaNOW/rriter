@@ -116,7 +116,7 @@ pub(super) fn draw(
         for (chord_index, label) in row.chords.iter().enumerate() {
             let chip_w = renderer.measure_ui_width(label, 0.76) + 25.0 * s;
             renderer.push_rounded_rect(chip_x.round(), metrics.chip_y, chip_w.round(), metrics.chip_h, (5.0 * s).round(), renderer.ui.pick(UiRole::BgChip, [0.3, 0.27, 0.38, 1.0]));
-            renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), renderer.ui.pick(UiRole::TextOnAccent, [0.9, 0.88, 0.96, 1.0]), 0.76);
+            renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), renderer.ui.pick(UiRole::TextPrimary, [0.9, 0.88, 0.96, 1.0]), 0.76);
             register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", renderer.ui.pick(UiRole::Danger, [1.0, 0.58, 0.62, 1.0]));
             chip_x += chip_w + (4.0 * s).round();
         }

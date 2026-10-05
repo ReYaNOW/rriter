@@ -618,7 +618,7 @@ impl Renderer {
             tab_title,
             content_title_x + 14.0 * s,
             content_y,
-            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
+            self.ui.pick(UiRole::TextOnAccent, [1.0, 1.0, 1.0, 1.0]),
             1.1,
         );
         content_y = (content_y + if active_tab == 4 { 30.0 * s } else { 46.0 * s }).round();
