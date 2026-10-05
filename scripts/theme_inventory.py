@@ -47,6 +47,7 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/scrollbar_widget.rs", "[0.7, 0.33, 0.54, 0.8]"): "SB: fallback, ScrollbarPaint",
     ("src/render_view/scrollbar_widget.rs", "[0.7, 0.33, 0.54, 1.0]"): "SB: fallback, ScrollbarPaint",
     ("src/render_view/scrollbar_widget.rs", "[0.45, 0.45, 0.55, 0.5]"): "SB: PROBLEMS grey, both themes",
+    ("src/render_view/scrollbar_widget.rs", "[1.0, 1.0, 1.0, 0.36]"): "SB: unit-test literal",
     ("src/render_view/ide_panels/ide_panel_helpers.rs", "[0.20, 0.21, 0.25, 0.55]"): "SB: fallback, ScrollbarPaint",
     ("src/render_view/ide_panels/ide_panel_helpers.rs", "[0.48, 0.50, 0.58, 0.90]"): "SB: fallback, ScrollbarPaint",
     ("src/app/lsp_actions.rs", "[1.0, 1.0, 1.0, 0.22]"): "SB: fallback, ScrollbarPaint",
