@@ -46,6 +46,7 @@ impl Renderer {
         ui: crate::theme::ThemeId,
         system_selection: [f32; 4],
     ) {
+        self.editor_ui = crate::theme::UiPalette::for_id(editor.id);
         self.theme = editor;
         self.ui = crate::theme::UiPalette::for_id(ui);
         self.ui_theme = Theme::for_id(ui, system_selection);
@@ -661,6 +662,8 @@ impl Renderer {
                 scale_factor,
                 theme,
                 ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                editor_ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                icons_on_editor: false,
                 ui_theme,
                 theme_gen: 0,
                 width: 1000.0,

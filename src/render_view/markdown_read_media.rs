@@ -261,7 +261,7 @@ impl Renderer {
             }
             let radius = MEDIA_FRAME_RADIUS * s;
             if matches!(entry, MediaEntryView::Failed(_)) {
-                let border = faded(self.ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]), 0.7);
+                let border = faded(self.editor_ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]), 0.7);
                 self.push_rounded_rect_border(
                     x,
                     y,
@@ -270,7 +270,7 @@ impl Renderer {
                     radius,
                     1.0,
                     border,
-                    self.ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
+                    self.editor_ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
                 );
             } else {
                 self.push_rounded_rect(
@@ -279,7 +279,7 @@ impl Renderer {
                     item.w,
                     item.h,
                     radius,
-                    self.ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
+                    self.editor_ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
                 );
             }
             if item.h >= line_h {
@@ -309,7 +309,7 @@ impl Renderer {
             (left + pad).round(),
             (row_top + code.line_height * 0.82).round(),
             right - left - 2.0 * pad,
-            self.ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]),
+            self.editor_ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]),
             MEDIA_ALT_SCALE,
             &mut scratch,
         );

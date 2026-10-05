@@ -116,6 +116,7 @@ impl GraphicsDiagnostics {
 
 #[derive(Clone)]
 pub struct Theme {
+    pub id: crate::theme::ThemeId,
     pub bg: [f32; 4],
     pub fg: [f32; 4],
     pub sel: [f32; 4],
@@ -428,6 +429,10 @@ pub struct Renderer {
 
     pub theme: Theme,
     pub ui: crate::theme::UiPalette,
+    /// Role palette of the editor theme, for chrome that sits on the editor surface (search bar, diff overlay, Markdown Reader).
+    pub editor_ui: crate::theme::UiPalette,
+    /// While set, `IconButton::render` takes its colours from `theme`/`editor_ui` instead of `ui_theme`/`ui`.
+    pub icons_on_editor: bool,
     pub ui_theme: Theme,
     pub theme_gen: u64,
     pub width: f32,

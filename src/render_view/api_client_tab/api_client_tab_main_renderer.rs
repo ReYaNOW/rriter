@@ -8,12 +8,13 @@ impl Renderer {
         right_pad: f32,
         baseline_y: f32,
         scale: f32,
+        color: [f32; 4],
     ) {
         let mut buf = [0u8; 20];
         if let Some(num_str) = editor_line_number_text(line_no, &mut buf) {
             let num_w = self.measure_mono_width(num_str, scale);
             let draw_x = right_x - right_pad - num_w;
-            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.ui_theme.line_num, scale);
+            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, color, scale);
         }
     }
 
@@ -24,12 +25,13 @@ impl Renderer {
         w: f32,
         baseline_y: f32,
         scale: f32,
+        color: [f32; 4],
     ) {
         let mut buf = [0u8; 20];
         if let Some(num_str) = editor_line_number_text(line_no, &mut buf) {
             let num_w = self.measure_mono_width(num_str, scale);
             let draw_x = x + ((w - num_w) * 0.5).round();
-            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.ui_theme.line_num, scale);
+            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, color, scale);
         }
     }
 

@@ -254,6 +254,8 @@ impl Renderer {
             );
         }
 
+        // The hunk overlay sits on the editor surface: its icons take the editor theme.
+        self.icons_on_editor = true;
         if controls_enabled {
             ui_registry.register_icon_button(
                 crate::ui_system::UiId::InlineGitPrevHunk,
@@ -286,6 +288,7 @@ impl Renderer {
             s,
             false,
         );
+        self.icons_on_editor = false;
     }
 
     fn draw_git_diff_hunk_panel(
@@ -433,6 +436,7 @@ impl Renderer {
             custom_color: None,
         };
 
+        self.icons_on_editor = true;
         ui_registry.register_icon_button(
             crate::ui_system::UiId::GitDiffPrevHunk,
             &btn_up,
@@ -451,6 +455,7 @@ impl Renderer {
             s,
             false,
         );
+        self.icons_on_editor = false;
     }
 
 }

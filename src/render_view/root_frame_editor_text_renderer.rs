@@ -487,6 +487,7 @@ impl Renderer {
                 num_right_pad,
                 y,
                 1.0,
+                self.theme.line_num,
             );
         }
 
