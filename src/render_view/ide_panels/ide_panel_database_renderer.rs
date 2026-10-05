@@ -94,7 +94,18 @@ impl Renderer {
 
         let database = &ide_panel.database;
         let toolbar_h = 34.0 * s;
-        self.push_rect(panel_x, panel_y, panel_w, panel_h, [0.129, 0.133, 0.173, 1.0]);
+        self.push_rect(
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
+            [
+                self.ui_theme.terminal_bg[0],
+                self.ui_theme.terminal_bg[1],
+                self.ui_theme.terminal_bg[2],
+                1.0,
+            ],
+        );
         ui_registry.register_blocker(
             UiId::DatabasePanelBody,
             panel_x,
@@ -109,7 +120,7 @@ impl Renderer {
             panel_y,
             panel_w,
             toolbar_h,
-            [0.15, 0.155, 0.20, 1.0],
+            self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.155, 0.20, 1.0]),
         );
 
         let button_size = 24.0 * s;
@@ -136,7 +147,8 @@ impl Renderer {
                 is_active: false,
                 icon_size: Some(17.0 * s),
                 active_square_width: None,
-                custom_color: (!enabled).then_some([0.4, 0.4, 0.45, 0.55]),
+                custom_color: (!enabled)
+                    .then_some(self.ui.pick(UiRole::TextMuted, [0.4, 0.4, 0.45, 0.55])),
             };
             if enabled {
                 ui_registry.register_icon_button(id, &button, self, mx, my, s, false);
@@ -154,7 +166,7 @@ impl Renderer {
                 button_x + 4.0 * s,
                 (panel_y + 22.0 * s).round(),
                 (panel_x + panel_w - button_x - 8.0 * s).max(0.0),
-                [0.63, 0.70, 0.92, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.63, 0.70, 0.92, 1.0]),
                 0.78,
                 &mut label_scratch,
             );
@@ -175,7 +187,7 @@ impl Renderer {
                 panel_layout.error_y,
                 panel_w,
                 panel_layout.error_h,
-                [0.34, 0.12, 0.15, 1.0],
+                self.ui.pick(UiRole::Error, [0.34, 0.12, 0.15, 1.0]),
             );
             let copy_size = (17.0 * s).min((panel_layout.error_h - 8.0 * s).max(0.0));
             let copy_slot_w = if copy_size > 0.0 { 30.0 * s } else { 0.0 };
@@ -188,7 +200,7 @@ impl Renderer {
                     s,
                 ),
                 (panel_w - 16.0 * s - copy_slot_w).max(4.0),
-                [1.0, 0.74, 0.76, 1.0],
+                self.ui.pick(UiRole::Error, [1.0, 0.74, 0.76, 1.0]),
                 0.78,
                 &mut label_scratch,
             );
@@ -211,9 +223,9 @@ impl Renderer {
                     copy_y,
                     copy_size,
                     if hovered {
-                        [1.0, 1.0, 1.0, 1.0]
+                        self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
                     } else {
-                        [0.88, 0.70, 0.72, 1.0]
+                        self.ui.pick(UiRole::Error, [0.88, 0.70, 0.72, 1.0])
                     },
                 );
             }
@@ -261,9 +273,15 @@ impl Renderer {
                         my,
                     );
                 if selected {
-                    self.push_rect(panel_x, row_y, panel_w, row_h, [0.60, 0.35, 0.85, 0.24]);
+                    self.push_rect(
+                        panel_x,
+                        row_y,
+                        panel_w,
+                        row_h,
+                        self.ui.pick(UiRole::Selection, [0.60, 0.35, 0.85, 0.24]),
+                    );
                 } else if hovered {
-                    self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.06]);
+                    self.push_rect(panel_x, row_y, panel_w, row_h, self.ui.ink(0.06));
                 }
                 let arrow_x = panel_x + 6.0 * s;
                 if hover_settled {
@@ -283,7 +301,7 @@ impl Renderer {
                     arrow_x,
                     row_y,
                     row_h,
-                    [0.72, 0.75, 0.82, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.72, 0.75, 0.82, 1.0]),
                 );
                 let color = database_connection_color(connection.config.color);
                 self.push_rounded_rect(
@@ -299,7 +317,7 @@ impl Renderer {
                     panel_x + 37.0 * s,
                     database_tree_icon_y(row_y, row_h, 17.0 * s),
                     17.0 * s,
-                    [1.0, 0.67, 0.16, 1.0],
+                    self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]),
                 );
                 let max_w = (panel_w - 82.0 * s).max(10.0);
                 self.draw_tree_label_clipped(
@@ -307,16 +325,27 @@ impl Renderer {
                     panel_x + 58.0 * s,
                     Self::tree_row_text_y(row_y, row_h, s),
                     max_w,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.86,
                     &mut label_scratch,
                 );
                 let status_color = match connection.status {
-                    DatabaseConnectionStatus::Ready => [0.35, 0.85, 0.48, 1.0],
-                    DatabaseConnectionStatus::BuiltinSsh => [0.95, 0.72, 0.25, 1.0],
-                    DatabaseConnectionStatus::Connecting => [0.40, 0.67, 0.95, 1.0],
-                    DatabaseConnectionStatus::Error => [0.95, 0.35, 0.38, 1.0],
-                    DatabaseConnectionStatus::Disconnected => [0.45, 0.47, 0.53, 1.0],
+                    DatabaseConnectionStatus::Ready => {
+                        self.ui.pick(UiRole::DatabaseConnected, [0.35, 0.85, 0.48, 1.0])
+                    }
+                    DatabaseConnectionStatus::BuiltinSsh => {
+                        self.ui.pick(UiRole::Warning, [0.95, 0.72, 0.25, 1.0])
+                    }
+                    DatabaseConnectionStatus::Connecting => {
+                        self.ui.pick(UiRole::Info, [0.40, 0.67, 0.95, 1.0])
+                    }
+                    DatabaseConnectionStatus::Error => {
+                        self.ui.pick(UiRole::Error, [0.95, 0.35, 0.38, 1.0])
+                    }
+                    DatabaseConnectionStatus::Disconnected => {
+                        self.ui
+                            .pick(UiRole::DatabaseDisconnected, [0.45, 0.47, 0.53, 1.0])
+                    }
                 };
                 self.push_rounded_rect(
                     panel_x + panel_w - 16.0 * s,
@@ -386,9 +415,15 @@ impl Renderer {
                                 my,
                             );
                         if selected {
-                            self.push_rect(panel_x, row_y, panel_w, row_h, [0.35, 0.48, 0.72, 0.20]);
+                            self.push_rect(
+                                panel_x,
+                                row_y,
+                                panel_w,
+                                row_h,
+                                self.ui.pick(UiRole::Selection, [0.35, 0.48, 0.72, 0.20]),
+                            );
                         } else if hovered {
-                            self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.05]);
+                            self.push_rect(panel_x, row_y, panel_w, row_h, self.ui.ink(0.05));
                         }
                         let arrow_x = panel_x + 26.0 * s;
                         if hover_settled {
@@ -408,21 +443,21 @@ impl Renderer {
                             arrow_x,
                             row_y,
                             row_h,
-                            [0.68, 0.71, 0.79, 1.0],
+                            self.ui.pick(UiRole::TextSecondary, [0.68, 0.71, 0.79, 1.0]),
                         );
                         self.draw_atlas_icon(
                             IconType::Database,
                             panel_x + 46.0 * s,
                             database_tree_icon_y(row_y, row_h, 15.0 * s),
                             15.0 * s,
-                            [1.0, 0.67, 0.16, 1.0],
+                            self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]),
                         );
                         self.draw_tree_label_clipped(
                             &database_node.name,
                             panel_x + 65.0 * s,
                             Self::tree_row_text_y(row_y, row_h, s),
                             (panel_w - 73.0 * s).max(10.0),
-                            self.theme.fg,
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             0.84,
                             &mut label_scratch,
                         );
@@ -468,7 +503,7 @@ impl Renderer {
                                         row_y,
                                         panel_w,
                                         row_h,
-                                        [0.35, 0.48, 0.72, 0.20],
+                                        self.ui.pick(UiRole::Selection, [0.35, 0.48, 0.72, 0.20]),
                                     );
                                 } else if hovered {
                                     self.push_rect(
@@ -476,7 +511,7 @@ impl Renderer {
                                         row_y,
                                         panel_w,
                                         row_h,
-                                        [1.0, 1.0, 1.0, 0.05],
+                                        self.ui.ink(0.05),
                                     );
                                 }
                                 self.draw_atlas_icon(
@@ -484,14 +519,14 @@ impl Renderer {
                                     panel_x + 67.0 * s,
                                     database_tree_icon_y(row_y, row_h, 15.0 * s),
                                     15.0 * s,
-                                    [0.20, 0.80, 0.75, 1.0],
+                                    self.ui.pick(UiRole::Info, [0.20, 0.80, 0.75, 1.0]),
                                 );
                                 self.draw_tree_label_clipped(
                                     &table.name,
                                     panel_x + 86.0 * s,
                                     Self::tree_row_text_y(row_y, row_h, s),
                                     (panel_w - 94.0 * s).max(10.0),
-                                    self.theme.fg,
+                                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                                     0.82,
                                     &mut label_scratch,
                                 );
@@ -653,7 +688,7 @@ impl Renderer {
     ) {
         use crate::ui_system::UiId;
         ui_registry.mark_overlay_start();
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.62]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.62]));
         ui_registry.register_blocker(
             UiId::DatabaseDialogBackdrop,
             0.0,
@@ -675,7 +710,7 @@ impl Renderer {
         let height = geometry.h;
         let x = geometry.x;
         let y = geometry.y;
-        self.push_rounded_rect(x, y, width, height, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
+        self.push_rounded_rect(x, y, width, height, 8.0 * s, self.ui.pick(UiRole::BgDialog, [0.12, 0.125, 0.16, 1.0]));
         self.push_rounded_rect_border(
             x,
             y,
@@ -683,8 +718,8 @@ impl Renderer {
             height,
             8.0 * s,
             1.0,
-            [1.0, 1.0, 1.0, 0.17],
-            [0.12, 0.125, 0.16, 1.0],
+            self.ui.ink(0.17),
+            self.ui.pick(UiRole::BgDialog, [0.12, 0.125, 0.16, 1.0]),
         );
         ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, width, height, mx, my);
         self.draw_string_scaled_pixel_snapped(
@@ -695,7 +730,7 @@ impl Renderer {
             },
             x + 20.0 * s,
             y + 30.0 * s,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.05,
         );
 
@@ -730,7 +765,7 @@ impl Renderer {
                 field_layout.label.x,
                 Self::tree_row_text_y(field_layout.input.y, field_layout.input.h, s),
                 field_layout.label.w,
-                [0.72, 0.75, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.75, 0.82, 1.0]),
                 DATABASE_DIALOG_FIELD_TEXT_SCALE,
                 &mut label_scratch,
             );
@@ -878,7 +913,7 @@ impl Renderer {
             x + 20.0 * s,
             footer.summary_baseline,
             (width - 40.0 * s).max(4.0),
-            [0.66, 0.70, 0.80, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.66, 0.70, 0.80, 1.0]),
             DATABASE_DIALOG_SECONDARY_TEXT_SCALE,
             &mut toggle_scratch,
         );
@@ -962,7 +997,7 @@ impl Renderer {
                 x + 20.0 * s,
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
-                [0.95, 0.38, 0.42, 1.0],
+                self.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 1.0]),
                 0.78,
                 &mut footer_scratch,
             );
@@ -972,7 +1007,7 @@ impl Renderer {
                 x + 20.0 * s,
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
-                [0.45, 0.85, 0.56, 1.0],
+                self.ui.pick(UiRole::Success, [0.45, 0.85, 0.56, 1.0]),
                 0.78,
                 &mut footer_scratch,
             );
@@ -982,7 +1017,7 @@ impl Renderer {
                 x + 20.0 * s,
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
-                [0.72, 0.75, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.75, 0.82, 1.0]),
                 DATABASE_DIALOG_SECONDARY_TEXT_SCALE,
                 &mut footer_scratch,
             );
@@ -1080,7 +1115,7 @@ fn draw_database_hint(
         x.round(),
         Renderer::tree_row_text_y(y.round(), row_h, s),
         max_w,
-        [0.48, 0.50, 0.57, 1.0],
+        renderer.ui.pick(UiRole::TextMuted, [0.48, 0.50, 0.57, 1.0]),
         0.78,
         scratch,
     );
@@ -1156,7 +1191,7 @@ fn draw_database_confirmation(
 ) {
     use crate::ui_system::UiId;
     ui_registry.mark_overlay_start();
-    renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, [0.0, 0.0, 0.0, 0.62]);
+    renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, renderer.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.62]));
     ui_registry.register_blocker(
         UiId::DatabaseDialogBackdrop,
         0.0,
@@ -1177,7 +1212,7 @@ fn draw_database_confirmation(
     );
     let s = geometry.scale;
     let (x, y, w, h) = (geometry.x, geometry.y, geometry.w, geometry.h);
-    renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
+    renderer.push_rounded_rect(x, y, w, h, 8.0 * s, renderer.ui.pick(UiRole::BgDialog, [0.12, 0.125, 0.16, 1.0]));
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
     let mut scratch = String::new();
     renderer.draw_tree_label_clipped(
@@ -1185,7 +1220,7 @@ fn draw_database_confirmation(
         x + 22.0 * s,
         y + 36.0 * s,
         (w - 44.0 * s).max(4.0),
-        renderer.theme.fg,
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         1.0,
         &mut scratch,
     );
@@ -1194,7 +1229,7 @@ fn draw_database_confirmation(
         x + 22.0 * s,
         y + 78.0 * s,
         (w - 44.0 * s).max(4.0),
-        [0.72, 0.74, 0.80, 1.0],
+        renderer.ui.pick(UiRole::TextSecondary, [0.72, 0.74, 0.80, 1.0]),
         0.82,
         &mut scratch,
     );
@@ -1275,7 +1310,7 @@ fn draw_database_host_key_confirmation(
 ) {
     use crate::ui_system::UiId;
     ui_registry.mark_overlay_start();
-    renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, [0.0, 0.0, 0.0, 0.64]);
+    renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, renderer.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.64]));
     ui_registry.register_blocker(
         UiId::DatabaseDialogBackdrop,
         0.0,
@@ -1296,7 +1331,7 @@ fn draw_database_host_key_confirmation(
     );
     let s = geometry.scale;
     let (x, y, w, h) = (geometry.x, geometry.y, geometry.w, geometry.h);
-    renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
+    renderer.push_rounded_rect(x, y, w, h, 8.0 * s, renderer.ui.pick(UiRole::BgDialog, [0.12, 0.125, 0.16, 1.0]));
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
     let mut scratch = String::new();
     renderer.draw_tree_label_clipped(
@@ -1304,7 +1339,7 @@ fn draw_database_host_key_confirmation(
         x + 22.0 * s,
         y + 36.0 * s,
         (w - 44.0 * s).max(4.0),
-        renderer.theme.fg,
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         1.0,
         &mut scratch,
     );
@@ -1314,7 +1349,7 @@ fn draw_database_host_key_confirmation(
             x + 22.0 * s,
             y + (76.0 + idx as f32 * 24.0) * s,
             (w - 44.0 * s).max(4.0),
-            [0.72, 0.75, 0.82, 1.0],
+            renderer.ui.pick(UiRole::TextSecondary, [0.72, 0.75, 0.82, 1.0]),
             0.82,
             &mut scratch,
         );

@@ -250,7 +250,7 @@ impl Renderer {
                 panel_x + 8.0 * s,
                 panel_y + 8.0 * s,
                 (panel_w - 16.0 * s).max(0.0),
-                [0.95, 0.36, 0.36, 1.0],
+                self.ui.pick(UiRole::Error, [0.95, 0.36, 0.36, 1.0]),
                 0.72,
                 &mut error_scratch,
             );
@@ -263,7 +263,7 @@ impl Renderer {
                 hint,
                 tx,
                 panel_y + 30.0 * s,
-                [0.45, 0.45, 0.45, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.45, 1.0]),
                 tree_text_scale,
             );
         } else {
@@ -303,7 +303,7 @@ impl Renderer {
                         row_y,
                         panel_w,
                         row_h,
-                        [0.60, 0.35, 0.85, 0.24],
+                        self.ui.pick(UiRole::Selection, [0.60, 0.35, 0.85, 0.24]),
                     );
                 }
 
@@ -313,7 +313,7 @@ impl Renderer {
                         row_y,
                         panel_w,
                         row_h,
-                        [1.0, 1.0, 1.0, 0.06],
+                        self.ui.ink(0.06),
                     );
                 }
 
@@ -335,11 +335,11 @@ impl Renderer {
                 }
 
                 let color: [f32; 4] = if node.is_ignored {
-                    [0.973, 0.584, 0.502, 0.8]
+                    self.ui.pick(UiRole::TextMuted, [0.973, 0.584, 0.502, 0.8])
                 } else if node.is_dir {
-                    [0.78, 0.68, 1.0, 1.0]
+                    self.ui.pick(UiRole::TextSecondary, [0.78, 0.68, 1.0, 1.0])
                 } else {
-                    [0.651, 0.686, 0.918, 1.0]
+                    self.ui.pick(UiRole::TextPrimary, [0.651, 0.686, 0.918, 1.0])
                 };
 
                 let icon_size = 20.0 * s;
@@ -359,9 +359,9 @@ impl Renderer {
                         );
                     }
                     let arrow_color = if node.is_ignored {
-                        [0.973, 0.584, 0.502, 0.6]
+                        self.ui.pick(UiRole::TextMuted, [0.973, 0.584, 0.502, 0.6])
                     } else {
-                        [0.78, 0.68, 1.0, 0.7]
+                        self.ui.pick(UiRole::TextSecondary, [0.78, 0.68, 1.0, 0.7])
                     };
                     let label = self.draw_tree_dir_entry(
                         &node.name,
@@ -379,9 +379,9 @@ impl Renderer {
                     );
                     if has_error || has_warn {
                         let sq_color = if has_error {
-                            self.theme.diag_error
+                            self.ui.pick(UiRole::Error, self.ui_theme.diag_error)
                         } else {
-                            self.theme.diag_warn
+                            self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn)
                         };
                         self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                     }
@@ -408,9 +408,9 @@ impl Renderer {
                     );
                     if has_error || has_warn {
                         let sq_color = if has_error {
-                            self.theme.diag_error
+                            self.ui.pick(UiRole::Error, self.ui_theme.diag_error)
                         } else {
-                            self.theme.diag_warn
+                            self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn)
                         };
                         self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                     }
@@ -427,14 +427,14 @@ impl Renderer {
                                 row_y,
                                 panel_w,
                                 row_h,
-                                [0.52, 0.78, 0.58, 0.22],
+                                self.ui.pick(UiRole::Success, [0.52, 0.78, 0.58, 0.22]),
                             );
                             self.push_rect(
                                 panel_x,
                                 row_y + row_h - 2.0,
                                 panel_w,
                                 2.0,
-                                [0.52, 0.78, 0.58, 0.85],
+                                self.ui.pick(UiRole::Success, [0.52, 0.78, 0.58, 0.85]),
                             );
                         }
                     }
@@ -456,13 +456,13 @@ impl Renderer {
                         ghost_w,
                         26.0 * s,
                         5.0 * s,
-                        [0.12, 0.13, 0.18, 0.92],
+                        self.ui.pick(UiRole::BgTooltip, [0.12, 0.13, 0.18, 0.92]),
                     );
                     self.draw_string_scaled(
                         &label,
                         ghost_x + 9.0 * s,
                         ghost_y + 18.0 * s,
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         tree_text_scale,
                     );
                 }
@@ -751,8 +751,20 @@ impl Renderer {
         let hit_mx = if mouse_in_blocking_bottom { -1.0 } else { mx };
         let hit_my = if mouse_in_blocking_bottom { -1.0 } else { my };
 
-        // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
-        self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, [1.0, 1.0, 1.0, 0.12]);
+        // The rail spans the full window height (real_height). Its fill is UI chrome: the frame is
+        // cleared with the editor theme's surface colour, so a separate UI theme must repaint it.
+        // When both surfaces match the clear colour is already right; skipping the rect keeps
+        // the single-theme frame pixel-identical (a drawn rect is off by one level).
+        if self.ui_theme.surface_bg != self.theme.surface_bg {
+            self.push_rect(
+                0.0,
+                0.0,
+                sb_w,
+                real_height,
+                self.ui.pick(UiRole::BgCode, self.ui_theme.surface_bg),
+            );
+        }
+        self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, self.ui.ink(0.12));
 
         let btn_size = sb_w;
         let btn_gap = 0.0;
@@ -818,12 +830,12 @@ impl Renderer {
 
             let custom_color = if slot.id == crate::app::PanelId::Problems {
                 if lsp_has_issues {
-                    Some([1.0, 0.8, 0.1, 1.0])
+                    Some(self.ui.pick(UiRole::Warning, [1.0, 0.8, 0.1, 1.0]))
                 } else {
-                    Some([0.69, 0.745, 0.773, 1.0])
+                    Some(self.ui.pick(UiRole::TextSecondary, [0.69, 0.745, 0.773, 1.0]))
                 }
             } else if slot.id == crate::app::PanelId::Database {
-                Some([1.0, 0.67, 0.16, 1.0])
+                Some(self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]))
             } else {
                 None
             };
@@ -857,12 +869,12 @@ impl Renderer {
                         (drag.current_y - btn_size / 2.0).clamp(0.0, real_height - btn_size);
                     let ghost_color = if slot.id == crate::app::PanelId::Problems {
                         if lsp_has_issues {
-                            Some([1.0, 0.8, 0.1, 1.0])
+                            Some(self.ui.pick(UiRole::Warning, [1.0, 0.8, 0.1, 1.0]))
                         } else {
-                            Some([0.69, 0.745, 0.773, 1.0])
+                            Some(self.ui.pick(UiRole::TextSecondary, [0.69, 0.745, 0.773, 1.0]))
                         }
                     } else if slot.id == crate::app::PanelId::Database {
-                        Some([1.0, 0.67, 0.16, 1.0])
+                        Some(self.ui.pick(UiRole::Warning, [1.0, 0.67, 0.16, 1.0]))
                     } else {
                         None
                     };
@@ -885,7 +897,7 @@ impl Renderer {
                     sep_y - 1.0,
                     sb_w - 4.0 * s,
                     2.0,
-                    [0.60, 0.35, 0.85, 0.9],
+                    self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 0.9]),
                 );
             }
         }
@@ -893,19 +905,19 @@ impl Renderer {
         // Левая панель (для групп Top)
         if panel_left_w > 0.0 {
             let panel_x = sb_w;
-            let panel_bg = [
+            let panel_bg = self.ui.pick(UiRole::BgPanel, [
                 0.129, // #21
                 0.133, // #22
                 0.173, // #2c
                 1.0,
-            ];
-            self.push_rect(panel_x, 0.0, panel_left_w, real_height, panel_bg);
+            ]);
+            self.push_rect(panel_x, 0.0, panel_left_w, real_height, self.ui.pick(UiRole::BgPanel, panel_bg));
             self.push_rect(
                 panel_x + panel_left_w - 1.0,
                 0.0,
                 1.0,
                 real_height,
-                [1.0, 1.0, 1.0, 0.12],
+                self.ui.ink(0.12),
             );
             // Тонкая линия-разделитель между левой панелью и зоной номеров строк (аналог Indent Guide)
             let sep_x = (panel_x + panel_left_w).round();
@@ -914,17 +926,20 @@ impl Renderer {
                 0.0,
                 1.0,
                 real_height,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
+                self.ui.pick(
+                    UiRole::TextPrimary,
+                    [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.10],
+                ),
             );
 
             let title_h = 32.0 * s;
-            let title_bg = [
-                (self.theme.bg[0] + 0.07).min(1.0),
-                (self.theme.bg[1] + 0.07).min(1.0),
-                (self.theme.bg[2] + 0.08).min(1.0),
+            let title_bg = self.ui.pick(UiRole::BgPanelAlt, [
+                (self.ui_theme.bg[0] + 0.07).min(1.0),
+                (self.ui_theme.bg[1] + 0.07).min(1.0),
+                (self.ui_theme.bg[2] + 0.08).min(1.0),
                 1.0,
-            ];
-            self.push_rect(panel_x, 0.0, panel_left_w, title_h, title_bg);
+            ]);
+            self.push_rect(panel_x, 0.0, panel_left_w, title_h, self.ui.pick(UiRole::BgPanelAlt, title_bg));
 
             let open_top_count = ide_panel
                 .slots
@@ -943,7 +958,7 @@ impl Renderer {
                     label,
                     panel_x + 12.0 * s,
                     title_h / 2.0 + 6.0 * s,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.9,
                 );
             } else {
@@ -957,20 +972,20 @@ impl Renderer {
                     let label = slot.id.label();
                     let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
                     if i == 0 {
-                        let act_bg = [
-                            (self.theme.bg[0] + 0.12).min(1.0),
-                            (self.theme.bg[1] + 0.12).min(1.0),
-                            (self.theme.bg[2] + 0.13).min(1.0),
+                        let act_bg = self.ui.pick(UiRole::RowActive, [
+                            (self.ui_theme.bg[0] + 0.12).min(1.0),
+                            (self.ui_theme.bg[1] + 0.12).min(1.0),
+                            (self.ui_theme.bg[2] + 0.13).min(1.0),
                             1.0,
-                        ];
+                        ]);
                         self.push_rect(tx, 0.0, tw, title_h, act_bg);
-                        self.push_rect(tx, title_h - 2.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+                        self.push_rect(tx, title_h - 2.0, tw, 2.0, self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0]));
                     }
                     self.draw_string_scaled(
                         label,
                         tx + 10.0 * s,
                         title_h / 2.0 + 6.0 * s,
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         0.85,
                     );
                     tx += tw;
@@ -1033,7 +1048,7 @@ impl Renderer {
                     0.0,
                     1.0,
                     resize_max_y,
-                    crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR,
+                    self.ui.pick(UiRole::ResizeHighlight, crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR),
                 );
             }
         }

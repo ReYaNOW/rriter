@@ -1,4 +1,5 @@
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiId, UiRegistry};
 use crate::widgets::ButtonView;
 use glow::HasContext;
@@ -118,7 +119,7 @@ impl Renderer {
         blink_alpha: f32,
     ) {
         ui.mark_overlay_start();
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.66]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.66]));
         ui.register_blocker(UiId::DatabaseTableModalBackdrop, 0.0, 0.0, self.width, self.height, mx, my);
         let (title, width, height) = match modal {
             crate::app::database::DatabaseTableModal::SqlPreview { .. } => ("Предпросмотр SQL", 980.0, 700.0),
@@ -145,11 +146,11 @@ impl Renderer {
             height,
             8.0 * s,
             1.0,
-            [1.0, 1.0, 1.0, 0.17],
-            [0.105, 0.11, 0.145, 1.0],
+            self.ui.ink(0.17),
+            self.ui.pick(UiRole::BgDialog, [0.105, 0.11, 0.145, 1.0]),
         );
         ui.register_blocker(UiId::DatabaseTableModalBody, x, y, width, height, mx, my);
-        self.draw_string_scaled_pixel_snapped(title, x + 20.0 * s, y + 32.0 * s, self.theme.fg, 1.0);
+        self.draw_string_scaled_pixel_snapped(title, x + 20.0 * s, y + 32.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.0);
 
         match modal {
             crate::app::database::DatabaseTableModal::SqlPreview {
@@ -200,7 +201,7 @@ impl Renderer {
                     "Есть несохранённые изменения. Выберите безопасное действие.",
                     x + 20.0 * s,
                     y + 78.0 * s,
-                    [0.80, 0.82, 0.88, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.80, 0.82, 0.88, 1.0]),
                     0.82,
                 );
                 draw_modal_buttons(
@@ -265,9 +266,9 @@ impl Renderer {
                     0.0,
                 );
                 if let Some(error) = error.as_deref() {
-                    self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + 126.0 * s, [0.95, 0.38, 0.42, 1.0], 0.76);
+                    self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + 126.0 * s, self.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 1.0]), 0.76);
                 } else {
-                    self.draw_string_scaled_pixel_snapped("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.theme.line_num, 0.74);
+                    self.draw_string_scaled_pixel_snapped("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num), 0.74);
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
@@ -301,7 +302,7 @@ impl Renderer {
                         error,
                         x + 20.0 * s,
                         y + height - 70.0 * s,
-                        [0.95, 0.38, 0.42, 1.0],
+                        self.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 1.0]),
                         0.72,
                     );
                 }
@@ -314,21 +315,21 @@ impl Renderer {
                     &format!("Добавлено: {}   Изменено: {}   Ячеек: {}   Удалено: {}", summary.inserted_rows, summary.updated_rows, summary.changed_cells, summary.deleted_rows),
                     x + 20.0 * s,
                     y + 66.0 * s,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.82,
                 );
                 self.draw_string_scaled_pixel_snapped(
                     &format!("До автоматического rollback: {}:{:02}", remaining / 60, remaining % 60),
                     x + 20.0 * s,
                     y + 92.0 * s,
-                    if remaining < 30 { [0.95,0.38,0.42,1.0] } else { [0.95,0.72,0.28,1.0] },
+                    if remaining < 30 { self.ui.pick(UiRole::Error, [0.95,0.38,0.42,1.0]) } else { self.ui.pick(UiRole::Warning, [0.95,0.72,0.28,1.0]) },
                     0.78,
                 );
                 let body_y = (y + 112.0 * s).round();
                 let body_h = database_table_review_body_height(self.width, self.height, s);
                 let body_x = (x + 18.0 * s).round();
                 let body_w = (width - 36.0 * s).round().max(0.0);
-                self.push_rect(body_x, body_y, body_w, body_h, [0.06, 0.065, 0.085,1.0]);
+                self.push_rect(body_x, body_y, body_w, body_h, self.ui.pick(UiRole::BgCode, [0.06, 0.065, 0.085,1.0]));
                 ui.register_rect(UiId::DatabaseTableModalScroll, body_x + body_w - 12.0 * s, body_y, 12.0 * s, body_h, mx, my);
                 self.flush();
                 unsafe {
@@ -369,9 +370,9 @@ impl Renderer {
                         notice_scratch.clear();
                         notice_scratch.push_str("⚠ ");
                         notice_scratch.push_str(text);
-                        (notice_scratch.as_str(), [0.95, 0.72, 0.28, 1.0])
+                        (notice_scratch.as_str(), self.ui.pick(UiRole::Warning, [0.95, 0.72, 0.28, 1.0]))
                     } else {
-                        (text, self.theme.fg)
+                        (text, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg))
                     };
                     self.draw_tree_label_clipped(
                         label,
@@ -396,7 +397,9 @@ impl Renderer {
                             min_thumb: 30.0,
                             radius: Some(2.5),
                             track_color: None,
-                            thumb_color: [0.62, 0.38, 0.82, 0.9],
+                            thumb_color: self.ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+                            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+                            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
                         },
                         axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
                         lane: (body_x + body_w - 8.0 * s, body_y, 8.0 * s, body_h),
@@ -407,12 +410,12 @@ impl Renderer {
                     self.draw_scrollbar(&bar, s, 1.0, None);
                 }
                 if summary.truncated_details {
-                    self.push_rect(body_x, body_y + body_h - 27.0 * s, body_w, 27.0 * s, [0.16,0.12,0.05,0.95]);
+                    self.push_rect(body_x, body_y + body_h - 27.0 * s, body_w, 27.0 * s, self.ui.pick(UiRole::Warning, [0.16,0.12,0.05,0.95]));
                     self.draw_string_scaled_pixel_snapped(
                         "Подробности ограничены; агрегаты рассчитаны полностью.",
                         body_x + 10.0 * s,
                         body_y + body_h - 8.0 * s,
-                        [0.95,0.72,0.28,1.0],
+                        self.ui.pick(UiRole::Warning, [0.95,0.72,0.28,1.0]),
                         0.7,
                     );
                 }
@@ -494,8 +497,8 @@ impl Renderer {
             .map(|anchor| (anchor.min(cursor), anchor.max(cursor)))
             .unwrap_or((cursor, cursor));
 
-        self.push_rect(outer_x, outer_y, outer_w, outer_h, [0.045, 0.05, 0.07, 1.0]);
-        self.push_rect(outer_x, outer_y, gutter_w, viewport_h, [0.065, 0.07, 0.09, 1.0]);
+        self.push_rect(outer_x, outer_y, outer_w, outer_h, self.ui.pick(UiRole::BgCode, [0.045, 0.05, 0.07, 1.0]));
+        self.push_rect(outer_x, outer_y, gutter_w, viewport_h, self.ui.pick(UiRole::BgPanel, [0.065, 0.07, 0.09, 1.0]));
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -521,7 +524,7 @@ impl Renderer {
                 &(line_index + 1).to_string(),
                 outer_x + (8.0 * s).round(),
                 baseline,
-                self.theme.line_num,
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.78,
             );
             let selected_start = selection_start.max(byte_offset).min(line_end);
@@ -537,7 +540,7 @@ impl Renderer {
                     (baseline - 19.0 * s).round(),
                     selected_w.round(),
                     line_h,
-                    self.theme.sel,
+                    self.ui.pick(UiRole::Selection, self.ui_theme.sel),
                 );
             }
             if cursor >= byte_offset && cursor <= line_end && selection_start == selection_end {
@@ -548,7 +551,7 @@ impl Renderer {
                     (baseline - 19.0 * s).round(),
                     (1.0 * s).round().max(1.0),
                     line_h,
-                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], blink_alpha],
+                    self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], blink_alpha]),
                 );
             }
             self.draw_database_sql_line(
@@ -565,9 +568,9 @@ impl Renderer {
 
         if show_y {
             let track_x = outer_x + viewport_w;
-            let bar = database_table_modal_scrollbar(
+            let bar = database_table_modal_scrollbar_with_ui(
                 (track_x, outer_y, scrollbar, viewport_h), viewport_h, content_h,
-                scroll_y, false,
+                scroll_y, false, &self.ui,
             );
             self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                 ui: &mut *ui, id: UiId::DatabaseTableModalScroll, mx, my, blocker: false,
@@ -575,9 +578,9 @@ impl Renderer {
         }
         if show_x {
             let track_y = outer_y + viewport_h;
-            let bar = database_table_modal_scrollbar(
+            let bar = database_table_modal_scrollbar_with_ui(
                 (outer_x + gutter_w, track_y, code_w, scrollbar), code_w, content_w,
-                scroll_x, true,
+                scroll_x, true, &self.ui,
             );
             self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                 ui: &mut *ui, id: UiId::DatabaseTableModalScrollX, mx, my, blocker: false,
@@ -591,6 +594,26 @@ pub(crate) fn database_table_modal_scrollbar(
     lane: (f32, f32, f32, f32), viewport: f32, content: f32,
     offset: f32, horizontal: bool,
 ) -> crate::render_view::scrollbar_widget::Scrollbar {
+    // Geometry-only callers (hit-testing, drags) never read the colours.
+    database_table_modal_scrollbar_styled(lane, viewport, content, offset, horizontal, None, [0.0; 4])
+}
+
+fn database_table_modal_scrollbar_with_ui(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool, ui: &crate::theme::UiPalette,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    database_table_modal_scrollbar_styled(
+        lane, viewport, content, offset, horizontal,
+        Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
+        ui.pick(UiRole::ScrollbarThumb, [0.35, 0.68, 0.94, 0.92]),
+    )
+}
+
+fn database_table_modal_scrollbar_styled(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool,
+    track_color: Option<[f32; 4]>, thumb_color: [f32; 4],
+) -> crate::render_view::scrollbar_widget::Scrollbar {
     use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
     Scrollbar {
         style: ScrollbarStyle {
@@ -599,8 +622,10 @@ pub(crate) fn database_table_modal_scrollbar(
             track_pad: 0.0,
             min_thumb: if horizontal { 36.0 } else { 28.0 },
             radius: Some(3.0),
-            track_color: Some([0.055, 0.058, 0.075, 1.0]),
-            thumb_color: [0.35, 0.68, 0.94, 0.92],
+            track_color,
+            thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
         lane,

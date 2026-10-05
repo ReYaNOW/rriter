@@ -149,6 +149,139 @@ impl SyntaxPalette {
     }
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UiRole {
+    BgPanel,
+    BgPanelAlt,
+    BgDialog,
+    BgInput,
+    BgTooltip,
+    Scrim,
+    RowHover,
+    RowActive,
+    BgChip,
+    BgCode,
+    BgMedia,
+    BgPdfPaper,
+    Border,
+    TextPrimary,
+    TextSecondary,
+    TextMuted,
+    TextOnAccent,
+    Accent,
+    AccentHover,
+    AccentSoft,
+    Selection,
+    InputSelection,
+    ScrollbarThumb,
+    Icon,
+    Error,
+    Warning,
+    Success,
+    Info,
+    Danger,
+    Link,
+    GitBranch,
+    GitCommit,
+    GitHunkAdded,
+    GitHunkDeleted,
+    GitAdded,
+    GitModified,
+    GitDeleted,
+    GitRenamed,
+    HttpGet,
+    HttpPost,
+    HttpPut,
+    HttpPatch,
+    HttpDelete,
+    HttpStatusSuccess,
+    HttpStatusRedirect,
+    HttpStatusError,
+    DatabaseConnected,
+    DatabaseDisconnected,
+    LspRunning,
+    LspStarting,
+    LspDisabled,
+    LspMissing,
+    LspCrashed,
+    PdfSearchMatch,
+    PdfSearchMatchActive,
+    ApiMockRoute,
+    TokenProperty,
+    TokenPunctuation,
+    PdfText,
+    ResizeHighlight,
+}
+
+impl UiRole {
+    pub(crate) const COUNT: usize = Self::ResizeHighlight as usize + 1;
+    pub(crate) const ALL: [Self; Self::COUNT] = [
+        Self::BgPanel,
+        Self::BgPanelAlt,
+        Self::BgDialog,
+        Self::BgInput,
+        Self::BgTooltip,
+        Self::Scrim,
+        Self::RowHover,
+        Self::RowActive,
+        Self::BgChip,
+        Self::BgCode,
+        Self::BgMedia,
+        Self::BgPdfPaper,
+        Self::Border,
+        Self::TextPrimary,
+        Self::TextSecondary,
+        Self::TextMuted,
+        Self::TextOnAccent,
+        Self::Accent,
+        Self::AccentHover,
+        Self::AccentSoft,
+        Self::Selection,
+        Self::InputSelection,
+        Self::ScrollbarThumb,
+        Self::Icon,
+        Self::Error,
+        Self::Warning,
+        Self::Success,
+        Self::Info,
+        Self::Danger,
+        Self::Link,
+        Self::GitBranch,
+        Self::GitCommit,
+        Self::GitHunkAdded,
+        Self::GitHunkDeleted,
+        Self::GitAdded,
+        Self::GitModified,
+        Self::GitDeleted,
+        Self::GitRenamed,
+        Self::HttpGet,
+        Self::HttpPost,
+        Self::HttpPut,
+        Self::HttpPatch,
+        Self::HttpDelete,
+        Self::HttpStatusSuccess,
+        Self::HttpStatusRedirect,
+        Self::HttpStatusError,
+        Self::DatabaseConnected,
+        Self::DatabaseDisconnected,
+        Self::LspRunning,
+        Self::LspStarting,
+        Self::LspDisabled,
+        Self::LspMissing,
+        Self::LspCrashed,
+        Self::PdfSearchMatch,
+        Self::PdfSearchMatchActive,
+        Self::ApiMockRoute,
+        Self::TokenProperty,
+        Self::TokenPunctuation,
+        Self::PdfText,
+        Self::ResizeHighlight,
+    ];
+}
+
+
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct UiPalette {
     pub(crate) syntax: SyntaxPalette,
@@ -158,19 +291,123 @@ pub(crate) struct UiPalette {
     pub(crate) bg_raised: [f32; 4],
     pub(crate) border: [f32; 4],
     pub(crate) accent: [f32; 4],
+    pub(crate) roles: [[f32; 4]; UiRole::COUNT],
+    pub(crate) dracula: bool,
 }
 
 impl UiPalette {
-    pub(crate) fn for_id(_id: ThemeId) -> Self {
-        Self {
-            syntax: SyntaxPalette::for_id(ThemeId::Dracula),
-            is_dark: true,
-            text: [1.0, 1.0, 1.0, 1.0],
-            text_dim: [0.7, 0.7, 0.7, 1.0],
-            bg_raised: [0.15, 0.16, 0.20, 1.0],
-            border: [0.224, 0.231, 0.251, 1.0],
-            accent: [0.35, 0.26, 0.48, 1.0],
+    pub(crate) fn for_id(id: ThemeId) -> Self {
+        if id == ThemeId::Dracula {
+            return Self {
+                syntax: SyntaxPalette::for_id(ThemeId::Dracula),
+                is_dark: true,
+                text: [1.0, 1.0, 1.0, 1.0],
+                text_dim: [0.7, 0.7, 0.7, 1.0],
+                bg_raised: [0.15, 0.16, 0.20, 1.0],
+                border: [0.224, 0.231, 0.251, 1.0],
+                accent: [0.35, 0.26, 0.48, 1.0],
+                roles: [
+                [0.085, 0.09, 0.115, 1.0],
+                [0.15, 0.16, 0.2, 1.0],
+                [0.12,0.13,0.17,1.0],
+                [0.13, 0.14, 0.18, 1.0],
+                [0.08, 0.09, 0.12, 1.0],
+                [0.0,0.0,0.0,0.42],
+                [0.2, 0.18, 0.29, 1.0],
+                [0.28,0.24,0.34,1.0],
+                [0.224, 0.231, 0.251, 1.0],
+                [0.075, 0.078, 0.098, 1.0],
+                [0.11,0.12,0.15,0.96],
+                [0.11,0.12,0.13,1.0],
+                [0.32, 0.34, 0.42, 1.0],
+                [1.0,1.0,1.0,1.0],
+                [0.68, 0.7, 0.78, 1.0],
+                [0.55,0.57,0.64,1.0],
+                [1.0, 1.0, 1.0, 1.0],
+                [0.6, 0.35, 0.85, 1.0],
+                [0.6, 0.35, 0.85, 0.8],
+                [0.6, 0.35, 0.85, 0.14],
+                [0.60, 0.35, 0.85, 0.24],
+                [0.55, 0.36, 0.90, 0.36],
+                [0.7, 0.33, 0.54, 1.0],
+                [1.0,1.0,1.0,1.0],
+                [0.95, 0.38, 0.42, 1.0],
+                [1.0, 0.67, 0.16, 1.0],
+                [0.46, 0.82, 0.58, 1.0],
+                [0.35,0.75,1.0,1.0],
+                [1.0, 0.58, 0.62, 1.0],
+                [0.72,0.52,1.0,1.0],
+                [0.78, 0.82, 0.92, 1.0],
+                [0.86,0.90,1.0,1.0],
+                [0.52,0.82,0.58,1.0],
+                [0.95,0.42,0.46,1.0],
+                [0.48, 0.82, 0.52, 1.0],
+                [0.97, 0.76, 0.38, 1.0],
+                [0.95, 0.42, 0.46, 1.0],
+                [0.48, 0.74, 1.0, 1.0],
+                [0.35,0.75,1.0,1.0],
+                [0.48,0.86,0.52,1.0],
+                [1.0, 0.76, 0.32, 1.0],
+                [0.78, 0.58, 1.0, 1.0],
+                [1.0,0.42,0.42,1.0],
+                [0.48,0.86,0.52,1.0],
+                [0.35,0.75,1.0,1.0],
+                [1.0,0.42,0.42,1.0],
+                [0.35,0.85,0.48,1.0],
+                [0.45, 0.47, 0.53, 1.0],
+                [0.28,0.85,0.45,1.0],
+                [0.85,0.75,0.25,1.0],
+                [0.45,0.45,0.45,1.0],
+                [0.95,0.45,0.30,1.0],
+                [0.90,0.30,0.30,1.0],
+                [1.0,0.85,0.2,0.35],
+                [1.0,0.55,0.1,0.55],
+                [0.50,0.90,0.55,1.0],
+                [1.0,0.68,0.26,1.0],
+                [0.86, 0.87, 0.91, 1.0],
+                [0.972, 0.972, 0.949, 1.0],
+                [0.60, 0.35, 0.85, 0.4],
+                ],
+                dracula: true,
+            };
         }
+
+        let values = theme_values(id);
+        let syntax = SyntaxPalette::for_id(id);
+        let text = values.fg;
+        let text_dim = mix(values.fg, values.bg, 0.22);
+        let away = if id.is_dark() { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] };
+        let bg_panel = mix(values.bg, away, 0.04);
+        let bg_panel_alt = mix(values.bg, away, 0.06);
+        let bg_dialog = mix(values.bg, away, 0.04);
+        let bg_input = mix(values.bg, away, 0.02);
+        let bg_tooltip = mix(values.bg, away, 0.03);
+        let bg_code = values.surface_bg;
+        let accent = if matches!(id, ThemeId::OneDark | ThemeId::OneLight) {
+            values.function
+        } else {
+            values.keyword_control
+        };
+        let roles = UiRole::ALL.map(|role| ui_theme_color(
+            role, id, values, syntax, bg_panel, bg_panel_alt, bg_dialog,
+            bg_input, bg_tooltip, bg_code, accent,
+        ));
+        Self {
+            syntax,
+            is_dark: id.is_dark(),
+            text,
+            text_dim,
+            bg_raised: bg_dialog,
+            border: mix(values.bg, text, 0.12),
+            accent,
+            roles,
+            dracula: false,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn pick(&self, role: UiRole, dracula: [f32; 4]) -> [f32; 4] {
+        if self.dracula { dracula } else { self.roles[role as usize] }
     }
 
     pub(crate) fn ink(&self, alpha: f32) -> [f32; 4] {
@@ -179,6 +416,92 @@ impl UiPalette {
         } else {
             [self.text[0], self.text[1], self.text[2], alpha]
         }
+    }
+
+    pub(crate) fn shadow_alpha(&self, alpha: f32) -> [f32; 4] {
+        [0.0, 0.0, 0.0, alpha]
+    }
+}
+
+fn mix(from: [f32; 4], to: [f32; 4], amount: f32) -> [f32; 4] {
+    [
+        from[0] + (to[0] - from[0]) * amount,
+        from[1] + (to[1] - from[1]) * amount,
+        from[2] + (to[2] - from[2]) * amount,
+        1.0,
+    ]
+}
+
+fn luminance(color: [f32; 4]) -> f64 {
+    let channel = |value: f32| {
+        let value = f64::from(value);
+        if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
+}
+
+fn contrast(a: [f32; 4], b: [f32; 4]) -> f64 {
+    let (lighter, darker) = { let x = luminance(a); let y = luminance(b); if x >= y { (x, y) } else { (y, x) } };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+fn ui_theme_color(
+    role: UiRole,
+    id: ThemeId,
+    values: ThemeValues,
+    syntax: SyntaxPalette,
+    bg_panel: [f32; 4],
+    bg_panel_alt: [f32; 4],
+    bg_dialog: [f32; 4],
+    bg_input: [f32; 4],
+    bg_tooltip: [f32; 4],
+    bg_code: [f32; 4],
+    accent: [f32; 4],
+) -> [f32; 4] {
+    let color = |role: SyntaxRole| syntax.color(role);
+    let alpha = |mut color: [f32; 4], a: f32| { color[3] = a; color };
+    match role {
+        UiRole::BgPanel => bg_panel,
+        UiRole::BgPanelAlt => bg_panel_alt,
+        UiRole::BgDialog => bg_dialog,
+        UiRole::BgInput => bg_input,
+        UiRole::BgTooltip => bg_tooltip,
+        UiRole::Scrim => [0.0, 0.0, 0.0, 0.42],
+        UiRole::RowHover => mix(bg_panel, accent, 0.06),
+        UiRole::RowActive => mix(bg_panel, accent, 0.08),
+        UiRole::BgChip => mix(bg_panel, accent, 0.12),
+        UiRole::BgCode => bg_code,
+        UiRole::BgMedia => bg_panel_alt,
+        UiRole::BgPdfPaper => [0.972, 0.972, 0.949, 1.0],
+        UiRole::Border => mix(values.bg, values.fg, 0.12),
+        UiRole::TextPrimary => values.fg,
+        UiRole::TextSecondary | UiRole::Icon => mix(values.fg, values.bg, 0.15),
+        UiRole::TextMuted => mix(values.fg, values.bg, 0.28),
+        UiRole::TextOnAccent => {
+            let black = [0.0, 0.0, 0.0, 1.0];
+            let white = [1.0, 1.0, 1.0, 1.0];
+            if contrast(black, accent) >= contrast(white, accent) { black } else { white }
+        }
+        UiRole::Accent => accent,
+        UiRole::AccentHover => mix(accent, values.fg, 0.16),
+        UiRole::AccentSoft => alpha(accent, 0.24),
+        UiRole::Selection | UiRole::InputSelection => alpha(values.selection, 0.42),
+        UiRole::ScrollbarThumb => alpha(mix(values.fg, values.bg, 0.40), 0.72),
+        UiRole::Error | UiRole::Danger | UiRole::HttpStatusError | UiRole::GitDeleted => values.diag_error,
+        UiRole::Warning | UiRole::GitModified => values.diag_warn,
+        UiRole::Success | UiRole::HttpStatusSuccess | UiRole::GitAdded | UiRole::DatabaseConnected => values.modified_saved,
+        UiRole::Info | UiRole::HttpStatusRedirect | UiRole::GitBranch => color(SyntaxRole::Keyword),
+        UiRole::Link => color(SyntaxRole::Function),
+        UiRole::GitCommit | UiRole::GitHunkAdded | UiRole::GitRenamed | UiRole::HttpGet | UiRole::HttpPut | UiRole::HttpPatch | UiRole::DatabaseDisconnected | UiRole::LspRunning | UiRole::LspStarting => color(SyntaxRole::Function),
+        UiRole::GitHunkDeleted | UiRole::HttpDelete | UiRole::LspCrashed => values.diag_error,
+        UiRole::HttpPost | UiRole::LspMissing => color(SyntaxRole::KeywordControl),
+        UiRole::LspDisabled => color(SyntaxRole::Comment),
+        UiRole::PdfSearchMatch => alpha(values.diag_warn, 0.30),
+        UiRole::PdfSearchMatchActive => alpha(values.diag_warn, 0.60),
+        UiRole::ApiMockRoute | UiRole::TokenProperty => color(SyntaxRole::KeywordControl),
+        UiRole::TokenPunctuation => color(SyntaxRole::Delimiter),
+        UiRole::PdfText => values.fg,
+        UiRole::ResizeHighlight => alpha(accent, 0.4),
     }
 }
 
@@ -308,6 +631,7 @@ impl Theme {
             ([0.85, 0.65, 0.13, 0.35], [0.95, 0.55, 0.0, 0.45], [0.20, 0.60, 0.25, 0.22])
         };
         Self {
+            id,
             bg: values.bg,
             fg: values.fg,
             sel: if id == ThemeId::Dracula { system_selection } else { values.selection },
@@ -354,19 +678,6 @@ impl Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn luminance(color: [f32; 4]) -> f64 {
-        let channel = |value: f32| {
-            let value = f64::from(value);
-            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
-    }
-
-    fn contrast(a: [f32; 4], b: [f32; 4]) -> f64 {
-        let (lighter, darker) = { let x = luminance(a); let y = luminance(b); if x >= y { (x, y) } else { (y, x) } };
-        (lighter + 0.05) / (darker + 0.05)
-    }
 
     #[test]
     fn ids_round_trip_and_fallback() {
@@ -434,7 +745,86 @@ mod tests {
             [0.875, 0.882, 0.902, 1.0], [0.972, 0.972, 0.949, 1.0],
         ];
         for (index, expected) in expected.into_iter().enumerate() { assert_eq!(syntax.colors[index], expected); }
-        for id in ThemeId::ALL { assert_eq!(UiPalette::for_id(id), UiPalette::for_id(ThemeId::Dracula)); }
+        assert_eq!(UiPalette::for_id(ThemeId::Dracula).syntax, SyntaxPalette::for_id(ThemeId::Dracula));
+    }
+
+    #[test]
+    fn ui_palette_pick_preserves_dracula_argument_bits_and_stage_one_fields() {
+        let ui = UiPalette::for_id(ThemeId::Dracula);
+        let expected_roles = [
+            [0.085, 0.09, 0.115, 1.0], [0.15, 0.16, 0.2, 1.0], [0.12, 0.13, 0.17, 1.0],
+            [0.13, 0.14, 0.18, 1.0], [0.08, 0.09, 0.12, 1.0], [0.0, 0.0, 0.0, 0.42],
+            [0.2, 0.18, 0.29, 1.0], [0.28, 0.24, 0.34, 1.0], [0.224, 0.231, 0.251, 1.0],
+            [0.075, 0.078, 0.098, 1.0], [0.11, 0.12, 0.15, 0.96], [0.11, 0.12, 0.13, 1.0],
+            [0.32, 0.34, 0.42, 1.0], [1.0, 1.0, 1.0, 1.0], [0.68, 0.7, 0.78, 1.0],
+            [0.55, 0.57, 0.64, 1.0], [1.0, 1.0, 1.0, 1.0], [0.6, 0.35, 0.85, 1.0],
+            [0.6, 0.35, 0.85, 0.8], [0.6, 0.35, 0.85, 0.14], [0.60, 0.35, 0.85, 0.24],
+            [0.55, 0.36, 0.90, 0.36], [0.7, 0.33, 0.54, 1.0], [1.0, 1.0, 1.0, 1.0],
+            [0.95, 0.38, 0.42, 1.0], [1.0, 0.67, 0.16, 1.0], [0.46, 0.82, 0.58, 1.0],
+            [0.35, 0.75, 1.0, 1.0], [1.0, 0.58, 0.62, 1.0], [0.72, 0.52, 1.0, 1.0],
+            [0.78, 0.82, 0.92, 1.0], [0.86, 0.90, 1.0, 1.0], [0.52, 0.82, 0.58, 1.0],
+            [0.95, 0.42, 0.46, 1.0], [0.48, 0.82, 0.52, 1.0], [0.97, 0.76, 0.38, 1.0],
+            [0.95, 0.42, 0.46, 1.0], [0.48, 0.74, 1.0, 1.0], [0.35, 0.75, 1.0, 1.0],
+            [0.48, 0.86, 0.52, 1.0], [1.0, 0.76, 0.32, 1.0], [0.78, 0.58, 1.0, 1.0],
+            [1.0, 0.42, 0.42, 1.0], [0.48, 0.86, 0.52, 1.0], [0.35, 0.75, 1.0, 1.0],
+            [1.0, 0.42, 0.42, 1.0], [0.35, 0.85, 0.48, 1.0], [0.45, 0.47, 0.53, 1.0],
+            [0.28, 0.85, 0.45, 1.0], [0.85, 0.75, 0.25, 1.0], [0.45, 0.45, 0.45, 1.0],
+            [0.95, 0.45, 0.30, 1.0], [0.90, 0.30, 0.30, 1.0], [1.0, 0.85, 0.2, 0.35],
+            [1.0, 0.55, 0.1, 0.55], [0.50, 0.90, 0.55, 1.0], [1.0, 0.68, 0.26, 1.0],
+            [0.86, 0.87, 0.91, 1.0], [0.972, 0.972, 0.949, 1.0], [0.60, 0.35, 0.85, 0.4],
+        ];
+        assert_eq!(
+            ui.roles.map(|color| color.map(f32::to_bits)),
+            expected_roles.map(|color| color.map(f32::to_bits)),
+        );
+        for (index, role) in UiRole::ALL.into_iter().enumerate() {
+            let color = [
+                f32::from_bits(0x3e12_3456 + index as u32),
+                f32::from_bits(0x3f23_4567 + index as u32),
+                f32::from_bits(0x3d34_5678 + index as u32),
+                f32::from_bits(0x3f45_6789 + index as u32),
+            ];
+            assert_eq!(ui.pick(role, color).map(f32::to_bits), color.map(f32::to_bits));
+        }
+        assert!(ui.is_dark);
+        assert_eq!(ui.syntax, SyntaxPalette::for_id(ThemeId::Dracula));
+        assert_eq!(ui.text.map(f32::to_bits), [1.0, 1.0, 1.0, 1.0].map(f32::to_bits));
+        assert_eq!(ui.text_dim.map(f32::to_bits), [0.7, 0.7, 0.7, 1.0].map(f32::to_bits));
+        assert_eq!(ui.bg_raised.map(f32::to_bits), [0.15, 0.16, 0.20, 1.0].map(f32::to_bits));
+        assert_eq!(ui.border.map(f32::to_bits), [0.224, 0.231, 0.251, 1.0].map(f32::to_bits));
+        assert_eq!(ui.accent.map(f32::to_bits), [0.35, 0.26, 0.48, 1.0].map(f32::to_bits));
+        assert_eq!(ui.ink(0.37).map(f32::to_bits), [1.0, 1.0, 1.0, 0.37].map(f32::to_bits));
+    }
+
+    #[test]
+    fn ui_palettes_are_theme_specific_and_meet_surface_contrast() {
+        let surface_roles = [
+            UiRole::BgPanel, UiRole::BgPanelAlt, UiRole::BgDialog, UiRole::BgInput,
+            UiRole::BgTooltip, UiRole::RowHover, UiRole::RowActive, UiRole::BgChip,
+            UiRole::BgCode, UiRole::BgMedia,
+        ];
+        let mut previous = UiPalette::for_id(ThemeId::Dracula);
+        for id in ThemeId::ALL {
+            let ui = UiPalette::for_id(id);
+            assert_eq!(ui.syntax, SyntaxPalette::for_id(id));
+            assert_eq!(ui.is_dark, id.is_dark());
+            assert_eq!(ui.dracula, id == ThemeId::Dracula);
+            if id != ThemeId::Dracula {
+                assert_ne!(ui.roles, previous.roles, "{id:?} UI palette must be distinct");
+            }
+            for role in surface_roles {
+                let bg = ui.roles[role as usize];
+                assert!(contrast(ui.text, bg) >= 4.5, "{id:?} text/{role:?}: {:.2}", contrast(ui.text, bg));
+                assert!(contrast(ui.text_dim, bg) >= 3.0, "{id:?} text_dim/{role:?}: {:.2}", contrast(ui.text_dim, bg));
+                if id != ThemeId::Dracula {
+                    for text_role in [UiRole::TextMuted, UiRole::TextSecondary] {
+                        let color = ui.roles[text_role as usize];
+                        assert!(contrast(color, bg) >= 3.0, "{id:?} {text_role:?}/{role:?}: {:.2}", contrast(color, bg));
+                    }
+                }
+            }
+            previous = ui;
+        }
     }
 
     #[test]
@@ -510,9 +900,11 @@ mod tests {
             let palette = SyntaxPalette::for_id(id);
             assert_eq!(palette.color(SyntaxRole::Interpolation), palette.color(SyntaxRole::Fg));
             let ui = UiPalette::for_id(id);
-            assert_eq!(ui.ink(0.4), [1.0, 1.0, 1.0, 0.4]);
+            let expected_ink = if id.is_dark() { [1.0, 1.0, 1.0, 0.4] } else { [ui.text[0], ui.text[1], ui.text[2], 0.4] };
+            assert_eq!(ui.ink(0.4), expected_ink);
         }
         let light_ui = UiPalette { is_dark: false, text: [0.2, 0.3, 0.4, 0.9], ..UiPalette::for_id(ThemeId::OneLight) };
         assert_eq!(light_ui.ink(0.4), [0.2, 0.3, 0.4, 0.4]);
     }
+
 }

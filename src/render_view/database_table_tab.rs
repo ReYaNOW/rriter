@@ -1,4 +1,5 @@
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 use crate::widgets::{ButtonStyle, ButtonView, IconType};
 use glow::HasContext;
@@ -125,14 +126,14 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.push_rect(x, y, w, h, self.theme.bg);
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         ui_registry.register_blocker(UiId::DatabaseTableBody, x, y, w, h, mx, my);
         if state.loading {
             self.draw_string_scaled_pixel_snapped(
                 "Загрузка структуры таблицы…",
                 x + 24.0 * s,
                 y + 42.0 * s,
-                self.theme.line_num,
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.9,
             );
             return;
@@ -149,14 +150,14 @@ impl Renderer {
                 card_h,
                 (6.0 * s).round(),
                 1.0,
-                [0.35, 0.37, 0.46, 0.9],
-                [0.085, 0.09, 0.115, 0.98],
+                self.ui.pick(UiRole::Border, [0.35, 0.37, 0.46, 0.9]),
+                self.ui.pick(UiRole::BgDialog, [0.085, 0.09, 0.115, 0.98]),
             );
             self.draw_string_scaled_pixel_snapped(
                 "Таблица недоступна",
                 card_x + (18.0 * s).round(),
                 card_y + (34.0 * s).round(),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.92,
             );
             let text_x = card_x + (18.0 * s).round();
@@ -200,9 +201,9 @@ impl Renderer {
                 0.0,
                 text_scale,
                 if state.error.is_some() {
-                    [0.98, 0.67, 0.69, 1.0]
+                    self.ui.pick(UiRole::Error, [0.98, 0.67, 0.69, 1.0])
                 } else {
-                    self.theme.line_num
+                    self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num)
                 },
                 0.0,
                 0.0,
@@ -259,15 +260,15 @@ impl Renderer {
                 banner_h,
                 (4.0 * s).round(),
                 1.0,
-                [0.95, 0.66, 0.22, 0.85],
-                [0.18, 0.12, 0.04, 0.96],
+                self.ui.pick(UiRole::Warning, [0.95, 0.66, 0.22, 0.85]),
+                self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.12, 0.04, 0.96]),
             );
             self.draw_tree_label_clipped(
                 notice,
                 x + (22.0 * s).round(),
                 Self::tree_row_text_y(banner_y, banner_h, s),
                 (w - 44.0 * s).max(20.0),
-                [1.0, 0.82, 0.42, 1.0],
+                self.ui.pick(UiRole::Warning, [1.0, 0.82, 0.42, 1.0]),
                 0.82,
                 &mut String::new(),
             );
@@ -281,15 +282,15 @@ impl Renderer {
                 banner_h,
                 (4.0 * s).round(),
                 1.0,
-                [0.95, 0.38, 0.42, 0.85],
-                [0.20, 0.07, 0.09, 0.96],
+                self.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 0.85]),
+                self.ui.pick(UiRole::BgPanelAlt, [0.20, 0.07, 0.09, 0.96]),
             );
             self.draw_tree_label_clipped(
                 error,
                 x + (22.0 * s).round(),
                 Self::tree_row_text_y(banner_y, banner_h, s),
                 (w - 44.0 * s).max(20.0),
-                [0.98, 0.72, 0.74, 1.0],
+                self.ui.pick(UiRole::Error, [0.98, 0.72, 0.74, 1.0]),
                 0.82,
                 &mut String::new(),
             );
@@ -313,7 +314,7 @@ impl Renderer {
         let x = x.round();
         let y = y.round();
         let w = w.round().max(0.0);
-        self.push_rect(x, y, w, toolbar_h, [0.105, 0.11, 0.14, 1.0]);
+        self.push_rect(x, y, w, toolbar_h, self.ui.pick(UiRole::BgPanelAlt, [0.105, 0.11, 0.14, 1.0]));
         let title = format!("{} / public.{}", meta.database_name, meta.table_name);
         let page_text = database_table_page_status(state);
         let page_w = self.measure_ui_width(&page_text, 0.82).round();
@@ -325,7 +326,7 @@ impl Renderer {
             x + (10.0 * s).round(),
             Self::tree_row_text_y(y, (34.0 * s).round(), s),
             (w - page_reserve).max(1.0),
-            [0.66, 0.69, 0.78, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.66, 0.69, 0.78, 1.0]),
             0.88,
             &mut title_scratch,
         );
@@ -334,7 +335,7 @@ impl Renderer {
                 &page_text,
                 (x + w - page_w - 12.0 * s).round(),
                 Self::tree_row_text_y(y, (34.0 * s).round(), s),
-                self.theme.line_num,
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.82,
             );
         }
@@ -468,7 +469,7 @@ impl Renderer {
             y.round(),
             w.round(),
             (TABLE_FILTER_H * s).round(),
-            [0.085, 0.09, 0.115, 1.0],
+            self.ui.pick(UiRole::BgPanel, [0.085, 0.09, 0.115, 1.0]),
         );
         let pad = 8.0 * s;
         let gap = 8.0 * s;
@@ -484,7 +485,7 @@ impl Renderer {
             where_label,
             x + pad,
             Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
-            self.theme.line_num,
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.86,
         );
         let where_x = x + pad + label_w;
@@ -511,7 +512,7 @@ impl Renderer {
             order_label,
             order_label_x,
             Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
-            self.theme.line_num,
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.86,
         );
         let order_x = order_label_x + label_w;
@@ -581,9 +582,9 @@ impl Renderer {
         let rows_y = layout.body_rect.y;
 
         ui.register_blocker(UiId::DatabaseTableGridBody, x, y, body_w, body_h, mx, my);
-        self.push_rect(x, y, body_w, body_h, [0.075, 0.078, 0.098, 1.0]);
-        self.push_rect(x, y, gutter_w, body_h, [0.095, 0.10, 0.125, 1.0]);
-        self.push_rect(x, y, body_w, header_h, [0.125, 0.13, 0.16, 1.0]);
+        self.push_rect(x, y, body_w, body_h, self.ui.pick(UiRole::BgCode, [0.075, 0.078, 0.098, 1.0]));
+        self.push_rect(x, y, gutter_w, body_h, self.ui.pick(UiRole::BgPanel, [0.095, 0.10, 0.125, 1.0]));
+        self.push_rect(x, y, body_w, header_h, self.ui.pick(UiRole::BgPanelAlt, [0.125, 0.13, 0.16, 1.0]));
 
         let visible_columns = database_visible_columns(metadata, &state.grid, data_w / s);
         let first_visible_column_x =
@@ -628,7 +629,7 @@ impl Renderer {
                 continue;
             }
             if state.grid.view.sorted_column.as_deref() == Some(column.name.as_str()) {
-                self.push_rect(draw_x, y, draw_w, header_h, [0.35, 0.22, 0.52, 0.36]);
+                self.push_rect(draw_x, y, draw_w, header_h, self.ui.pick(UiRole::Selection, [0.35, 0.22, 0.52, 0.36]));
             }
             ui.register_rect_clipped(
                 UiId::DatabaseTableHeader(column_index),
@@ -645,7 +646,7 @@ impl Renderer {
                 draw_x + (8.0 * s).round(),
                 header_baseline,
                 (draw_w - 16.0 * s).max(4.0),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 TABLE_HEADER_TEXT_SCALE,
                 &mut scratch,
             );
@@ -660,7 +661,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            self.push_rect((draw_x + draw_w - 1.0).round(), y, 1.0, body_h, [1.0, 1.0, 1.0, 0.09]);
+            self.push_rect((draw_x + draw_w - 1.0).round(), y, 1.0, body_h, self.ui.ink(0.09));
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
@@ -701,10 +702,10 @@ impl Renderer {
             };
             let Some(row) = row else { continue; };
             let bg = match row.state {
-                crate::app::database::DatabaseRowState::Added => [0.10, 0.28, 0.16, 0.72],
-                crate::app::database::DatabaseRowState::Deleted => [0.28, 0.28, 0.30, 0.58],
+                crate::app::database::DatabaseRowState::Added => self.ui.pick(UiRole::Success, [0.10, 0.28, 0.16, 0.72]),
+                crate::app::database::DatabaseRowState::Deleted => self.ui.pick(UiRole::TextMuted, [0.28, 0.28, 0.30, 0.58]),
                 crate::app::database::DatabaseRowState::Clean => {
-                    if relative % 2 == 0 { [0.08, 0.084, 0.105, 1.0] } else { [0.095, 0.098, 0.12, 1.0] }
+                    if relative % 2 == 0 { self.ui.pick(UiRole::BgCode, [0.08, 0.084, 0.105, 1.0]) } else { self.ui.pick(UiRole::BgPanel, [0.095, 0.098, 0.12, 1.0]) }
                 }
             };
             self.push_rect(data_x, row_y, data_w, row_h, bg);
@@ -717,10 +718,10 @@ impl Renderer {
                 column_x += column_w;
                 let Some(cell) = row.cells.get(column_index) else { continue; };
                 if state.grid.selection.contains_cell(row.absolute_index, column_index) {
-                    self.push_rect(draw_x, row_y, draw_w, row_h, [0.42, 0.25, 0.63, 0.48]);
+                    self.push_rect(draw_x, row_y, draw_w, row_h, self.ui.pick(UiRole::Selection, [0.42, 0.25, 0.63, 0.48]));
                 }
                 if cell.dirty {
-                    self.push_rect(draw_x, row_y + row_h - (2.0 * s).round(), draw_w, (2.0 * s).round().max(1.0), [0.32, 0.90, 0.48, 1.0]);
+                    self.push_rect(draw_x, row_y + row_h - (2.0 * s).round(), draw_w, (2.0 * s).round().max(1.0), self.ui.pick(UiRole::Success, [0.32, 0.90, 0.48, 1.0]));
                 }
                 ui.register_rect_clipped(
                     UiId::DatabaseTableCell(row.absolute_index, column_index),
@@ -739,9 +740,9 @@ impl Renderer {
                     row_baseline,
                     (draw_w - 14.0 * s).max(4.0),
                     if matches!(cell.value, crate::app::database::DatabaseCellValue::Null | crate::app::database::DatabaseCellValue::Default) {
-                        [0.52, 0.55, 0.62, 1.0]
+                        self.ui.pick(UiRole::TextMuted, [0.52, 0.55, 0.62, 1.0])
                     } else {
-                        self.theme.fg
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                     },
                     TABLE_CELL_TEXT_SCALE,
                     &mut scratch,
@@ -793,7 +794,7 @@ impl Renderer {
         for column_index in visible_columns.clone() {
             let column_w = state.grid.column_width(&metadata.columns[column_index].name);
             let divider_x = (data_x + (column_x + column_w) * s - scroll_x - 1.0).round();
-            self.push_rect(divider_x, rows_y, 1.0, rows_h, [0.52, 0.55, 0.62, 0.20]);
+            self.push_rect(divider_x, rows_y, 1.0, rows_h, self.ui.pick(UiRole::Border, [0.52, 0.55, 0.62, 0.20]));
             column_x += column_w;
         }
         self.flush();
@@ -876,8 +877,8 @@ impl Renderer {
                         popup_h.max(option_h),
                         (4.0 * s).round(),
                         1.0,
-                        [0.32, 0.34, 0.42, 1.0],
-                        [0.095, 0.10, 0.13, 1.0],
+                        self.ui.pick(UiRole::Border, [0.32, 0.34, 0.42, 1.0]),
+                        self.ui.pick(UiRole::BgInput, [0.095, 0.10, 0.13, 1.0]),
                     );
                     let mut visual_row = 0usize;
                     if page.previous {
@@ -898,7 +899,7 @@ impl Renderer {
                                 option_y + 1.0,
                                 popup_w - 2.0,
                                 option_h - 2.0,
-                                [0.20, 0.18, 0.29, 1.0],
+                                self.ui.pick(UiRole::RowHover, [0.20, 0.18, 0.29, 1.0]),
                             );
                         }
                         let (text_x, text_y, text_w) = database_enum_option_text_layout(
@@ -913,7 +914,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.theme.line_num,
+                            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                             0.84,
                             &mut scratch,
                         );
@@ -923,7 +924,7 @@ impl Renderer {
                         let option = &options[option_index];
                         let option_y = (popup_y + visual_row as f32 * option_h).round();
                         if mx >= popup_x && mx <= popup_x + popup_w && my >= option_y && my <= option_y + option_h {
-                            self.push_rect(popup_x + 1.0, option_y + 1.0, popup_w - 2.0, option_h - 2.0, [0.20, 0.18, 0.29, 1.0]);
+                            self.push_rect(popup_x + 1.0, option_y + 1.0, popup_w - 2.0, option_h - 2.0, self.ui.pick(UiRole::RowHover, [0.20, 0.18, 0.29, 1.0]));
                         }
                         ui.register_rect_clipped(
                             UiId::DatabaseTableEnumOption(option_index),
@@ -947,7 +948,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.theme.fg,
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             0.84,
                             &mut scratch,
                         );
@@ -971,7 +972,7 @@ impl Renderer {
                                 option_y + 1.0,
                                 popup_w - 2.0,
                                 option_h - 2.0,
-                                [0.20, 0.18, 0.29, 1.0],
+                                self.ui.pick(UiRole::RowHover, [0.20, 0.18, 0.29, 1.0]),
                             );
                         }
                         let (text_x, text_y, text_w) = database_enum_option_text_layout(
@@ -986,7 +987,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.theme.line_num,
+                            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                             0.84,
                             &mut scratch,
                         );
@@ -996,12 +997,12 @@ impl Renderer {
             }
         }
 
-        self.push_rect(x, y, gutter_w, header_h, [0.115, 0.12, 0.15, 1.0]);
+        self.push_rect(x, y, gutter_w, header_h, self.ui.pick(UiRole::BgPanelAlt, [0.115, 0.12, 0.15, 1.0]));
         self.draw_string_scaled_pixel_snapped(
             "#",
             x + (18.0 * s).round(),
             header_baseline,
-            self.theme.line_num,
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.82,
         );
         self.flush();
@@ -1023,7 +1024,7 @@ impl Renderer {
                 row.absolute_index
             } else { continue; };
             if state.grid.selection.contains_row(absolute) {
-                self.push_rect(x, row_y, gutter_w, row_h, [0.42, 0.25, 0.63, 0.55]);
+                self.push_rect(x, row_y, gutter_w, row_h, self.ui.pick(UiRole::Selection, [0.42, 0.25, 0.63, 0.55]));
             }
             ui.register_rect_clipped(
                 UiId::DatabaseGridRow(absolute),
@@ -1040,7 +1041,7 @@ impl Renderer {
                 &display_number.to_string(),
                 x + (8.0 * s).round(),
                 Self::tree_row_text_y(row_y, row_h, s).round(),
-                self.theme.line_num,
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.78,
             );
         }
@@ -1060,12 +1061,12 @@ impl Renderer {
         if let Some(reason) = metadata.read_only_reason.as_deref() {
             let banner_h = (28.0 * s).round();
             let banner_y = (y + body_h - banner_h).round();
-            self.push_rect(x, banner_y, body_w, banner_h, [0.30, 0.18, 0.06, 0.94]);
+            self.push_rect(x, banner_y, body_w, banner_h, self.ui.pick(UiRole::Warning, [0.30, 0.18, 0.06, 0.94]));
             self.draw_string_scaled_pixel_snapped(
                 reason,
                 x + (10.0 * s).round(),
                 Self::tree_row_text_y(banner_y, banner_h, s).round(),
-                [0.98, 0.72, 0.30, 1.0],
+                self.ui.pick(UiRole::Warning, [0.98, 0.72, 0.30, 1.0]),
                 0.8,
             );
         }
@@ -1126,75 +1127,6 @@ fn database_visible_columns(
     }
     first..last
 }
-
-#[allow(clippy::too_many_arguments)]
-fn draw_database_table_scrollbars(
-    renderer: &mut Renderer,
-    ui: &mut UiRegistry,
-    layout: &crate::app::database::DatabaseGridLayout,
-    metadata: &crate::app::database::DatabaseTableMetadata,
-    state: &crate::app::database::DatabaseTableTabState,
-    mx: f32,
-    my: f32,
-    s: f32,
-) {
-    let (vertical_rect, horizontal_rect) = database_table_scrollbar_rects(layout);
-    if let Some(rect) = vertical_rect {
-        let total_h = state.grid.logical_row_count() as f32
-            * crate::app::database::database_grid_row_height_px(s);
-        let bar = database_table_scrollbar(
-            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.h, total_h,
-            state.grid.scroll_y.current * s, false,
-        );
-        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
-            ui: &mut *ui, id: UiId::DatabaseTableScrollY, mx, my, blocker: false,
-        }));
-    }
-    if let Some(rect) = horizontal_rect {
-        let content_w = (state.grid.content_width(metadata) * s).round();
-        let bar = database_table_scrollbar(
-            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.w, content_w,
-            state.grid.scroll_x.current * s, true,
-        );
-        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
-            ui: &mut *ui, id: UiId::DatabaseTableScrollX, mx, my, blocker: false,
-        }));
-    }
-}
-
-pub(crate) fn database_table_scrollbar(
-    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
-    offset: f32, horizontal: bool,
-) -> crate::render_view::scrollbar_widget::Scrollbar {
-    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
-    Scrollbar {
-        style: ScrollbarStyle {
-            thumb_thickness: 0.0,
-            edge_gap: Some(2.0),
-            track_pad: 0.0,
-            min_thumb: if horizontal { 36.0 } else { 28.0 },
-            radius: Some(3.0),
-            track_color: Some([0.055, 0.058, 0.075, 1.0]),
-            thumb_color: [0.62, 0.38, 0.82, 0.9],
-        },
-        axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
-        lane,
-        extent: ScrollbarExtent::new(viewport, content, offset),
-    }
-}
-
-fn database_table_scrollbar_rects(
-    layout: &crate::app::database::DatabaseGridLayout,
-) -> (
-    Option<crate::app::database::DatabaseGridRect>,
-    Option<crate::app::database::DatabaseGridRect>,
-) {
-    (
-        layout.vertical_scrollbar_rect,
-        layout.horizontal_scrollbar_rect,
-    )
-}
-
 
 #[cfg(test)]
 mod database_table_renderer_tests {

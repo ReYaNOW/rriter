@@ -124,10 +124,11 @@ impl Renderer {
         // Прозрачность терминала/ляпов (0.0 - полностью прозрачный, 1.0 - непрозрачный)
         let panel_alpha = if uses_translucent_bg { 0.80 } else { 1.0 };
 
-        let panel_bg = if ide_panel.open_bottom_panel_id() == Some(crate::app::PanelId::Terminal) {
+        let active_panel = ide_panel.open_bottom_panel_id();
+        let panel_bg = if active_panel == Some(crate::app::PanelId::Terminal) {
             [self.theme.terminal_bg[0], self.theme.terminal_bg[1], self.theme.terminal_bg[2], panel_alpha]
         } else {
-            [0.129, 0.133, 0.173, panel_alpha]
+            [self.ui_theme.terminal_bg[0], self.ui_theme.terminal_bg[1], self.ui_theme.terminal_bg[2], panel_alpha]
         };
         // Ручка ресайза (1px линия вверху панели)self.push_rect(panel_x, panel_y, panel_w, 1.0,[1.0, 1.0, 1.0, 0.15]);
         self.push_rect(
@@ -152,12 +153,12 @@ impl Renderer {
         }
 
         let tab_h = 32.0 * s;
-        let tab_bar_bg = [
-            (self.theme.bg[0] + 0.07).min(1.0),
-            (self.theme.bg[1] + 0.07).min(1.0),
-            (self.theme.bg[2] + 0.08).min(1.0),
+        let tab_bar_bg = self.ui.pick(UiRole::BgPanel, [
+            (self.ui_theme.bg[0] + 0.07).min(1.0),
+            (self.ui_theme.bg[1] + 0.07).min(1.0),
+            (self.ui_theme.bg[2] + 0.08).min(1.0),
             panel_alpha,
-        ];
+        ]);
         self.push_rect(panel_x, panel_y + 1.0, panel_w, tab_h, tab_bar_bg);
 
         let mut tx = panel_x + 8.0 * s;
@@ -170,20 +171,20 @@ impl Renderer {
             let label = slot.id.label();
             let tw = self.measure_ui_width(label, 0.9) + 20.0 * s;
             if i == 0 {
-                let act_bg = [
-                    (self.theme.bg[0] + 0.12).min(1.0),
-                    (self.theme.bg[1] + 0.12).min(1.0),
-                    (self.theme.bg[2] + 0.13).min(1.0),
+                let act_bg = self.ui.pick(UiRole::BgPanel, [
+                    (self.ui_theme.bg[0] + 0.12).min(1.0),
+                    (self.ui_theme.bg[1] + 0.12).min(1.0),
+                    (self.ui_theme.bg[2] + 0.13).min(1.0),
                     1.0,
-                ];
+                ]);
                 self.push_rect(tx, panel_y + 1.0, tw, tab_h, act_bg);
-                self.push_rect(tx, panel_y + tab_h - 1.0, tw, 2.0, [0.60, 0.35, 0.85, 1.0]);
+                self.push_rect(tx, panel_y + tab_h - 1.0, tw, 2.0, self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0]));
             }
             self.draw_string_scaled(
                 label,
                 tx + 10.0 * s,
                 panel_y + 1.0 + tab_h / 2.0 + 5.5 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.9,
             );
             tx += tw;
@@ -191,7 +192,7 @@ impl Renderer {
 
         // Подсветка ручки ресайза при наведении (wants_pointer=false — курсор через NsResize)
         if my >= panel_y - 8.0 * s && my <= panel_y + 8.0 * s && mx >= panel_x {
-            self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
+            self.push_rect(panel_x, panel_y, panel_w, 2.0, self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.4]));
         }
 
         let content_y = panel_y + 1.0 + tab_h;
@@ -282,13 +283,13 @@ impl Renderer {
             return;
         }
 
-        self.push_rect(bar_x, bar_y, bar_w, bar_h, [0.118, 0.125, 0.165, 1.0]);
+        self.push_rect(bar_x, bar_y, bar_w, bar_h, self.ui.pick(UiRole::BgPanelAlt, [0.118, 0.125, 0.165, 1.0]));
         self.push_rect(
             bar_x,
             bar_y,
             bar_w,
             1.0,
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.12],
+            self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.12]),
         );
         ui_registry.register_blocker(
             crate::ui_system::UiId::StatusBar,
@@ -425,7 +426,7 @@ impl Renderer {
                     bar_y,
                     diagnostics_w,
                     bar_h,
-                    [1.0, 1.0, 1.0, 0.07],
+                    self.ui.ink(0.07),
                 );
             }
             self.draw_atlas_icon(
@@ -433,19 +434,19 @@ impl Renderer {
                 diag_x,
                 icon_y,
                 icon_sz,
-                [1.0, 1.0, 1.0, 1.0],
+                self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
             );
             scratch.clear();
             let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
             let error_text_x = diag_x + icon_sz + icon_gap;
-            self.draw_string_scaled(&scratch, error_text_x, text_y, self.theme.fg, text_scale);
+            self.draw_string_scaled(&scratch, error_text_x, text_y, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), text_scale);
             let warn_icon_x = error_text_x + error_w + item_gap;
             self.draw_atlas_icon(
                 crate::widgets::IconType::Warning,
                 warn_icon_x,
                 icon_y,
                 icon_sz,
-                [1.0, 1.0, 1.0, 1.0],
+                self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
             );
             scratch.clear();
             let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
@@ -453,7 +454,7 @@ impl Renderer {
                 &scratch,
                 warn_icon_x + icon_sz + icon_gap,
                 text_y,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 text_scale,
             );
             hovered
@@ -465,7 +466,7 @@ impl Renderer {
         } else {
             bar_x + pad_x
         };
-        let pos_color = self.theme.fg;
+        let pos_color = self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg);
         let (line_x, show_selected, progress_anchor_x) = if let Some(layout) = markdown_layout {
             let (toggle_id, mode, override_labels) = if let Some(labels) = pdf_status_labels {
                 (crate::ui_system::UiId::PdfDarkToggle, crate::app::MarkdownMode::Edit, Some(labels))
@@ -524,7 +525,7 @@ impl Renderer {
         };
         // The PDF page label is a plain status item (no track) at the right edge; real progress, if any, sits left of it.
         if let (Some((page, count)), Some(label), Some(label_x)) = (pdf_page, pdf_label, pdf_page_x) {
-            let color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72];
+            let color = self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.72]);
             let label_y = text_y.round();
             self.draw_string_scaled("стр. ", label_x, label_y, color, PDF_PAGE_LABEL_SCALE);
             scratch.clear();
@@ -572,7 +573,7 @@ impl Renderer {
                     label,
                     progress_x,
                     text_y,
-                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72],
+                    self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.72]),
                     0.82,
                 );
                 if elapsed_w > 0.0 {
@@ -580,7 +581,7 @@ impl Renderer {
                         &scratch,
                         elapsed_x,
                         text_y,
-                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.52],
+                        self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.52]),
                         0.76,
                     );
                 }
@@ -590,7 +591,7 @@ impl Renderer {
                     track_w,
                     track_h,
                     track_h / 2.0,
-                    [1.0, 1.0, 1.0, 0.10],
+                    self.ui.ink(0.10),
                 );
                 if let Some(value) = progress_value {
                     self.push_rounded_rect(
@@ -599,7 +600,7 @@ impl Renderer {
                         (track_w * value.clamp(0.0, 1.0)).max(track_h),
                         track_h,
                         track_h / 2.0,
-                        [0.60, 0.35, 0.85, 0.88],
+                        self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 0.88]),
                     );
                 } else {
                     let thumb_w = (28.0 * s).min(track_w);
@@ -610,7 +611,7 @@ impl Renderer {
                         thumb_w,
                         track_h,
                         track_h / 2.0,
-                        [0.60, 0.35, 0.85, 0.88],
+                        self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 0.88]),
                     );
                 }
             }
@@ -671,14 +672,14 @@ impl Renderer {
                 tip_h,
                 5.0 * s,
                 1.0,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18],
-                [0.08, 0.085, 0.115, 0.96],
+                self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.18]),
+                self.ui.pick(UiRole::BgTooltip, [0.08, 0.085, 0.115, 0.96]),
             );
             self.draw_string_scaled(
                 &scratch,
                 tip_x + 8.0 * s,
                 tip_y + 18.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 text_scale,
             );
         }
@@ -695,8 +696,8 @@ impl Renderer {
             h,
             10.0 * s,
             border,
-            self.theme.sel,
-            [0.15, 0.16, 0.20, 1.0],
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::BgDialog, [0.15, 0.16, 0.20, 1.0]),
         );
     }
 
@@ -799,11 +800,11 @@ impl Renderer {
             corner_radius.round().max(0.0),
             (1.0 * s).round().max(1.0),
             if focused {
-                [0.60, 0.35, 0.85, 1.0]
+                self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
             } else {
-                [1.0, 1.0, 1.0, 0.14]
+                self.ui.ink(0.14)
             },
-            [0.08, 0.09, 0.12, 1.0],
+            self.ui.pick(UiRole::BgInput, [0.08, 0.09, 0.12, 1.0]),
         );
 
         self.draw_one_line_selectable_text(
@@ -819,7 +820,7 @@ impl Renderer {
             scroll_x,
             blink_alpha,
             text_scale,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             right_inset,
             pad_x,
         );
@@ -901,7 +902,7 @@ impl Renderer {
                 let adv = self.one_line_ui_advance(char_to_render, text_scale);
 
                 if byte_idx >= sel_start && byte_idx < sel_end {
-                    self.push_rect(current_x, selection_y, adv, selection_h, self.theme.sel);
+                    self.push_rect(current_x, selection_y, adv, selection_h, self.ui.pick(UiRole::Selection, self.ui_theme.sel));
                 }
 
                 if current_x + adv >= text_start_x
@@ -966,9 +967,9 @@ impl Renderer {
                 wants_pointer = true;
             }
             let bg = if hovered {
-                [0.30, 0.32, 0.38, 1.0]
+                self.ui.pick(UiRole::RowHover, [0.30, 0.32, 0.38, 1.0])
             } else {
-                [0.22, 0.23, 0.28, 1.0]
+                self.ui.pick(UiRole::BgPanelAlt, [0.22, 0.23, 0.28, 1.0])
             };
             self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
             let tw = self.measure_ui_width(label, 0.86);
@@ -976,7 +977,7 @@ impl Renderer {
                 label,
                 (bx + (btn_w - tw) / 2.0).round(),
                 dialog_button_text_baseline(btn_y, btn_h, s),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.86,
             );
         }
@@ -1034,8 +1035,8 @@ impl Renderer {
             visible_h,
             6.0 * s,
             border,
-            self.theme.sel,
-            [0.09, 0.10, 0.14, 1.0],
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::BgPanelAlt, [0.09, 0.10, 0.14, 1.0]),
         );
 
         self.flush();
@@ -1061,7 +1062,7 @@ impl Renderer {
                     line_y.round(),
                     menu_w - border * 2.0 - pad_x * 2.0,
                     1.0,
-                    [1.0, 1.0, 1.0, 0.16],
+                    self.ui.ink(0.16),
                 );
                 row_y += separator_h;
             }
@@ -1085,14 +1086,14 @@ impl Renderer {
                     row_y,
                     menu_w - border * 2.0,
                     visible_row_h,
-                    [1.0, 1.0, 1.0, 0.10],
+                    self.ui.ink(0.10),
                 );
             }
             self.draw_string_scaled_stable(
                 label_at(idx),
                 x + pad_x,
                 row_y + row_h / 2.0 + 5.0 * s,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.88,
             );
             row_y += row_h;

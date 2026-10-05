@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::theme::UiRole;
 use crate::editor::Editor;
 use crate::ui_system::UiId;
 use super::UiClickFlow;
@@ -153,7 +154,9 @@ impl App {
                         );
                         let bar = crate::render_view::settings_ui::settings_scrollbar(
                             rect, rect.3, max_scroll, self.settings_ide_scroll.current,
-                            6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                            6.0, 40.0, self.renderer.as_ref()
+                                .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                                .unwrap_or_default(),
                         );
                         let geometry = bar.geometry(s);
                         crate::app::mouse::press_scrollbar(
@@ -181,7 +184,9 @@ impl App {
                         .unwrap_or(0.0);
                     let bar = crate::render_view::settings_ui::settings_scrollbar(
                         rect, rect.3, max_scroll, self.settings_scroll.current,
-                        6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                        6.0, 40.0, self.renderer.as_ref()
+                            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                            .unwrap_or_default(),
                     );
                     let geometry = bar.geometry(s);
                     crate::app::mouse::press_scrollbar(
@@ -196,7 +201,9 @@ impl App {
                     let bar = crate::render_view::settings_ui::settings_scrollbar(
                         rect, rect.3, self.settings_general_max_scroll,
                         self.settings_general_scroll.current, 6.0, 40.0,
-                        [0.7, 0.33, 0.54, 1.0],
+                        self.renderer.as_ref()
+                            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                            .unwrap_or_default(),
                     );
                     let geometry = bar.geometry(s);
                     crate::app::mouse::press_scrollbar(
@@ -211,11 +218,30 @@ impl App {
                     let bar = crate::render_view::settings_ui::settings_scrollbar(
                         rect, rect.3, self.settings_database_max_scroll,
                         self.settings_database_scroll.current, 6.0, 40.0,
-                        [0.7, 0.33, 0.54, 1.0],
+                        self.renderer.as_ref()
+                            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                            .unwrap_or_default(),
                     );
                     let geometry = bar.geometry(s);
                     crate::app::mouse::press_scrollbar(
                         &mut self.settings_database_scroll, geometry, 0.0, pointer,
+                    );
+                }
+            }
+            UiId::SettingsAppearanceScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsAppearanceScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(
+                        rect, rect.3, self.settings_appearance_max_scroll,
+                        self.settings_appearance_scroll.current, 6.0, 40.0,
+                        self.renderer.as_ref()
+                            .map(|renderer| renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]))
+                            .unwrap_or_default(),
+                    );
+                    let geometry = bar.geometry(s);
+                    crate::app::mouse::press_scrollbar(
+                        &mut self.settings_appearance_scroll, geometry, 0.0, pointer,
                     );
                 }
             }

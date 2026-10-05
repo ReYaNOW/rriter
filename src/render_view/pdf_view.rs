@@ -1,5 +1,6 @@
 use crate::app::pdf_tab::{PdfEngineState, PdfPhase, PdfTabState};
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 
 impl Renderer {
@@ -17,7 +18,7 @@ impl Renderer {
         my: f32,
         ui_registry: &mut UiRegistry,
     ) {
-        self.push_rect(x, y, w, h, self.theme.bg);
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         let offset = tab.scroll.current.round() as i32;
         let clip = UiClipRect { x, y, w, h };
         self.flush();
@@ -62,7 +63,11 @@ impl Renderer {
             if let Some(texture) = tab.textures.get(&page) {
                 self.draw_texture_quad(&texture.tex, px, py, page_w, page_h);
             } else {
-                let paper = if dark_pages { [0.11, 0.12, 0.13, 1.0] } else { [0.94, 0.94, 0.91, 1.0] };
+                let paper = if dark_pages {
+                    self.ui.pick(UiRole::BgPdfPaper, [0.11, 0.12, 0.13, 1.0])
+                } else {
+                    self.ui.pick(UiRole::BgPdfPaper, [0.94, 0.94, 0.91, 1.0])
+                };
                 self.push_rect(px, py, page_w, page_h, paper);
                 let mut caption = std::mem::take(&mut self.scratch_buffer);
                 caption.clear();
@@ -73,7 +78,7 @@ impl Renderer {
                     &caption,
                     (px + (page_w - text_w) * 0.5).round(),
                     (py + page_h * 0.5).round(),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::PdfText, self.ui_theme.fg),
                     caption_scale,
                 );
                 self.scratch_buffer = caption;
@@ -160,7 +165,7 @@ impl Renderer {
                         progress,
                         (x + (w - progress_w) * 0.5).round(),
                         first_y,
-                        self.theme.line_num,
+                        self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                         text_scale,
                     );
                 }
@@ -208,7 +213,11 @@ impl Renderer {
         for (offset, item) in tab.search.matches[first..last].iter().enumerate() {
             rects.clear();
             crate::app::pdf_tab::text::line_rects(&text.chars, item.start as usize, item.end as usize, rects);
-            let color = if tab.search.current == Some(first + offset) { [1.0, 0.55, 0.1, 0.55] } else { [1.0, 0.85, 0.2, 0.35] };
+            let color = if tab.search.current == Some(first + offset) {
+                self.ui.pick(UiRole::PdfSearchMatchActive, [1.0, 0.55, 0.1, 0.55])
+            } else {
+                self.ui.pick(UiRole::PdfSearchMatch, [1.0, 0.85, 0.2, 0.35])
+            };
             fill(self, rects.as_slice(), color);
         }
         if let Some(selection) = tab.selection {
@@ -218,8 +227,10 @@ impl Renderer {
                 let end = if page == last_page { last_char.saturating_add(1) } else { text.chars.len() };
                 rects.clear();
                 crate::app::pdf_tab::text::line_rects(&text.chars, start, end, rects);
-                let sel = self.theme.sel;
-                fill(self, rects.as_slice(), [sel[0], sel[1], sel[2], 0.55]);
+                let color = self.ui.pick(UiRole::Selection, [
+                    self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.55,
+                ]);
+                fill(self, rects.as_slice(), color);
             }
         }
     }
@@ -231,7 +242,7 @@ impl Renderer {
             message,
             (x + (w - text_w) * 0.5).round(),
             (y + h * 0.5).round(),
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             text_scale,
         );
     }

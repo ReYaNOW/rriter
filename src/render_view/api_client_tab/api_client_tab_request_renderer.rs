@@ -26,7 +26,7 @@ impl Renderer {
             cy + 23.0 * s,
             cy,
             34.0 * s,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.14,
             false,
             0,
@@ -53,7 +53,7 @@ impl Renderer {
                 cy + 18.0 * s,
                 cy,
                 28.0 * s,
-                [0.68, 0.70, 0.78, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                 0.92,
                 false,
                 0,
@@ -114,7 +114,7 @@ impl Renderer {
                     "Не авторизовано",
                     x + pad + title_w + 16.0 * s,
                     cy + 18.0 * s,
-                    [1.0, 0.42, 0.42, 1.0],
+                    self.ui.pick(UiRole::Error, [1.0, 0.42, 0.42, 1.0]),
                     0.86,
                 );
             }
@@ -263,7 +263,7 @@ impl Renderer {
                 menu_w,
                 28.0 * s,
                 5.0 * s,
-                [0.18, 0.19, 0.23, 1.0],
+                self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.19, 0.23, 1.0]),
             );
             ui_registry.register_rect(
                 crate::ui_system::UiId::ApiInputSchemaMenu(route_idx),
@@ -278,7 +278,7 @@ impl Renderer {
                 &menu_label,
                 menu_x + 10.0 * s,
                 api_centered_text_y(cy, 28.0 * s, s),
-                [0.78, 0.80, 0.88, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.78, 0.80, 0.88, 1.0]),
                 0.82,
             );
             self.draw_string_scaled_stable(
@@ -289,7 +289,7 @@ impl Renderer {
                 },
                 menu_x + menu_w - 18.0 * s,
                 api_centered_text_y(cy, 28.0 * s, s),
-                [0.78, 0.80, 0.88, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.78, 0.80, 0.88, 1.0]),
                 0.82,
             );
         }
@@ -305,9 +305,9 @@ impl Renderer {
                     28.0 * s,
                     4.0 * s,
                     if media_idx == selected_schema_idx {
-                        [1.0, 1.0, 1.0, 0.12]
+                        self.ui.ink(0.12)
                     } else {
-                        [0.15, 0.16, 0.20, 1.0]
+                        self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0])
                     },
                 );
                 ui_registry.register_rect(
@@ -323,7 +323,7 @@ impl Renderer {
                     &label,
                     menu_x + 10.0 * s,
                     api_centered_text_y(item_y, 28.0 * s, s),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.80,
                 );
             }
@@ -340,11 +340,11 @@ impl Renderer {
             0.0,
             (1.0 * s).max(1.0),
             if input_schema_focused {
-                [0.60, 0.35, 0.85, 1.0]
+                self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
             } else {
-                [1.0, 1.0, 1.0, 0.12]
+                self.ui.ink(0.12)
             },
-            [0.12, 0.13, 0.17, 1.0],
+            self.ui.pick(UiRole::BgInput, [0.12, 0.13, 0.17, 1.0]),
         );
         ui_registry.register_text_input(
             crate::ui_system::UiId::ApiInputSchemaBody(route_idx),
@@ -552,7 +552,7 @@ impl Renderer {
                 &body.content_type,
                 x + pad + 52.0 * s,
                 cy + 18.0 * s,
-                [0.35, 0.75, 1.0, 1.0],
+                self.ui.pick(UiRole::Info, [0.35, 0.75, 1.0, 1.0]),
                 0.84,
             );
             let body_focused = matches!(
@@ -586,9 +586,9 @@ impl Renderer {
                     x + pad + 52.0 * s + body_type_w + 12.0 * s,
                     cy + 18.0 * s,
                     if valid {
-                        [0.48, 0.86, 0.52, 1.0]
+                        self.ui.pick(UiRole::Success, [0.48, 0.86, 0.52, 1.0])
                     } else {
-                        [1.0, 0.42, 0.42, 1.0]
+                        self.ui.pick(UiRole::Error, [1.0, 0.42, 0.42, 1.0])
                     },
                     0.92,
                 );
@@ -678,11 +678,11 @@ impl Renderer {
                         Some(ApiFocus::Body { spec_id, route_idx: f_route })
                             if spec_id == tab_meta.spec_id && f_route == route_idx
                     ) {
-                        [0.60, 0.35, 0.85, 1.0]
+                        self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                     } else {
-                        [1.0, 1.0, 1.0, 0.12]
+                        self.ui.ink(0.12)
                     },
-                    [0.13, 0.14, 0.18, 1.0],
+                    self.ui.pick(UiRole::BgInput, [0.13, 0.14, 0.18, 1.0]),
                 );
                 ui_registry.register_text_input(
                     crate::ui_system::UiId::ApiBodyInput(route_idx),
@@ -802,9 +802,9 @@ impl Renderer {
                     32.0 * s,
                     5.0 * s,
                     if active {
-                        [0.35, 0.26, 0.48, 1.0]
+                        self.ui.pick(UiRole::Accent, [0.35, 0.26, 0.48, 1.0])
                     } else {
-                        [0.18, 0.19, 0.23, 1.0]
+                        self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.19, 0.23, 1.0])
                     },
                 );
                 ui_registry.register_rect(
@@ -820,7 +820,7 @@ impl Renderer {
                     label,
                     sx + 10.0 * s,
                     api_centered_text_y(cy, 32.0 * s, s),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     server_text_scale,
                 );
                 sx += chip_w + 8.0 * s;

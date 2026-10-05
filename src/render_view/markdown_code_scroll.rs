@@ -299,7 +299,12 @@ impl Renderer {
         self.flush();
         self.set_markdown_read_scissor(clip_x, clip_y, clip_w, clip_h);
 
-        let bar = code_scrollbar(&g, sx, self.scale_factor, faded(self.theme.fg, 0.32));
+        let bar = code_scrollbar(
+            &g,
+            sx,
+            self.scale_factor,
+            self.ui.pick(UiRole::ScrollbarThumb, faded(self.theme.fg, 0.32)),
+        );
         let _ = self.draw_scrollbar(&bar, self.scale_factor, 1.0, None);
     }
 

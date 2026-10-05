@@ -3,7 +3,6 @@ use crate::app::project_search::{
     ProjectSearchQueryScrollAxis, ProjectSearchRect,
 };
 use crate::editor::Editor;
-
 fn project_search_row_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
     (row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()).round()
 }
@@ -202,7 +201,7 @@ impl Renderer {
         );
 
         let pad = crate::app::project_search::PROJECT_SEARCH_PAD_X * scale;
-        let label_color = [0.66, 0.68, 0.72, 1.0];
+        let label_color = self.ui.pick(UiRole::TextSecondary, [0.66, 0.68, 0.72, 1.0]);
         let label_scale = 0.74;
 
         self.draw_project_search_label_text_stable(
@@ -308,13 +307,13 @@ impl Renderer {
             (layout.filter.y - 18.0 * scale).round(),
             layout.filter.w,
             1.0,
-            [1.0, 1.0, 1.0, 0.05],
+            self.ui.ink(0.05),
         );
         let filter_enabled = ide_panel.project_search.filter_enabled();
         let filter_label_color = if filter_enabled {
             label_color
         } else {
-            [0.40, 0.41, 0.45, 1.0]
+            self.ui.pick(UiRole::TextMuted, [0.40, 0.41, 0.45, 1.0])
         };
         self.draw_project_search_label_text_stable(
             "Фильтровать",
@@ -340,7 +339,7 @@ impl Renderer {
             (layout.stats_y - 16.0 * scale).round(),
             content_w,
             1.0,
-            [1.0, 1.0, 1.0, 0.06],
+            self.ui.ink(0.06),
         );
         self.draw_project_search_stats(&layout, ide_panel, pad, scale);
         self.draw_project_search_results(&layout, ide_panel, ui_registry, scale);
@@ -365,11 +364,11 @@ impl Renderer {
         let hovered = ui_registry.hovered() == Some(crate::ui_system::UiId::ProjectSearchHelp);
         let active = ide_panel.project_search.help_open;
         let fill = if active {
-            [0.741, 0.576, 0.976, 0.30]
+            self.ui.pick(UiRole::AccentSoft, [0.741, 0.576, 0.976, 0.30])
         } else if hovered {
-            [1.0, 1.0, 1.0, 0.10]
+            self.ui.ink(0.10)
         } else {
-            [1.0, 1.0, 1.0, 0.05]
+            self.ui.ink(0.05)
         };
         self.push_rounded_rect(rect.x, rect.y, rect.w, rect.h, rect.h * 0.5, fill);
         let tw = self.measure_ui_width("?", 0.82);
@@ -377,7 +376,7 @@ impl Renderer {
             "?",
             (rect.x + (rect.w - tw) * 0.5).round(),
             project_search_row_text_y(rect.y, rect.h, scale),
-            [0.88, 0.88, 0.92, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.88, 0.88, 0.92, 1.0]),
             0.82,
         );
     }
@@ -395,7 +394,7 @@ impl Renderer {
         }
         ui_registry.mark_overlay_start();
         ui_registry.reset_cursor_state();
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
 
         let fitted = crate::ui_system::fit_centered_rect(
             self.width,
@@ -423,7 +422,7 @@ impl Renderer {
             "Поиск по рабочим областям",
             x + side_pad,
             y + 38.0 * scale,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.0,
         );
         let content_factor = project_search_help_content_factor(h, scale);
@@ -440,7 +439,7 @@ impl Renderer {
             content_x,
             cy,
             0.72 * content_factor,
-            [0.80, 0.82, 0.88, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.80, 0.82, 0.88, 1.0]),
         );
         cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
@@ -448,7 +447,7 @@ impl Renderer {
             content_x,
             cy,
             0.72 * content_factor,
-            [0.80, 0.82, 0.88, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.80, 0.82, 0.88, 1.0]),
         );
         cy += project_search_scaled_step(26.0, content_scale);
         self.draw_project_search_help_line(
@@ -456,7 +455,7 @@ impl Renderer {
             content_x,
             cy,
             0.78 * content_factor,
-            [0.96, 0.94, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.96, 0.94, 1.0, 1.0]),
         );
         cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
@@ -464,7 +463,7 @@ impl Renderer {
             content_x,
             cy,
             0.70 * content_factor,
-            [0.76, 0.78, 0.84, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.76, 0.78, 0.84, 1.0]),
         );
         cy += project_search_scaled_step(23.0, content_scale);
         self.draw_project_search_help_code_row(
@@ -488,7 +487,7 @@ impl Renderer {
             content_x,
             cy,
             0.78 * content_factor,
-            [0.96, 0.94, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.96, 0.94, 1.0, 1.0]),
         );
         cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
@@ -496,7 +495,7 @@ impl Renderer {
             content_x,
             cy,
             0.70 * content_factor,
-            [0.76, 0.78, 0.84, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.76, 0.78, 0.84, 1.0]),
         );
         cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
@@ -504,7 +503,7 @@ impl Renderer {
             content_x,
             cy,
             0.70 * content_factor,
-            [0.76, 0.78, 0.84, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.76, 0.78, 0.84, 1.0]),
         );
         cy += project_search_scaled_step(28.0, content_scale);
         self.draw_project_search_help_line(
@@ -512,7 +511,7 @@ impl Renderer {
             content_x,
             cy,
             0.78 * content_factor,
-            [0.96, 0.94, 1.0, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.96, 0.94, 1.0, 1.0]),
         );
         cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
@@ -520,7 +519,7 @@ impl Renderer {
             content_x,
             cy,
             0.70 * content_factor,
-            [0.76, 0.78, 0.84, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.76, 0.78, 0.84, 1.0]),
         );
         cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
@@ -528,7 +527,7 @@ impl Renderer {
             content_x,
             cy,
             0.70 * content_factor,
-            [0.76, 0.78, 0.84, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.76, 0.78, 0.84, 1.0]),
         );
         let btn_w = 112.0 * scale;
         let btn_h = 32.0 * scale;
@@ -574,13 +573,13 @@ impl Renderer {
                 w.round(),
                 20.0 * scale,
                 4.0 * scale,
-                [0.16, 0.17, 0.20, 1.0],
+                self.ui.pick(UiRole::BgCode, [0.16, 0.17, 0.20, 1.0]),
             );
             self.draw_project_search_text_stable(
                 part,
                 (x + 5.0 * scale).round(),
                 y.round(),
-                [0.91, 0.86, 1.0, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.91, 0.86, 1.0, 1.0]),
                 text_scale,
             );
             x += w + 6.0 * scale;
@@ -606,10 +605,10 @@ impl Renderer {
         );
         if state.running_generation.is_some() {
             scratch.push_str("Ищет...");
-            self.draw_project_search_text_stable(&scratch, x, y, [0.741, 0.576, 0.976, 1.0], 0.80);
+            self.draw_project_search_text_stable(&scratch, x, y, self.ui.pick(UiRole::Info, [0.741, 0.576, 0.976, 1.0]), 0.80);
         } else if let Some(error) = &state.error {
             scratch.push_str(error);
-            self.draw_project_search_text_stable(&scratch, x, y, [0.95, 0.35, 0.45, 1.0], 0.80);
+            self.draw_project_search_text_stable(&scratch, x, y, self.ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]), 0.80);
         } else if state.has_run {
             use std::fmt::Write;
             let _ = write!(
@@ -619,7 +618,7 @@ impl Renderer {
                 state.results.len()
             );
             let base_w = self.project_search_stable_text_width(&scratch, 0.80);
-            self.draw_project_search_text_stable(&scratch, x, y, [0.90, 0.91, 0.94, 1.0], 0.80);
+            self.draw_project_search_text_stable(&scratch, x, y, self.ui.pick(UiRole::TextSecondary, [0.90, 0.91, 0.94, 1.0]), 0.80);
             if let Some(ms) = state.elapsed_ms {
                 scratch.clear();
                 let _ = write!(&mut scratch, " ({} мс)", ms);
@@ -627,7 +626,7 @@ impl Renderer {
                     &scratch,
                     (x + base_w).round(),
                     y,
-                    [0.62, 0.86, 0.62, 1.0],
+                    self.ui.pick(UiRole::Success, [0.62, 0.86, 0.62, 1.0]),
                     0.80,
                 );
                 let time_w = self.project_search_stable_text_width(&scratch, 0.80);
@@ -636,7 +635,7 @@ impl Renderer {
                         " limit",
                         (x + base_w + time_w).round(),
                         y,
-                        [0.90, 0.91, 0.94, 1.0],
+                        self.ui.pick(UiRole::TextSecondary, [0.90, 0.91, 0.94, 1.0]),
                         0.80,
                     );
                 }
@@ -645,7 +644,7 @@ impl Renderer {
                     " limit",
                     (x + base_w).round(),
                     y,
-                    [0.90, 0.91, 0.94, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.90, 0.91, 0.94, 1.0]),
                     0.80,
                 );
             }
@@ -667,11 +666,11 @@ impl Renderer {
     ) {
         let scale = self.scale_factor;
         let border = if focused && enabled {
-            [0.741, 0.576, 0.976, 1.0]
+            self.ui.pick(UiRole::Accent, [0.741, 0.576, 0.976, 1.0])
         } else if enabled {
-            [1.0, 1.0, 1.0, 0.16]
+            self.ui.ink(0.16)
         } else {
-            [1.0, 1.0, 1.0, 0.07]
+            self.ui.ink(0.07)
         };
         self.push_rounded_rect(
             rect.x - 1.0,
@@ -688,9 +687,9 @@ impl Renderer {
             rect.h,
             4.0 * scale,
             if enabled {
-                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0]
+                self.ui.pick(UiRole::BgPanel, [self.ui_theme.bg[0], self.ui_theme.bg[1], self.ui_theme.bg[2], 1.0])
             } else {
-                [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 0.58]
+                self.ui.pick(UiRole::BgPanel, [self.ui_theme.bg[0], self.ui_theme.bg[1], self.ui_theme.bg[2], 0.58])
             },
         );
         if enabled {
@@ -781,14 +780,14 @@ impl Renderer {
                             (text_y - 13.0 * scale).round(),
                             sw,
                             (line_h - 2.0 * scale).max(1.0),
-                            [0.50, 0.34, 0.78, 0.55],
+                            self.ui.pick(UiRole::InputSelection, [0.50, 0.34, 0.78, 0.55]),
                         );
                     }
                 }
                 let text_color = if enabled {
-                    self.theme.fg
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                 } else {
-                    [0.48, 0.49, 0.54, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.48, 0.49, 0.54, 1.0])
                 };
                 self.draw_project_search_text_stable(line_text, draw_x, text_y, text_color, text_scale);
             }
@@ -806,7 +805,7 @@ impl Renderer {
                     (text_y - 13.0 * scale).round(),
                     (2.0 * scale).max(1.0),
                     (line_h - 2.0 * scale).max(1.0),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 );
             }
         }
@@ -824,7 +823,7 @@ impl Renderer {
                 (text_y - 13.0 * scale).round(),
                 (2.0 * scale).max(1.0),
                 (line_h - 2.0 * scale).max(1.0),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             );
         }
 
@@ -914,7 +913,7 @@ impl Renderer {
                         hint,
                         (layout.list.x + (layout.list.w - tw) * 0.5).round(),
                         (layout.list.y + 32.0 * scale).round(),
-                        [0.45, 0.45, 0.50, 1.0],
+                        self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.50, 1.0]),
                         0.84,
                     );
                 }
@@ -1016,7 +1015,7 @@ impl Renderer {
                 row_y.round(),
                 layout.list.w - 10.0 * scale,
                 row_h,
-                [1.0, 1.0, 1.0, 0.05],
+                self.ui.ink(0.05),
             );
         }
 
@@ -1037,7 +1036,7 @@ impl Renderer {
             arrow_x.round(),
             icon_y.round(),
             icon_size,
-            [0.60, 0.60, 0.66, 1.0],
+            self.ui.pick(UiRole::Icon, [0.60, 0.60, 0.66, 1.0]),
         );
 
         let file_icon_x = arrow_x + icon_size + 4.0 * scale;
@@ -1060,7 +1059,7 @@ impl Renderer {
             badge_w,
             badge_h,
             badge_h * 0.5,
-            [0.741, 0.576, 0.976, 0.28],
+            self.ui.pick(UiRole::AccentSoft, [0.741, 0.576, 0.976, 0.28]),
         );
         let badge_text_x =
             badge_x + (badge_w - self.measure_ui_width(&badge_text, 0.72)) * 0.5;
@@ -1068,7 +1067,7 @@ impl Renderer {
             &badge_text,
             badge_text_x.round(),
             project_search_row_text_y(row_y, row_h, scale),
-            [0.86, 0.80, 0.96, 1.0],
+            self.ui.pick(UiRole::TextOnAccent, [0.86, 0.80, 0.96, 1.0]),
             0.72,
         );
 
@@ -1079,7 +1078,7 @@ impl Renderer {
             text_x.round(),
             project_search_row_text_y(row_y, row_h, scale),
             max_w,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             0.82,
             scratch,
         );
@@ -1126,7 +1125,7 @@ impl Renderer {
                 row_y.round(),
                 layout.list.w - 10.0 * scale,
                 row_h,
-                [1.0, 1.0, 1.0, 0.045],
+                self.ui.ink(0.045),
             );
         }
         let text_y = project_search_row_text_y(row_y, row_h, scale);
@@ -1140,7 +1139,7 @@ impl Renderer {
             scratch.as_str(),
             line_x.round(),
             text_y,
-            [0.52, 0.55, 0.64, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.52, 0.55, 0.64, 1.0]),
             0.72,
         );
 
@@ -1150,7 +1149,7 @@ impl Renderer {
                 "...",
                 preview_x.round(),
                 text_y,
-                [0.50, 0.52, 0.58, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.50, 0.52, 0.58, 1.0]),
                 0.78,
             );
             return;
@@ -1210,16 +1209,16 @@ impl Renderer {
                     hw,
                     17.0 * self.scale_factor,
                     3.0 * self.scale_factor,
-                    [0.741, 0.576, 0.976, 0.26],
+                    self.ui.pick(UiRole::AccentSoft, [0.741, 0.576, 0.976, 0.26]),
                 );
             }
         }
-        self.draw_string_scaled_stable(scratch, x, y, [0.75, 0.77, 0.82, 1.0], scale);
+        self.draw_string_scaled_stable(scratch, x, y, self.ui.pick(UiRole::TextSecondary, [0.75, 0.77, 0.82, 1.0]), scale);
         if hs < he && scratch.is_char_boundary(hs) && scratch.is_char_boundary(he) {
             let before = &scratch[..hs];
             let hit = &scratch[hs..he];
             let hx = x + self.measure_ui_width(before, scale).round();
-            self.draw_string_scaled_stable(hit, hx.round(), y, [0.98, 0.95, 1.0, 1.0], scale);
+            self.draw_string_scaled_stable(hit, hx.round(), y, self.ui.pick(UiRole::TextOnAccent, [0.98, 0.95, 1.0, 1.0]), scale);
         }
     }
 

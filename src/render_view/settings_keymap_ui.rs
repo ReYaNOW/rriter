@@ -1,5 +1,6 @@
 use crate::app::keymap_settings::KeymapSettingsState;
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 
 const ROW_H: f32 = 38.0;
@@ -47,8 +48,8 @@ pub(super) fn draw(
     let s = renderer.scale_factor;
     let filter_y = y.round();
     let filter_placeholder = if state.filter.is_empty() { "Фильтр по команде или сочетанию" } else { "" };
-    register_button(renderer, ui, UiId::SettingsKeymapFilter, x, filter_y, width * 0.66, 34.0 * s, filter_placeholder, [0.8, 0.8, 0.82, 1.0]);
-    renderer.draw_string_scaled(&state.filter, x + 8.0 * s, (filter_y + 22.0 * s).round(), [1.0, 1.0, 1.0, 1.0], 0.8);
+    register_button(renderer, ui, UiId::SettingsKeymapFilter, x, filter_y, width * 0.66, 34.0 * s, filter_placeholder, renderer.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.82, 1.0]));
+    renderer.draw_string_scaled(&state.filter, x + 8.0 * s, (filter_y + 22.0 * s).round(), renderer.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]), 0.8);
     if state.filter_focused {
         let scale = 0.8;
         let text_geometry = crate::app::single_line_input::single_line_text_geometry(
@@ -69,15 +70,15 @@ pub(super) fn draw(
             (filter_y + 8.0 * s).round(),
             crate::app::single_line_input::single_line_caret_width(s),
             (18.0 * s).round(),
-            [1.0, 1.0, 1.0, 0.9],
+            renderer.ui.ink(0.9),
         );
     }
-    register_button(renderer, ui, UiId::SettingsKeymapResetAll, x + width * 0.69, filter_y, width * 0.31, 34.0 * s, "Сбросить все", [0.9, 0.78, 0.8, 1.0]);
+    register_button(renderer, ui, UiId::SettingsKeymapResetAll, x + width * 0.69, filter_y, width * 0.31, 34.0 * s, "Сбросить все", renderer.ui.pick(UiRole::Danger, [0.9, 0.78, 0.8, 1.0]));
     if let Some(label) = &state.skipped_label {
-        renderer.draw_string_scaled(label, x, (filter_y + 54.0 * s).round(), [1.0, 0.38, 0.38, 1.0], 0.9);
+        renderer.draw_string_scaled(label, x, (filter_y + 54.0 * s).round(), renderer.ui.pick(UiRole::Error, [1.0, 0.38, 0.38, 1.0]), 0.9);
     }
     if let Some(hint) = state.hint {
-        renderer.draw_string_scaled(hint, x, (filter_y + 54.0 * s).round(), [0.9, 0.78, 0.56, 1.0], 0.9);
+        renderer.draw_string_scaled(hint, x, (filter_y + 54.0 * s).round(), renderer.ui.pick(UiRole::Warning, [0.9, 0.78, 0.56, 1.0]), 0.9);
     }
 
     let viewport = keymap_list_viewport(filter_y, s, clip);
@@ -93,7 +94,7 @@ pub(super) fn draw(
 
         if previous_context != Some(row.context) {
             previous_context = Some(row.context);
-            renderer.draw_string_scaled(context_label(row.context), x.round(), (row_y.round() + (18.0 * s).round()), [0.78, 0.65, 1.0, 1.0], 0.9);
+            renderer.draw_string_scaled(context_label(row.context), x.round(), (row_y.round() + (18.0 * s).round()), renderer.ui.pick(UiRole::TextSecondary, [0.78, 0.65, 1.0, 1.0]), 0.9);
             row_y += (25.0 * s).round();
         }
         if !row_is_visible(row_y, row_step, viewport.y, viewport.h) {
@@ -102,31 +103,31 @@ pub(super) fn draw(
             continue;
         }
         let metrics = keymap_row_metrics(row_y, s);
-        if row_index.is_multiple_of(2) { renderer.push_rect(x.round(), row_y.round(), width.round(), metrics.row_h, [1.0, 1.0, 1.0, 0.025]); }
+        if row_index.is_multiple_of(2) { renderer.push_rect(x.round(), row_y.round(), width.round(), metrics.row_h, renderer.ui.ink(0.025)); }
         let command_index = row.command as usize;
-        let color = if matches!(row.warning, crate::app::keymap_settings::RowWarning::Conflict | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) { [1.0, 0.46, 0.42, 1.0] } else { [0.88, 0.89, 0.92, 1.0] };
+        let color = if matches!(row.warning, crate::app::keymap_settings::RowWarning::Conflict | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) { renderer.ui.pick(UiRole::Error, [1.0, 0.46, 0.42, 1.0]) } else { renderer.ui.pick(UiRole::TextSecondary, [0.88, 0.89, 0.92, 1.0]) };
         renderer.draw_string_scaled(row.label, (x + (5.0 * s).round()).round(), metrics.first_baseline, color, 0.83);
-        renderer.draw_string_scaled(row.id, (x + (5.0 * s).round()).round(), metrics.second_baseline, [0.48, 0.49, 0.54, 1.0], 0.65);
+        renderer.draw_string_scaled(row.id, (x + (5.0 * s).round()).round(), metrics.second_baseline, renderer.ui.pick(UiRole::TextMuted, [0.48, 0.49, 0.54, 1.0]), 0.65);
         let mut chip_x = x + width * 0.49;
         if row.chords.is_empty() {
-            renderer.draw_string_scaled("не назначено", chip_x, row_y.round() + (23.0 * s).round(), [0.52, 0.53, 0.58, 1.0], 0.74);
+            renderer.draw_string_scaled("не назначено", chip_x, row_y.round() + (23.0 * s).round(), renderer.ui.pick(UiRole::TextMuted, [0.52, 0.53, 0.58, 1.0]), 0.74);
             chip_x += (82.0 * s).round();
         }
         for (chord_index, label) in row.chords.iter().enumerate() {
             let chip_w = renderer.measure_ui_width(label, 0.76) + 25.0 * s;
-            renderer.push_rounded_rect(chip_x.round(), metrics.chip_y, chip_w.round(), metrics.chip_h, (5.0 * s).round(), [0.3, 0.27, 0.38, 1.0]);
-            renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), [0.9, 0.88, 0.96, 1.0], 0.76);
-            register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", [1.0, 0.58, 0.62, 1.0]);
+            renderer.push_rounded_rect(chip_x.round(), metrics.chip_y, chip_w.round(), metrics.chip_h, (5.0 * s).round(), renderer.ui.pick(UiRole::BgChip, [0.3, 0.27, 0.38, 1.0]));
+            renderer.draw_string_scaled(label, (chip_x + (5.0 * s).round()).round(), row_y.round() + (23.0 * s).round(), renderer.ui.pick(UiRole::TextPrimary, [0.9, 0.88, 0.96, 1.0]), 0.76);
+            register_button(renderer, ui, UiId::SettingsKeymapRemove(command_index, chord_index), chip_x + chip_w - (19.0 * s).round(), metrics.chip_y, (19.0 * s).round(), metrics.chip_h, "×", renderer.ui.pick(UiRole::Danger, [1.0, 0.58, 0.62, 1.0]));
             chip_x += chip_w + (4.0 * s).round();
         }
         if matches!(row.override_state, crate::app::keymap_settings::OverrideState::Default | crate::app::keymap_settings::OverrideState::Array) {
-            register_button(renderer, ui, UiId::SettingsKeymapAdd(command_index), chip_x.round(), metrics.chip_y, (28.0 * s).round(), metrics.chip_h, if state.recording.is_some_and(|recording| recording.command == row.command) { "…" } else { "+" }, [0.72, 0.78, 0.96, 1.0]);
+            register_button(renderer, ui, UiId::SettingsKeymapAdd(command_index), chip_x.round(), metrics.chip_y, (28.0 * s).round(), metrics.chip_h, if state.recording.is_some_and(|recording| recording.command == row.command) { "…" } else { "+" }, renderer.ui.pick(UiRole::Accent, [0.72, 0.78, 0.96, 1.0]));
         }
         if !matches!(row.override_state, crate::app::keymap_settings::OverrideState::Default) {
-            register_button(renderer, ui, UiId::SettingsKeymapReset(command_index), (x + width - (30.0 * s).round()).round(), metrics.chip_y, (26.0 * s).round(), metrics.chip_h, "↺", [0.84, 0.75, 0.96, 1.0]);
+            register_button(renderer, ui, UiId::SettingsKeymapReset(command_index), (x + width - (30.0 * s).round()).round(), metrics.chip_y, (26.0 * s).round(), metrics.chip_h, "↺", renderer.ui.pick(UiRole::AccentHover, [0.84, 0.75, 0.96, 1.0]));
         }
         if matches!(row.warning, crate::app::keymap_settings::RowWarning::TerminalIntercept | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) {
-            renderer.draw_string_scaled("терминал перехватывает", x + width * 0.76, (row_y + 34.0 * s).round(), [1.0, 0.7, 0.42, 1.0], 0.62);
+            renderer.draw_string_scaled("терминал перехватывает", x + width * 0.76, (row_y + 34.0 * s).round(), renderer.ui.pick(UiRole::Warning, [1.0, 0.7, 0.42, 1.0]), 0.62);
         }
         row_y += row_step;
         row_index += 1;
@@ -135,24 +136,24 @@ pub(super) fn draw(
     state.max_scroll = (row_y - list_y - viewport.h).max(0.0);
     state.scroll.clamp_target(0.0, state.max_scroll);
     if state.max_scroll > 0.0 {
-        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, viewport.y, 14.0 * s, viewport.h), viewport.h, state.max_scroll, state.scroll.current, 6.0, super::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, [0.7, 0.33, 0.54, 1.0]);
+        let bar = super::settings_ui::settings_scrollbar((x + width - 11.0 * s, viewport.y, 14.0 * s, viewport.h), viewport.h, state.max_scroll, state.scroll.current, 6.0, super::settings_ui::KEYMAP_SCROLLBAR_MIN_THUMB, renderer.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]));
         renderer.draw_scrollbar(&bar, s, 1.0, Some(super::scrollbar_widget::ScrollbarHit { ui, id: UiId::SettingsKeymapScrollY, mx: renderer.last_mouse_x, my: renderer.last_mouse_y, blocker: false }));
     }
     ui.pop_clip();
 
     if let Some(conflict) = &state.pending_conflict {
-        renderer.draw_string_scaled(&conflict.owner_labels, x, (clip.y + clip.h - 52.0 * s).round(), [1.0, 0.78, 0.55, 1.0], 0.9);
-        register_button(renderer, ui, UiId::SettingsKeymapConflictAccept, x + width - 180.0 * s, clip.y + clip.h - 40.0 * s, 78.0 * s, 30.0 * s, "Да", [0.7, 0.88, 0.72, 1.0]);
-        register_button(renderer, ui, UiId::SettingsKeymapConflictCancel, x + width - 92.0 * s, clip.y + clip.h - 40.0 * s, 78.0 * s, 30.0 * s, "Нет", [0.9, 0.65, 0.68, 1.0]);
+        renderer.draw_string_scaled(&conflict.owner_labels, x, (clip.y + clip.h - 52.0 * s).round(), renderer.ui.pick(UiRole::Warning, [1.0, 0.78, 0.55, 1.0]), 0.9);
+        register_button(renderer, ui, UiId::SettingsKeymapConflictAccept, x + width - 180.0 * s, clip.y + clip.h - 40.0 * s, 78.0 * s, 30.0 * s, "Да", renderer.ui.pick(UiRole::Success, [0.7, 0.88, 0.72, 1.0]));
+        register_button(renderer, ui, UiId::SettingsKeymapConflictCancel, x + width - 92.0 * s, clip.y + clip.h - 40.0 * s, 78.0 * s, 30.0 * s, "Нет", renderer.ui.pick(UiRole::Danger, [0.9, 0.65, 0.68, 1.0]));
     }
 }
 
 fn register_button(renderer: &mut Renderer, ui: &mut UiRegistry, id: UiId, x: f32, y: f32, w: f32, h: f32, label: &str, color: [f32; 4]) {
     let hovered = ui.register_rect(id, x, y, w, h, renderer.last_mouse_x, renderer.last_mouse_y);
     let background = if hovered {
-        [0.38, 0.34, 0.46, 0.9]
+        renderer.ui.pick(UiRole::AccentHover, [0.38, 0.34, 0.46, 0.9])
     } else {
-        [0.25, 0.26, 0.31, 0.8]
+        renderer.ui.pick(UiRole::BgInput, [0.25, 0.26, 0.31, 0.8])
     };
     renderer.push_rounded_rect(x, y, w, h, 4.0 * renderer.scale_factor, background);
     renderer.draw_string_scaled(

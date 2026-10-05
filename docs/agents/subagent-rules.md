@@ -15,7 +15,7 @@ Read this before starting. The brief gives the task, files, entry points, stop c
 * Long output to a new log file (`cmd > /tmp/<task>.log 2>&1`), then `tail -n 40` / `grep`. Never print full logs.
 * Tests in the foreground only: a background run ends your turn without a result.
 * Focused tests: `make test TEST_FILTER=<module path>` (e.g. `headless::ui_tests_api_mock`). The prefix `headless::ui_tests_` alone runs ~230 tests — never use it.
-* Environment errors (`Read-only file system` under /run/user, `EGL setup failed`) — request to leave the sandbox and repeat; not a product bug.
+* In a sandbox (Codex), run GPU/EGL commands with a sandbox-escape request on the first attempt, never try them inside first: `scripts/rriter_headless.py` (any subcommand) and any `make test`/`cargo test` whose filter matches a `headless::` test (substring match: `TEST_FILTER=theme` matches `headless::ui_tests_themes`). `EGL setup failed` or `Read-only file system` under /run/user is the environment, not a product bug. Reason: each in-sandbox attempt costs a full link and a test run for nothing (05.10).
 
 ## Headless UI tests
 

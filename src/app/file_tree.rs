@@ -655,12 +655,14 @@ impl App {
         }
         let expanded = self.ide_panel.file_tree_expanded.clone();
         let patterns = self.ide_ignore_patterns.clone();
+        let is_dark = self.renderer.as_ref().is_some_and(|renderer| renderer.ui.is_dark);
         let known_icons = self.renderer.as_ref().map_or_else(FxHashSet::default, |renderer| {
             renderer
                 .file_icon_cache
                 .keys()
                 .chain(renderer.rasterized_file_icons.keys())
                 .copied()
+                .filter(|(_, variant)| *variant == is_dark)
                 .collect()
         });
         self.ide_panel.file_tree_error = None;
@@ -669,6 +671,7 @@ impl App {
             expanded,
             patterns,
             known_icons,
+            is_dark,
             &self.ui_waker,
         ));
     }
@@ -715,11 +718,12 @@ impl App {
                                 }
                                 updated = true;
                             }
-                            crate::app::file_tree::FileTreeScanMessage::Icon(key, state) => {
+                            crate::app::file_tree::FileTreeScanMessage::Icon(key, is_dark, state) => {
                                 if let Some(renderer) = self.renderer.as_mut()
-                                    && !renderer.file_icon_cache.contains_key(key)
+                                    && renderer.ui.is_dark == is_dark
+                                    && !renderer.file_icon_cache.contains_key(&(key, is_dark))
                                 {
-                                    renderer.rasterized_file_icons.insert(key, state);
+                                    renderer.rasterized_file_icons.insert((key, is_dark), state);
                                 }
                                 updated = true;
                             }

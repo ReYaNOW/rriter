@@ -40,6 +40,18 @@ fn required_graphics_attribute(
 }
 
 impl Renderer {
+    pub(crate) fn set_themes(
+        &mut self,
+        editor: Theme,
+        ui: crate::theme::ThemeId,
+        system_selection: [f32; 4],
+    ) {
+        self.editor_ui = crate::theme::UiPalette::for_id(editor.id);
+        self.theme = editor;
+        self.ui = crate::theme::UiPalette::for_id(ui);
+        self.ui_theme = Theme::for_id(ui, system_selection);
+    }
+
     pub fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
         let texture = unsafe { self.gl.create_texture().ok()? };
         unsafe {
@@ -621,6 +633,7 @@ impl Renderer {
             let icon_logo = load_icon_from_memory(trace.take_logo(crate::startup_trace::LOGO_PNG), "icon");
             trace.mark("logo");
 
+            let ui_theme = theme.clone();
             let mut renderer = Self {
                 gl,
                 graphics_diagnostics: diagnostics,
@@ -649,6 +662,9 @@ impl Renderer {
                 scale_factor,
                 theme,
                 ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                editor_ui: crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+                icons_on_editor: false,
+                ui_theme,
                 theme_gen: 0,
                 width: 1000.0,
                 height: 800.0,
@@ -689,6 +705,7 @@ impl Renderer {
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 rasterized_file_icons: rustc_hash::FxHashMap::default(),
                 icon_rasterize_budget: 1,
+                icon_raster_deferred: false,
                 icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),

@@ -21,6 +21,7 @@ fn git_workspace_scrollbar(
     total_h: f32,
     offset: f32,
     scale: f32,
+    thumb_color: [f32; 4],
 ) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
     let max_scroll = (total_h - list_h).max(0.0);
     if max_scroll <= 0.0 {
@@ -34,7 +35,9 @@ fn git_workspace_scrollbar(
             min_thumb: 20.0,
             radius: Some(1.5),
             track_color: None,
-            thumb_color: [1.0, 1.0, 1.0, 0.22],
+            thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
         lane: (panel_x + panel_w - 8.0 * scale, list_y, 8.0 * scale, list_h),
@@ -101,9 +104,9 @@ impl Renderer {
         let input_w = input.w;
         let input_h = input.h;
         let input_border = if ide_panel.git.message_focused {
-            [0.60, 0.35, 0.85, 0.78]
+            self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.78])
         } else {
-            [1.0, 1.0, 1.0, 0.10]
+            self.ui.ink(0.10)
         };
         self.push_rounded_rect(
             input_x - 1.0,
@@ -120,9 +123,9 @@ impl Renderer {
             input_h,
             4.0 * s,
             if ide_panel.git.message_focused {
-                [0.18, 0.19, 0.25, 1.0]
+                self.ui.pick(UiRole::BgInput, [0.18, 0.19, 0.25, 1.0])
             } else {
-                [0.11, 0.12, 0.16, 1.0]
+                self.ui.pick(UiRole::BgPanelAlt, [0.11, 0.12, 0.16, 1.0])
             },
         );
         ui_registry.register_text_input(
@@ -237,9 +240,9 @@ impl Renderer {
         let dot_x = (options_btn.x + (options_btn.w - dot_size) / 2.0).round();
         let dot_center_y = (options_btn.y + options_btn.h / 2.0).round();
         let dot_color = if commit_controls_enabled {
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82]
+            self.ui.pick(UiRole::TextSecondary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.82])
         } else {
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.34]
+            self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.34])
         };
         for offset in [-5.0 * s, 0.0, 5.0 * s] {
             self.push_rounded_rect(
@@ -259,7 +262,7 @@ impl Renderer {
                 badge,
                 badge,
                 badge / 2.0,
-                [1.0, 0.55, 0.12, 1.0],
+                self.ui.pick(UiRole::Warning, [1.0, 0.55, 0.12, 1.0]),
             );
         }
 
@@ -291,7 +294,7 @@ impl Renderer {
                 graph_btn.y + graph_btn.h - 2.0,
                 graph_btn.w,
                 2.0,
-                [0.60, 0.35, 0.85, 0.9],
+                self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.9]),
             );
         }
 
@@ -324,7 +327,7 @@ impl Renderer {
                 logs_btn.y + logs_btn.h - 2.0,
                 logs_btn.w,
                 2.0,
-                [0.60, 0.35, 0.85, 0.9],
+                self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.9]),
             );
         }
 
@@ -377,7 +380,7 @@ impl Renderer {
                 notice_x,
                 graph_btn_y + 16.0 * s,
                 (panel_x + pad + inner_w - notice_x).max(0.0),
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.68],
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.68]),
                 0.78,
                 &mut label_scratch,
             );
@@ -413,8 +416,11 @@ impl Renderer {
             drew_any = true;
             let row_visible = y + workspace_h >= list_y && y <= list_y + list_paint_h;
             if row_visible {
-                let workspace_name_color =
-                    git_disabled_color(self.theme.fg, workspace_disabled, 0.38);
+                let workspace_name_color = git_disabled_color(
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
+                    workspace_disabled,
+                    0.38,
+                );
                 let show_stage_actions = !workspace.files.is_empty();
                 let show_repo_menu = workspace.repo_root.is_some();
                 let stage_interaction_disabled =
@@ -477,12 +483,12 @@ impl Renderer {
                     y,
                     panel_w,
                     workspace_h,
-                    [
-                        self.theme.bg[0] + 0.035,
-                        self.theme.bg[1] + 0.035,
-                        self.theme.bg[2] + 0.045,
+                    self.ui.pick(UiRole::BgPanelAlt, [
+                        self.ui_theme.bg[0] + 0.035,
+                        self.ui_theme.bg[1] + 0.035,
+                        self.ui_theme.bg[2] + 0.045,
                         1.0,
-                    ],
+                    ]),
                 );
                 let name = workspace
                     .root
@@ -506,7 +512,11 @@ impl Renderer {
                         workspace_arrow_x,
                         y + 2.0 * s,
                         workspace_h,
-                        git_disabled_color([0.78, 0.80, 0.88, 0.75], workspace_disabled, 0.26),
+                        git_disabled_color(
+                            self.ui.pick(UiRole::TextMuted, [0.78, 0.80, 0.88, 0.75]),
+                            workspace_disabled,
+                            0.26,
+                        ),
                     );
                     workspace_arrow_x + 18.0 * s
                 } else {
@@ -551,13 +561,13 @@ impl Renderer {
                             chip_w,
                             chip_h,
                             4.0 * s,
-                            [0.20, 0.22, 0.30, 1.0],
+                            self.ui.pick(UiRole::BgChip, [0.20, 0.22, 0.30, 1.0]),
                         );
                         self.draw_string_scaled(
                             branch_name,
                             (chip_x + chip_pad_x).round(),
                             branch_text_y,
-                            [0.78, 0.82, 0.92, 1.0],
+                            self.ui.pick(UiRole::GitBranch, [0.78, 0.82, 0.92, 1.0]),
                             branch_scale,
                         );
                     } else {
@@ -622,13 +632,21 @@ impl Renderer {
                             count_badge_w,
                             count_badge_h,
                             count_badge_h / 2.0,
-                            git_disabled_color([0.24, 0.27, 0.34, 1.0], workspace_disabled, 0.34),
+                            git_disabled_color(
+                                self.ui.pick(UiRole::BgPanelAlt, [0.24, 0.27, 0.34, 1.0]),
+                                workspace_disabled,
+                                0.34,
+                            ),
                         );
                         self.draw_string_scaled(
                             &label_scratch,
                             (badge_x + (count_badge_w - count_text_w) / 2.0).round(),
                             (badge_y + count_badge_h / 2.0 + 4.0 * s).round(),
-                            git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
+                            git_disabled_color(
+                                self.ui.pick(UiRole::TextSecondary, [0.86, 0.90, 1.0, 1.0]),
+                                workspace_disabled,
+                                0.38,
+                            ),
                             count_text_scale,
                         );
                     }
@@ -642,7 +660,11 @@ impl Renderer {
                             &label_scratch,
                             (push_x - 8.0 * s - ahead_text_w).max(panel_x + pad),
                             y + workspace_h / 2.0 + 5.0 * s,
-                            git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
+                            git_disabled_color(
+                                self.ui.pick(UiRole::Info, [0.48, 0.74, 1.0, 1.0]),
+                                workspace_disabled,
+                                0.34,
+                            ),
                             0.78,
                         );
                         let push_btn = Button {
@@ -808,7 +830,7 @@ impl Renderer {
                                 menu_btn.y + menu_btn.h - 2.0,
                                 (menu_btn.w - 10.0 * s).max(1.0),
                                 2.0,
-                                [0.60, 0.35, 0.85, 0.8],
+                                self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.8]),
                             );
                         }
                     }
@@ -832,7 +854,11 @@ impl Renderer {
                         &label_scratch,
                         (push_x - 8.0 * s - ahead_text_w).max(panel_x + pad),
                         y + workspace_h / 2.0 + 5.0 * s,
-                        git_disabled_color([0.48, 0.74, 1.0, 1.0], workspace_disabled, 0.34),
+                        git_disabled_color(
+                            self.ui.pick(UiRole::Info, [0.48, 0.74, 1.0, 1.0]),
+                            workspace_disabled,
+                            0.34,
+                        ),
                         0.78,
                     );
                     let push_btn = Button {
@@ -906,7 +932,7 @@ impl Renderer {
                                 menu_btn.y + menu_btn.h - 2.0,
                                 (menu_btn.w - 10.0 * s).max(1.0),
                                 2.0,
-                                [0.60, 0.35, 0.85, 0.8],
+                                self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.8]),
                             );
                         }
                     }
@@ -933,13 +959,21 @@ impl Renderer {
                         count_badge_w,
                         count_badge_h,
                         count_badge_h / 2.0,
-                        git_disabled_color([0.24, 0.27, 0.34, 1.0], workspace_disabled, 0.34),
+                        git_disabled_color(
+                            self.ui.pick(UiRole::BgPanelAlt, [0.24, 0.27, 0.34, 1.0]),
+                            workspace_disabled,
+                            0.34,
+                        ),
                     );
                     self.draw_string_scaled(
                         &label_scratch,
                         (badge_x + (count_badge_w - count_text_w) / 2.0).round(),
                         (badge_y + count_badge_h / 2.0 + 4.0 * s).round(),
-                        git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
+                        git_disabled_color(
+                            self.ui.pick(UiRole::TextSecondary, [0.86, 0.90, 1.0, 1.0]),
+                            workspace_disabled,
+                            0.38,
+                        ),
                         count_text_scale,
                     );
                     if show_repo_menu {
@@ -974,7 +1008,7 @@ impl Renderer {
                                 menu_btn.y + menu_btn.h - 2.0,
                                 (menu_btn.w - 10.0 * s).max(1.0),
                                 2.0,
-                                [0.60, 0.35, 0.85, 0.8],
+                                self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.8]),
                             );
                         }
                     }
@@ -1010,7 +1044,7 @@ impl Renderer {
                             menu_btn.y + menu_btn.h - 2.0,
                             (menu_btn.w - 10.0 * s).max(1.0),
                             2.0,
-                            [0.60, 0.35, 0.85, 0.8],
+                            self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.8]),
                         );
                     }
                 }
@@ -1028,7 +1062,7 @@ impl Renderer {
                         panel_x + pad,
                         y + row_h / 2.0 + 5.0 * s,
                         inner_w,
-                        [0.95, 0.42, 0.46, 1.0],
+                        self.ui.pick(UiRole::Error, [0.95, 0.42, 0.46, 1.0]),
                         0.82,
                         &mut label_scratch,
                     );
@@ -1087,19 +1121,19 @@ impl Renderer {
                             );
                         }
                         if hovered {
-                            self.push_rect(panel_x, y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
+                            self.push_rect(panel_x, y, panel_w, row_h, self.ui.ink(0.055));
                         } else if selected {
                             self.push_rect(
                                 panel_x,
                                 y,
                                 panel_w,
                                 row_h,
-                                [
-                                    self.theme.sel[0],
-                                    self.theme.sel[1],
-                                    self.theme.sel[2],
+                                self.ui.pick(UiRole::Selection, [
+                                    self.ui_theme.sel[0],
+                                    self.ui_theme.sel[1],
+                                    self.ui_theme.sel[2],
                                     0.16,
-                                ],
+                                ]),
                             );
                         }
                         if git_file_tooltip_hovered(hovered, mx, check_x, file_layout.check_size) {
@@ -1118,6 +1152,7 @@ impl Renderer {
                         }
 
                         let (checkbox_color, check_color) = git_stage_checkbox_color(
+                            &self.ui,
                             file.staged,
                             false,
                             workspace_disabled,
@@ -1162,9 +1197,9 @@ impl Renderer {
                             status_x,
                             y + row_h / 2.0 + 5.0 * s,
                             if workspace_disabled {
-                                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.28]
+                                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.28])
                             } else {
-                                file.status.color()
+                                self.ui.pick(file.status.role(), file.status.color())
                             },
                             0.82,
                         );
@@ -1183,9 +1218,9 @@ impl Renderer {
                             row_h,
                             status_x - 8.0 * s,
                             if workspace_disabled {
-                                [0.72, 0.76, 0.88, 0.38]
+                                self.ui.pick(UiRole::TextMuted, [0.72, 0.76, 0.88, 0.38])
                             } else {
-                                [0.72, 0.76, 0.88, 1.0]
+                                self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 1.0])
                             },
                             s,
                             text_scale,
@@ -1210,6 +1245,7 @@ impl Renderer {
                         let check_x = folder_layout.check_x;
                         let check_y = folder_layout.check_y;
                         let (checkbox_color, check_color) = git_stage_checkbox_color(
+                            &self.ui,
                             matches!(
                                 folder_stage,
                                 Some(crate::app::git_panel::GitFolderStageState::All)
@@ -1265,7 +1301,11 @@ impl Renderer {
 
                         let text_y = Self::tree_row_text_y(y, row_h, s);
                         let arrow_color =
-                            git_disabled_color([0.78, 0.80, 0.88, 0.75], workspace_disabled, 0.26);
+                            git_disabled_color(
+                                self.ui.pick(UiRole::TextMuted, [0.78, 0.80, 0.88, 0.75]),
+                                workspace_disabled,
+                                0.26,
+                            );
                         self.draw_tree_disclosure_icon(
                             !row_collapsed,
                             folder_layout.arrow_x,
@@ -1283,7 +1323,11 @@ impl Renderer {
                             text_x,
                             text_y,
                             (panel_x + panel_w - pad - text_x).max(0.0),
-                            git_disabled_color(self.theme.fg, workspace_disabled, 0.38),
+                            git_disabled_color(
+                                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
+                                workspace_disabled,
+                                0.38,
+                            ),
                             text_scale,
                             &mut label_scratch,
                         );
@@ -1307,7 +1351,7 @@ impl Renderer {
                 hint,
                 panel_x + (panel_w - tw) / 2.0,
                 list_y + 30.0 * s,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.45],
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.45]),
                 text_scale,
             );
         }
@@ -1321,7 +1365,7 @@ impl Renderer {
 
         let total_h = (y + scroll - list_y).max(0.0);
         if let Some(bar) = git_workspace_scrollbar(
-            panel_x, panel_w, list_y, list_h, total_h, scroll, s,
+            panel_x, panel_w, list_y, list_h, total_h, scroll, s, self.ui.ink(0.22),
         ) {
             self.git_workspace_scrollbar = Some(bar);
             self.draw_scrollbar(
@@ -1355,7 +1399,7 @@ impl Renderer {
                 graph_divider_y,
                 panel_w,
                 1.0,
-                [0.0, 0.0, 0.0, 0.22],
+                self.ui.shadow_alpha(0.22),
             );
             self.push_rect(
                 panel_x,
@@ -1367,9 +1411,9 @@ impl Renderer {
                     graph_divider_h.max(1.0)
                 },
                 if divider_hovered {
-                    [0.60, 0.35, 0.85, 0.4]
+                    self.ui.pick(UiRole::AccentHover, [0.60, 0.35, 0.85, 0.4])
                 } else {
-                    [1.0, 1.0, 1.0, 0.10]
+                    self.ui.ink(0.10)
                 },
             );
             match ide_panel.git.bottom_pane {

@@ -271,6 +271,9 @@ pub(crate) fn autocomplete_scrollbar(
             thumb_thickness: 6.0,
             track_pad: 3.0,
             thumb_color: [0.7, 0.33, 0.54, 1.0],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Role(
+                crate::theme::UiRole::ScrollbarThumb,
+            ),
             ..ScrollbarStyle::BASE
         },
         axis: ScrollbarAxis::Vertical,
@@ -340,6 +343,7 @@ impl App {
         self.settings_ide_scroll.end_drag();
         self.settings_general_scroll.end_drag();
         self.settings_database_scroll.end_drag();
+        self.settings_appearance_scroll.end_drag();
         self.autocomplete_scroll.end_drag();
         self.ide_panel.explorer_scroll.end_drag();
         self.ide_panel.project_search.scroll.end_drag();

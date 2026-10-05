@@ -38,7 +38,7 @@ impl Renderer {
                 },
                 x + pad + 48.0 * s,
                 (cy + 18.0 * s).round(),
-                [0.48, 0.86, 0.52, 1.0],
+                self.ui.pick(UiRole::Success, [0.48, 0.86, 0.52, 1.0]),
                 0.86,
             );
         }
@@ -166,7 +166,7 @@ impl Renderer {
                         message.lines().next().unwrap_or("Ty проверка прошла"),
                         x + pad,
                         cy + 16.0 * s,
-                        [0.50, 0.90, 0.55, 1.0],
+                        self.ui.pick(UiRole::ApiMockRoute, [0.50, 0.90, 0.55, 1.0]),
                         0.76,
                     );
                     cy += 22.0 * s;
@@ -202,7 +202,7 @@ impl Renderer {
                     "Ответ мока",
                     x + pad,
                     cy + 16.0 * s,
-                    [0.68, 0.70, 0.78, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                     0.82,
                 );
                 cy += 22.0 * s;
@@ -215,11 +215,11 @@ impl Renderer {
                     0.0,
                     (1.0 * s).max(1.0),
                     if static_focused {
-                        [0.60, 0.35, 0.85, 1.0]
+                        self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                     } else {
-                        [1.0, 1.0, 1.0, 0.12]
+                        self.ui.ink(0.12)
                     },
-                    [0.13, 0.14, 0.18, 1.0],
+                    self.ui.pick(UiRole::BgInput, [0.13, 0.14, 0.18, 1.0]),
                 );
                 ui_registry.register_text_input(
                     crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx),
@@ -320,12 +320,10 @@ impl Renderer {
             let frame_y = mock_frame_y.round();
             let frame_w = (content_w + 20.0 * s).round().max(line_w * 2.0);
             let frame_h = (cy - mock_frame_y - 8.0 * s).round().max(line_w * 2.0);
-            let frame_color = [
-                self.theme.sel[0],
-                self.theme.sel[1],
-                self.theme.sel[2],
-                0.55,
-            ];
+            let frame_color = self.ui.pick(
+                UiRole::Selection,
+                [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.55],
+            );
             self.push_rect(frame_x, frame_y, frame_w, line_w, frame_color);
             self.push_rect(frame_x, frame_y, line_w, frame_h, frame_color);
             self.push_rect(
@@ -473,11 +471,11 @@ impl Renderer {
                 0.0,
                 (1.0 * s).max(1.0),
                 if any_focused {
-                    [0.60, 0.35, 0.85, 1.0]
+                    self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                 } else {
-                    [1.0, 1.0, 1.0, 0.12]
+                    self.ui.ink(0.12)
                 },
-                [0.13, 0.14, 0.18, 1.0],
+                self.ui.pick(UiRole::BgInput, [0.13, 0.14, 0.18, 1.0]),
             );
             self.draw_api_line_number_gutter(x + pad, cy, line_gutter_w, viewport_h, s);
             let viewport_clip = (x + pad, cy, content_w, viewport_h);
@@ -531,13 +529,13 @@ impl Renderer {
                         section_y,
                         content_w - line_gutter_w,
                         header_h,
-                        [1.0, 1.0, 1.0, 0.030],
+                        self.ui.ink(0.030),
                     );
                     self.draw_string_scaled_stable(
                         label,
                         x + pad + line_gutter_w + 10.0 * s,
                         api_mock_contract_row_text_y(section_y, header_h, s),
-                        [0.68, 0.70, 0.78, 1.0],
+                        self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                         0.78,
                     );
                     if section_y + header_h >= cy && section_y <= cy + viewport_h {
@@ -549,7 +547,7 @@ impl Renderer {
                             is_active: false,
                             icon_size: Some(16.0 * s),
                             active_square_width: None,
-                            custom_color: Some([0.76, 0.79, 0.88, 1.0]),
+                            custom_color: Some(self.ui.pick(UiRole::ApiMockRoute, [0.76, 0.79, 0.88, 1.0])),
                         };
                         ui_registry.register_icon_button(
                             reset_id, &reset_btn, self, mx, my, s, false,
@@ -560,7 +558,7 @@ impl Renderer {
                         (section_y + header_h).round(),
                         content_w,
                         1.0,
-                        [1.0, 1.0, 1.0, 0.08],
+                        self.ui.ink(0.08),
                     );
                     let content_y = section_y + header_h;
                     if locked_h > 0.0 {
@@ -828,7 +826,7 @@ impl Renderer {
                             section_y.round(),
                             content_w,
                             1.0,
-                            [1.0, 1.0, 1.0, 0.10],
+                            self.ui.ink(0.10),
                         );
                     }
                 }

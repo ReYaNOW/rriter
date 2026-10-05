@@ -1171,6 +1171,8 @@ pub struct App {
     pub settings_database_scroll: crate::scroll::ScrollState,
     pub settings_general_max_scroll: f32,
     pub settings_database_max_scroll: f32,
+    pub settings_appearance_scroll: crate::scroll::ScrollState,
+    pub settings_appearance_max_scroll: f32,
     pub tab_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
     pub editor: Editor,

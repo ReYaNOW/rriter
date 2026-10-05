@@ -112,7 +112,7 @@ impl Renderer {
                     menu_w,
                     output_tab_h,
                     5.0 * s,
-                    [0.18, 0.19, 0.23, 1.0],
+                    self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.19, 0.23, 1.0]),
                 );
                 if show_example_menu {
                     ui_registry.register_blocker(
@@ -129,7 +129,7 @@ impl Renderer {
                     &menu_label,
                     x + pad + 10.0 * s,
                     api_centered_text_y(output_menu_y, output_tab_h, s),
-                    [0.78, 0.80, 0.88, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.78, 0.80, 0.88, 1.0]),
                     0.82,
                 );
                 if show_example_menu {
@@ -141,7 +141,7 @@ impl Renderer {
                         },
                         x + pad + menu_w - 18.0 * s,
                         api_centered_text_y(output_menu_y, output_tab_h, s),
-                        [0.78, 0.80, 0.88, 1.0],
+                        self.ui.pick(UiRole::TextSecondary, [0.78, 0.80, 0.88, 1.0]),
                         0.82,
                     );
                 }
@@ -189,11 +189,11 @@ impl Renderer {
                 0.0,
                 (1.0 * s).max(1.0),
                 if output_schema_focused {
-                    [0.60, 0.35, 0.85, 1.0]
+                    self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                 } else {
-                    [1.0, 1.0, 1.0, 0.12]
+                    self.ui.ink(0.12)
                 },
-                [0.12, 0.13, 0.17, 1.0],
+                self.ui.pick(UiRole::BgInput, [0.12, 0.13, 0.17, 1.0]),
             );
             ui_registry.register_text_input(
                 crate::ui_system::UiId::ApiOutputSchemaBody(route_idx),
@@ -375,7 +375,7 @@ impl Renderer {
                 menu_w + offset * 2.0,
                 anim_h + offset * 2.0,
                 6.0 * s,
-                [0.0, 0.0, 0.0, alpha],
+                self.ui.shadow_alpha(alpha),
             );
         }
         self.push_rounded_rect_border(
@@ -385,8 +385,8 @@ impl Renderer {
             anim_h + 4.0 * s,
             6.0 * s,
             (2.0 * s).max(1.0),
-            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
-            [0.15, 0.16, 0.20, 1.0],
+            self.ui.pick(UiRole::Selection, [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 1.0]),
+            self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0]),
         );
         ui_registry.register_blocker(
             crate::ui_system::UiId::ApiOutputSchemaMenu(route_idx),
@@ -438,11 +438,11 @@ impl Renderer {
                     28.0 * s,
                     4.0 * s,
                     if option_idx == selected_example_idx {
-                        [1.0, 1.0, 1.0, 0.12]
+                        self.ui.ink(0.12)
                     } else if hovered {
-                        [0.20, 0.21, 0.28, 1.0]
+                        self.ui.pick(UiRole::RowHover, [0.20, 0.21, 0.28, 1.0])
                     } else {
-                        [0.15, 0.16, 0.20, 1.0]
+                        self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0])
                     },
                 );
                 ui_registry.register_rect(
@@ -458,7 +458,7 @@ impl Renderer {
                     &label,
                     row_x + 10.0 * s,
                     api_centered_text_y(item_y, 28.0 * s, s),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.80,
                 );
             }
@@ -471,7 +471,7 @@ impl Renderer {
                     track_y,
                     track_w,
                     track_h,
-                    [0.52, 0.54, 0.60, 0.36],
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.52, 0.54, 0.60, 0.36]),
                 );
                 let id = crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx);
                 let lane = (
@@ -523,7 +523,7 @@ impl Renderer {
                     &err.message,
                     x + pad,
                     cy + 18.0 * s,
-                    [1.0, 0.42, 0.42, 1.0],
+                    self.ui.pick(UiRole::Error, [1.0, 0.42, 0.42, 1.0]),
                     0.88,
                 );
                 cy += API_ROUTE_RESPONSE_ERROR_ROW_ADVANCE * s;
@@ -537,14 +537,14 @@ impl Renderer {
                     &status_text,
                     x + pad,
                     cy + 18.0 * s,
-                    api_status_color(response.status),
+                    api_status_color(&self.ui, response.status),
                     0.92,
                 );
                 self.draw_string_scaled_stable(
                     &response.timing_text,
                     x + pad + 62.0 * s,
                     cy + 18.0 * s,
-                    [0.68, 0.70, 0.78, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                     0.88,
                 );
                 cy += API_ROUTE_RESPONSE_STATUS_ROW_ADVANCE * s;
@@ -609,7 +609,7 @@ impl Renderer {
                             &scheme.name,
                             x + pad,
                             cy + 20.0 * s,
-                            [0.68, 0.70, 0.78, 1.0],
+                            self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                             0.78,
                         );
                         let mut bx = x + pad + (content_w * 0.34).max(130.0 * s);
@@ -682,11 +682,11 @@ impl Renderer {
                     0.0,
                     (1.0 * s).max(1.0),
                     if response_focused {
-                        [0.60, 0.35, 0.85, 1.0]
+                        self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                     } else {
-                        [1.0, 1.0, 1.0, 0.12]
+                        self.ui.ink(0.12)
                     },
-                    [0.12, 0.13, 0.17, 1.0],
+                    self.ui.pick(UiRole::BgInput, [0.12, 0.13, 0.17, 1.0]),
                 );
                 ui_registry.register_text_input(
                     crate::ui_system::UiId::ApiResponseBody(route_idx),
@@ -785,7 +785,7 @@ impl Renderer {
                         "обрезано",
                         x + pad + content_w - 86.0 * s,
                         cy + 18.0 * s,
-                        [1.0, 0.76, 0.32, 1.0],
+                        self.ui.pick(UiRole::HttpPut, [1.0, 0.76, 0.32, 1.0]),
                         0.78,
                     );
                 }
@@ -795,7 +795,7 @@ impl Renderer {
                 "Запрос выполняется",
                 x + pad,
                 cy + 18.0 * s,
-                [0.68, 0.70, 0.78, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                 0.88,
             );
         }

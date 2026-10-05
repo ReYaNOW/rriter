@@ -748,6 +748,9 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
     if let Some(value) = value.get("ui_theme").and_then(serde_json::Value::as_str) {
         config.theme.ui = crate::theme::ThemeId::from_key(value);
     }
+    if config.theme.linked {
+        config.theme.ui = config.theme.editor;
+    }
     if let Some(value) = value
         .get("ctrl_wheel_multiplier")
         .and_then(serde_json::Value::as_f64)
@@ -1243,8 +1246,16 @@ mod tests {
         assert_eq!(parsed.theme.editor, crate::theme::ThemeId::OneDark);
         assert_eq!(parsed.theme.ui, crate::theme::ThemeId::Sepia);
 
+        let linked = parse_config_content(
+            r#"{"theme_linked":true,"editor_theme":"one_dark","ui_theme":"one_light"}"#,
+            Config::default(),
+        );
+        assert!(linked.theme.linked);
+        assert_eq!(linked.theme.editor, crate::theme::ThemeId::OneDark);
+        assert_eq!(linked.theme.ui, crate::theme::ThemeId::OneDark);
+
         let invalid = parse_config_content(
-            r#"{"window_width": 1234, "theme_linked": "yes", "editor_theme": "neon", "ui_theme": 5}"#,
+            r#"{"window_width": 1234, "theme_linked": "garbage", "editor_theme": "unknown", "ui_theme": 42}"#,
             Config::default(),
         );
         assert!(invalid.theme.linked);

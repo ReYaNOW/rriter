@@ -346,6 +346,8 @@ pub fn project_search_scrollbar(
             radius: Some(3.0),
             track_color: None,
             thumb_color: [0.48, 0.48, 0.56, 0.55],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: ScrollbarAxis::Vertical,
         lane: (

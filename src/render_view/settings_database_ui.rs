@@ -1,5 +1,6 @@
 use crate::app::database::{DatabaseConnectionColor, DatabaseSettings};
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 use crate::widgets::ButtonView;
 use glow::HasContext;
@@ -182,7 +183,7 @@ impl Renderer {
             "Все ограничения применяются к PostgreSQL и SQL-консолям без перезапуска RRiter.",
             content_x,
             content_y,
-            [0.55, 0.57, 0.65, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.65, 1.0]),
             0.82,
         );
         let controls = database_settings_control_layout(content_x, content_w, s);
@@ -195,7 +196,7 @@ impl Renderer {
                 content_x,
                 Self::tree_row_text_y(row_y, vertical.control_h, s),
                 controls.label_w,
-                [0.82, 0.82, 0.86, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.82, 0.82, 0.86, 1.0]),
                 0.86,
                 &mut label_scratch,
             );
@@ -248,14 +249,14 @@ impl Renderer {
                 value_box_w,
                 vertical.control_h,
                 5.0 * s,
-                [0.20, 0.21, 0.26, 1.0],
+                self.ui.pick(UiRole::BgInput, [0.20, 0.21, 0.26, 1.0]),
             );
             let value_w = self.measure_ui_width(&row.value, 0.78);
             self.draw_string_scaled_pixel_snapped(
                 &row.value,
                 (value_x + (value_box_w - value_w) * 0.5).round(),
                 Self::tree_row_text_y(row_y, vertical.control_h, s),
-                [0.92, 0.92, 0.95, 1.0],
+                self.ui.pick(UiRole::TextPrimary, [0.92, 0.92, 0.95, 1.0]),
                 0.78,
             );
 

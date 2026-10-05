@@ -26,12 +26,12 @@ impl Renderer {
             graph_y,
             panel_w,
             graph_h + overdraw_h,
-            [
-                self.theme.bg[0] + 0.018,
-                self.theme.bg[1] + 0.020,
-                self.theme.bg[2] + 0.026,
+            self.ui.pick(UiRole::BgPanel, [
+                self.ui_theme.bg[0] + 0.018,
+                self.ui_theme.bg[1] + 0.020,
+                self.ui_theme.bg[2] + 0.026,
                 1.0,
-            ],
+            ]),
         );
 
         let header_h = 34.0 * s;
@@ -40,12 +40,12 @@ impl Renderer {
             graph_y,
             panel_w,
             header_h,
-            [
-                self.theme.bg[0] + 0.005,
-                self.theme.bg[1] + 0.006,
-                self.theme.bg[2] + 0.010,
+            self.ui.pick(UiRole::BgPanelAlt, [
+                self.ui_theme.bg[0] + 0.005,
+                self.ui_theme.bg[1] + 0.006,
+                self.ui_theme.bg[2] + 0.010,
                 1.0,
-            ],
+            ]),
         );
         let tab_clip_x = panel_x + pad;
         let tab_clip_w = (panel_w - pad * 2.0).max(0.0);
@@ -98,9 +98,9 @@ impl Renderer {
                         tab_h,
                         4.0 * s,
                         if active {
-                            [0.60, 0.35, 0.85, 0.28]
+                            self.ui.pick(UiRole::RowActive, [0.60, 0.35, 0.85, 0.28])
                         } else {
-                            [1.0, 1.0, 1.0, 0.075]
+                            self.ui.ink(0.075)
                         },
                     );
                 }
@@ -109,9 +109,9 @@ impl Renderer {
                     tab_x + 9.0 * s,
                     tab_y + tab_h / 2.0 + 4.5 * s,
                     if active {
-                        self.theme.fg
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                     } else {
-                        [0.72, 0.76, 0.88, 0.72]
+                        self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 0.72])
                     },
                     0.76,
                 );
@@ -144,7 +144,7 @@ impl Renderer {
                 hint,
                 panel_x + (panel_w - tw) / 2.0,
                 rows_y + 28.0 * s,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.48],
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.48]),
                 0.82,
             );
             return;
@@ -195,7 +195,7 @@ impl Renderer {
                     panel_x + panel_w,
                     my,
                 ));
-                self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.055]);
+                self.push_rect(panel_x, row_y, panel_w, row_h, self.ui.ink(0.055));
             }
 
             let circle_y = row_y + row_h / 2.0;
@@ -225,8 +225,11 @@ impl Renderer {
                     if lane_x > graph_clip_right && target_x > graph_clip_right {
                         continue;
                     }
-                    let color =
-                        git_graph_lane_color(usize::from(lane.color_idx), 0.62, self.theme.sel);
+                    let color = git_graph_lane_color(
+                        usize::from(lane.color_idx),
+                        0.62,
+                        self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+                    );
                     match lane.kind {
                         crate::app::git_panel::GitGraphLaneKind::Vertical => {
                             let mut top = row_y;
@@ -281,7 +284,11 @@ impl Renderer {
                     }
                 }
             }
-            let circle_color = git_graph_lane_color(commit.color_idx, 1.0, self.theme.sel);
+            let circle_color = git_graph_lane_color(
+                commit.color_idx,
+                1.0,
+                            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            );
             if commit.is_head {
                 self.push_rounded_rect(
                     commit_x - 6.0 * s,
@@ -297,12 +304,12 @@ impl Renderer {
                     6.0 * s,
                     6.0 * s,
                     3.0 * s,
-                    [
-                        self.theme.bg[0] + 0.018,
-                        self.theme.bg[1] + 0.020,
-                        self.theme.bg[2] + 0.026,
+                    self.ui.pick(UiRole::BgPanel, [
+                        self.ui_theme.bg[0] + 0.018,
+                        self.ui_theme.bg[1] + 0.020,
+                        self.ui_theme.bg[2] + 0.026,
                         1.0,
-                    ],
+                    ]),
                 );
             } else {
                 self.push_rounded_rect(
@@ -368,7 +375,7 @@ impl Renderer {
                 text_x,
                 row_text_y,
                 summary_max_w,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.82,
                 scratch,
             );
@@ -384,8 +391,8 @@ impl Renderer {
                         chip_w,
                         chip_h,
                         4.0 * s,
-                        [0.28, 0.24, 0.40, 1.0],
-                        [0.86, 0.90, 1.0, 1.0],
+                        self.ui.pick(UiRole::AccentSoft, [0.28, 0.24, 0.40, 1.0]),
+                        self.ui.pick(UiRole::TextPrimary, [0.86, 0.90, 1.0, 1.0]),
                         chip_scale,
                         chip_pad_x,
                         false,
@@ -401,8 +408,8 @@ impl Renderer {
                         chip_w,
                         chip_h,
                         4.0 * s,
-                        [0.24, 0.32, 0.42, 1.0],
-                        [0.86, 0.90, 1.0, 1.0],
+                        self.ui.pick(UiRole::BgPanelAlt, [0.24, 0.32, 0.42, 1.0]),
+                        self.ui.pick(UiRole::TextPrimary, [0.86, 0.90, 1.0, 1.0]),
                         chip_scale,
                         chip_pad_x,
                         false,
@@ -415,7 +422,7 @@ impl Renderer {
                 author_x,
                 row_text_y,
                 author_draw_w,
-                [0.72, 0.76, 0.88, 0.72],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.88, 0.72]),
                 0.78,
                 scratch,
             );
@@ -480,19 +487,32 @@ mod git_graph_scroll_regression_tests {
 
 
 fn git_log_semantic_color(
-    theme: &crate::renderer::Theme,
+    ui: &crate::theme::UiPalette,
+    ui_theme: &crate::renderer::Theme,
     kind: crate::app::git_panel::GitLogKind,
 ) -> [f32; 4] {
     match kind {
-        crate::app::git_panel::GitLogKind::Header => [0.72, 0.76, 0.90, 0.92],
-        crate::app::git_panel::GitLogKind::Stdout => {
-            [theme.fg[0], theme.fg[1], theme.fg[2], 0.86]
+        crate::app::git_panel::GitLogKind::Header => {
+            ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.90, 0.92])
         }
-        crate::app::git_panel::GitLogKind::Stderr => [0.96, 0.72, 0.40, 0.95],
-        crate::app::git_panel::GitLogKind::Hook => [0.60, 0.72, 1.00, 0.96],
-        crate::app::git_panel::GitLogKind::Success => [0.42, 0.84, 0.50, 0.96],
-        crate::app::git_panel::GitLogKind::Failure => [0.96, 0.42, 0.46, 0.98],
-        crate::app::git_panel::GitLogKind::Info => [0.60, 0.62, 0.70, 0.88],
+        crate::app::git_panel::GitLogKind::Stdout => {
+            ui.pick(UiRole::TextSecondary, [ui_theme.fg[0], ui_theme.fg[1], ui_theme.fg[2], 0.86])
+        }
+        crate::app::git_panel::GitLogKind::Stderr => {
+            ui.pick(UiRole::Warning, [0.96, 0.72, 0.40, 0.95])
+        }
+        crate::app::git_panel::GitLogKind::Hook => {
+            ui.pick(UiRole::Info, [0.60, 0.72, 1.00, 0.96])
+        }
+        crate::app::git_panel::GitLogKind::Success => {
+            ui.pick(UiRole::Success, [0.42, 0.84, 0.50, 0.96])
+        }
+        crate::app::git_panel::GitLogKind::Failure => {
+            ui.pick(UiRole::Error, [0.96, 0.42, 0.46, 0.98])
+        }
+        crate::app::git_panel::GitLogKind::Info => {
+            ui.pick(UiRole::TextMuted, [0.60, 0.62, 0.70, 0.88])
+        }
     }
 }
 
@@ -814,7 +834,7 @@ impl Renderer {
         baseline: f32,
         text_scale: f32,
     ) {
-        let semantic = git_log_semantic_color(&self.theme, line.line().kind());
+        let semantic = git_log_semantic_color(&self.ui, &self.ui_theme, line.line().kind());
         let mut draw_x = x;
         visit_git_log_display_pieces(line, |piece_start, piece, ansi_fg| {
             let piece_end = piece_start.saturating_add(piece.len());
@@ -824,7 +844,7 @@ impl Renderer {
                 if let Some(slice) = piece.get(local_start..local_end) {
                     let color = ansi_fg
                         .and_then(|index| {
-                            self.theme.terminal.get(index as usize).copied()
+                            self.ui_theme.terminal.get(index as usize).copied()
                         })
                         .unwrap_or(semantic);
                     self.draw_string_scaled(slice, draw_x, baseline, color, text_scale);
@@ -929,12 +949,12 @@ impl Renderer {
             logs_y,
             panel_w,
             logs_h + self.left_panel_overdraw_h,
-            [
-                self.theme.bg[0] + 0.018,
-                self.theme.bg[1] + 0.020,
-                self.theme.bg[2] + 0.026,
+            self.ui.pick(UiRole::BgPanel, [
+                self.ui_theme.bg[0] + 0.018,
+                self.ui_theme.bg[1] + 0.020,
+                self.ui_theme.bg[2] + 0.026,
                 1.0,
-            ],
+            ]),
         );
 
         let toolbar_h = (crate::app::git_panel::GIT_LOG_TOOLBAR_H * s)
@@ -945,18 +965,18 @@ impl Renderer {
             logs_y,
             panel_w,
             toolbar_h,
-            [
-                self.theme.bg[0] + 0.005,
-                self.theme.bg[1] + 0.006,
-                self.theme.bg[2] + 0.010,
+            self.ui.pick(UiRole::BgPanelAlt, [
+                self.ui_theme.bg[0] + 0.005,
+                self.ui_theme.bg[1] + 0.006,
+                self.ui_theme.bg[2] + 0.010,
                 1.0,
-            ],
+            ]),
         );
         self.draw_string_scaled(
             "VCS Console",
             panel_x + pad,
             logs_y + toolbar_h / 2.0 + 5.0 * s,
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82],
+            self.ui.pick(UiRole::TextSecondary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.82]),
             0.80,
         );
 
@@ -980,14 +1000,14 @@ impl Renderer {
                 clear_w,
                 clear_h,
                 4.0 * s,
-                [1.0, 1.0, 1.0, 0.07],
+                self.ui.ink(0.07),
             );
         }
         self.draw_string_scaled(
             "Очистить",
             clear_x + 9.0 * s,
             clear_y + clear_h / 2.0 + 4.5 * s,
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+            self.ui.pick(UiRole::TextSecondary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.78]),
             0.76,
         );
 
@@ -1098,7 +1118,7 @@ impl Renderer {
                             row_top + (2.0 * s).round(),
                             selected_w,
                             (row_h - (4.0 * s).round()).max(1.0),
-                            self.theme.sel,
+                            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
                         );
                     }
                 }
@@ -1118,7 +1138,7 @@ impl Renderer {
                 message,
                 panel_x + ((panel_w - width) / 2.0).max(pad),
                 rows_y + 30.0 * s,
-                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.44],
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.44]),
                 0.80,
             );
         }

@@ -1,3 +1,5 @@
+use crate::theme::UiRole;
+
 pub(crate) const KEYMAP_SCROLLBAR_MIN_THUMB: f32 = 36.0;
 
 fn clamped_settings_tab(active_tab: usize, tab_count: usize) -> usize {
@@ -256,6 +258,8 @@ pub(crate) fn settings_scrollbar(
             radius: Some(3.0),
             track_color: None,
             thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: ScrollbarAxis::Vertical,
         lane,
@@ -389,18 +393,18 @@ impl Renderer {
                     kbd_w + 2.0,
                     kbd_h + 2.0,
                     4.0 * s,
-                    [0.306, 0.3176, 0.341, 1.0],
+                    self.ui.pick(UiRole::Border, [0.306, 0.3176, 0.341, 1.0]),
                 );
-                self.push_rounded_rect(x, kbd_y, kbd_w, kbd_h, 4.0 * s, [0.224, 0.231, 0.251, 1.0]);
+                self.push_rounded_rect(x, kbd_y, kbd_w, kbd_h, 4.0 * s, self.ui.pick(UiRole::BgChip, [0.224, 0.231, 0.251, 1.0]));
                 self.draw_string_scaled(
                     shortcut,
                     x + 10.0 * s,
                     y - 1.0 * s,
-                    [0.875, 0.882, 0.902, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.875, 0.882, 0.902, 1.0]),
                     0.95,
                 );
             }
-            let desc_color = [0.663, 0.690, 0.729, 1.0];
+            let desc_color = self.ui.pick(UiRole::TextMuted, [0.663, 0.690, 0.729, 1.0]);
             if stacked {
                 let desc_origin =
                     origin.map(|(x, y)| (x, y + (SETTINGS_FAQ_STACKED_DESC_TOP * s).round()));
@@ -423,7 +427,7 @@ impl Renderer {
         if trimmed.is_empty() {
             return SETTINGS_FAQ_BLANK_STEP;
         }
-        let rows = self.settings_faq_wrapped_text(trimmed, text_w, origin, [0.875, 0.882, 0.902, 1.0]);
+        let rows = self.settings_faq_wrapped_text(trimmed, text_w, origin, self.ui.pick(UiRole::TextSecondary, [0.875, 0.882, 0.902, 1.0]));
         SETTINGS_FAQ_TEXT_STEP + rows.saturating_sub(1) as f32 * SETTINGS_FAQ_WRAP_STEP
     }
 
@@ -431,13 +435,15 @@ impl Renderer {
         &mut self,
         anim_progress: f32,
         active_tab: usize,
-        editor_theme: crate::theme::ThemeId,
+        theme_selection: crate::theme::ThemeSelection,
         faq_editor: &Editor,
         scroll_y: f32,
         general_scroll_y: f32,
         database_scroll_y: f32,
+        appearance_scroll_y: f32,
         general_max_scroll: &mut f32,
         database_max_scroll: &mut f32,
+        appearance_max_scroll: &mut f32,
         ide_workspaces: &[std::path::PathBuf],
         ide_ignore_patterns: &[String],
         settings_ignore_editor: &Editor,
@@ -472,7 +478,7 @@ impl Renderer {
             0.0,
             self.width,
             self.height,
-            [0.0, 0.0, 0.0, overlay_alpha],
+            self.ui.shadow_alpha(overlay_alpha),
         );
 
         let layout = animated_settings_modal_layout(
@@ -487,8 +493,8 @@ impl Renderer {
         let y = fitted.y;
         let x = fitted.x;
 
-        let top_color = [0.26, 0.20, 0.36, 1.0];
-        let bottom_color = [0.12, 0.13, 0.22, 1.0];
+        let top_color = self.ui.pick(UiRole::BgDialog, [0.26, 0.20, 0.36, 1.0]);
+        let bottom_color = self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.22, 1.0]);
 
         // 1. Внешнее окно с градиентом
         self.push_rounded_rect(
@@ -497,7 +503,7 @@ impl Renderer {
             w + 2.0,
             h + 2.0,
             10.0 * s,
-            [0.224, 0.231, 0.251, 1.0],
+            self.ui.pick(UiRole::Border, [0.224, 0.231, 0.251, 1.0]),
         );
         self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
 
@@ -513,14 +519,14 @@ impl Renderer {
             iw + 2.0,
             ih + 2.0,
             8.0 * s,
-            [0.224, 0.231, 0.251, 0.8],
+            self.ui.pick(UiRole::Border, [0.224, 0.231, 0.251, 0.8]),
         );
-        self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, [0.15, 0.16, 0.20, 1.0]);
+        self.push_rounded_rect(ix, iy, iw, ih, 8.0 * s, self.ui.pick(UiRole::BgPanel, [0.15, 0.16, 0.20, 1.0]));
 
         self.flush();
 
         let sidebar_w = layout.sidebar_w;
-        self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
+        self.push_rect(ix + sidebar_w, iy, 1.0, ih, self.ui.ink(0.05));
 
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных", "Горячие клавиши"];
         let active_tab = clamped_settings_tab(active_tab, tabs.len());
@@ -555,7 +561,7 @@ impl Renderer {
                     (sidebar_w - 20.0 * s).max(0.0),
                     tab_rect_h,
                     6.0 * s,
-                    [1.0, 1.0, 1.0, 0.1],
+                    self.ui.pick(UiRole::RowActive, [1.0, 1.0, 1.0, 0.1]),
                 );
             } else if is_hovered {
                 self.push_rounded_rect(
@@ -564,14 +570,14 @@ impl Renderer {
                     (sidebar_w - 20.0 * s).max(0.0),
                     tab_rect_h,
                     6.0 * s,
-                    [1.0, 1.0, 1.0, 0.05],
+                    self.ui.pick(UiRole::RowHover, [1.0, 1.0, 1.0, 0.05]),
                 );
             }
 
             let color = if i == active_tab {
-                [1.0, 1.0, 1.0, 1.0]
+                self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0])
             } else {
-                [0.7, 0.7, 0.7, 1.0]
+                self.ui.pick(UiRole::TextSecondary, [0.7, 0.7, 0.7, 1.0])
             };
             self.draw_tree_label_clipped(
                 title,
@@ -600,7 +606,7 @@ impl Renderer {
             pill_w + 2.0,
             pill_h + 2.0,
             6.0 * s,
-            [0.35, 0.26, 0.48, 1.0],
+            self.ui.pick(UiRole::AccentHover, [0.35, 0.26, 0.48, 1.0]),
         );
         self.push_rounded_rect(
             content_title_x,
@@ -608,13 +614,13 @@ impl Renderer {
             pill_w,
             pill_h,
             6.0 * s,
-            [0.26, 0.20, 0.36, 1.0],
+            self.ui.pick(UiRole::Accent, [0.26, 0.20, 0.36, 1.0]),
         );
         self.draw_string_scaled(
             tab_title,
             content_title_x + 14.0 * s,
             content_y,
-            [1.0, 1.0, 1.0, 1.0],
+            self.ui.pick(UiRole::TextOnAccent, [1.0, 1.0, 1.0, 1.0]),
             1.1,
         );
         content_y = (content_y + if active_tab == 4 { 30.0 * s } else { 46.0 * s }).round();
@@ -653,7 +659,7 @@ impl Renderer {
                 "Рабочие области",
                 content_x,
                 content_y,
-                [0.8, 0.8, 0.8, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.8, 1.0]),
                 1.0,
             );
             content_y += SETTINGS_IDE_SECTION_TITLE_STEP * s;
@@ -669,7 +675,7 @@ impl Renderer {
                     item_w + 2.0,
                     item_h + 2.0,
                     6.0 * s,
-                    [0.306, 0.3176, 0.341, 1.0],
+                    self.ui.pick(UiRole::Border, [0.306, 0.3176, 0.341, 1.0]),
                 );
                 self.push_rounded_rect(
                     content_x,
@@ -677,7 +683,7 @@ impl Renderer {
                     item_w,
                     item_h,
                     6.0 * s,
-                    [0.224, 0.231, 0.251, 1.0],
+                    self.ui.pick(UiRole::BgPanelAlt, [0.224, 0.231, 0.251, 1.0]),
                 );
 
                 let mut path_scratch = String::new();
@@ -686,7 +692,7 @@ impl Renderer {
                     (content_x + 10.0 * s).round(),
                     (content_y + item_h * 0.70).round(),
                     (item_w - 54.0 * s).max(1.0),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.85,
                     &mut path_scratch,
                 );
@@ -751,7 +757,7 @@ impl Renderer {
             btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             content_y += SETTINGS_IDE_ADD_WORKSPACE_STEP * s;
             // ── Разделитель ───────────────────────────────────────────────
-            self.push_rect(content_x, content_y, content_available_w, 1.0, [1.0, 1.0, 1.0, 0.07]);
+            self.push_rect(content_x, content_y, content_available_w, 1.0, self.ui.ink(0.07));
             content_y += SETTINGS_IDE_DIVIDER_STEP * s;
 
             // ── Заголовок секции игноров ──────────────────────────────────
@@ -759,7 +765,7 @@ impl Renderer {
                 "Игнорируемые файлы и папки",
                 content_x,
                 content_y.round(),
-                [0.8, 0.8, 0.8, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.8, 1.0]),
                 1.0,
             );
             content_y += SETTINGS_IDE_IGNORE_TITLE_STEP * s;
@@ -769,7 +775,7 @@ impl Renderer {
                 "Эти файлы и папки не будут показаны в дереве проекта.",
                 content_x,
                 content_y.round(),
-                [0.45, 0.47, 0.55, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.45, 0.47, 0.55, 1.0]),
                 0.85,
             );
             content_y += SETTINGS_IDE_IGNORE_HINT_STEP * s;
@@ -777,7 +783,7 @@ impl Renderer {
                 "Примеры: *.log  temp/  .DS_Store  *.min.js  build  dist",
                 content_x,
                 content_y.round(),
-                [0.35, 0.37, 0.44, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.35, 0.37, 0.44, 1.0]),
                 0.82,
             );
             content_y += SETTINGS_IDE_IGNORE_EXAMPLES_STEP * s;
@@ -833,7 +839,7 @@ impl Renderer {
                     (content_x + 8.0 * s).round(),
                     (content_y + input_h * 0.70).round(),
                     (input_w - 16.0 * s).max(1.0),
-                    [0.30, 0.32, 0.40, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.30, 0.32, 0.40, 1.0]),
                     text_scale_input,
                     &mut placeholder_scratch,
                 );
@@ -907,14 +913,14 @@ impl Renderer {
                 );
 
                 let bg = if chip_hov {
-                    [0.30, 0.18, 0.44, 1.0]
+                    self.ui.pick(UiRole::AccentHover, [0.30, 0.18, 0.44, 1.0])
                 } else {
-                    [0.20, 0.13, 0.30, 1.0]
+                    self.ui.pick(UiRole::Accent, [0.20, 0.13, 0.30, 1.0])
                 };
                 let border = if chip_hov {
-                    [0.58, 0.34, 0.82, 1.0]
+                    self.ui.pick(UiRole::AccentHover, [0.58, 0.34, 0.82, 1.0])
                 } else {
-                    [0.35, 0.22, 0.52, 1.0]
+                    self.ui.pick(UiRole::Accent, [0.35, 0.22, 0.52, 1.0])
                 };
 
                 self.push_rounded_rect(
@@ -931,14 +937,14 @@ impl Renderer {
                     pattern,
                     chip_x + pad_x,
                     (content_y + chip_h * 0.70).round(),
-                    [0.82, 0.68, 1.0, 1.0],
+                    self.ui.pick(UiRole::TextOnAccent, [0.82, 0.68, 1.0, 1.0]),
                     0.88,
                 );
 
                 let cross_color = if close_hov {
-                    [1.0, 0.38, 0.58, 1.0]
+                    self.ui.pick(UiRole::Danger, [1.0, 0.38, 0.58, 1.0])
                 } else {
-                    [0.50, 0.40, 0.65, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.50, 0.40, 0.65, 1.0])
                 };
                 self.draw_string_scaled(
                     "×",
@@ -956,7 +962,7 @@ impl Renderer {
                     "Нет пользовательских правил",
                     content_x,
                     (content_y + chip_h * 0.70).round(),
-                    [0.28, 0.30, 0.36, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.28, 0.30, 0.36, 1.0]),
                     0.88,
                 );
             }
@@ -982,7 +988,8 @@ impl Renderer {
                 let sb_x = (ix + iw - 14.0 * s).round();
                 let bar = settings_scrollbar(
                     (sb_x - 5.0 * s, iy + SETTINGS_IDE_SCROLL_TOP * s, 16.0 * s, track_h),
-                    track_h, max_scroll, ide_scroll_y, 6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    track_h, max_scroll, ide_scroll_y, 6.0, 40.0,
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                     ui: &mut *ui_registry,
@@ -1015,7 +1022,7 @@ impl Renderer {
                 "Размер шрифта: 14px",
                 content_x,
                 content_y,
-                [0.8, 0.8, 0.8, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.8, 1.0]),
                 1.0,
             );
             content_y += 30.0 * s;
@@ -1023,7 +1030,7 @@ impl Renderer {
                 "Межстрочный интервал: 1.5",
                 content_x,
                 content_y,
-                [0.8, 0.8, 0.8, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.8, 1.0]),
                 1.0,
             );
             content_y += 42.0 * s;
@@ -1036,14 +1043,33 @@ impl Renderer {
             );
         } else if active_tab == 3 {
             self.begin_settings_content_clip(ui_registry, settings_content_clip);
-            super::settings_appearance_ui::draw(
+            let content_bottom = super::settings_appearance_ui::draw(
                 self,
                 content_x,
                 content_y,
                 content_available_w,
-                editor_theme,
+                appearance_scroll_y,
+                theme_selection,
                 ui_registry,
             );
+            *appearance_max_scroll =
+                (content_bottom + (12.0 * s).round() - (iy + ih)).max(0.0);
+            if *appearance_max_scroll > 0.0 {
+                let sb_x = (ix + iw - 14.0 * s).round();
+                let bar = settings_scrollbar(
+                    (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
+                    settings_content_clip.h, *appearance_max_scroll, appearance_scroll_y,
+                    6.0, 40.0,
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
+                );
+                self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: &mut *ui_registry,
+                    id: crate::ui_system::UiId::SettingsAppearanceScrollY,
+                    mx: self.last_mouse_x,
+                    my: self.last_mouse_y,
+                    blocker: false,
+                }));
+            }
             self.end_settings_content_clip(ui_registry);
         } else if active_tab == 4 {
             self.flush();
@@ -1093,7 +1119,7 @@ impl Renderer {
                             pill_w + 2.0,
                             pill_h + 2.0,
                             5.0 * s,
-                            [0.35, 0.26, 0.48, 1.0],
+                            self.ui.pick(UiRole::AccentHover, [0.35, 0.26, 0.48, 1.0]),
                         );
                         self.push_rounded_rect(
                             main_header_x,
@@ -1101,13 +1127,13 @@ impl Renderer {
                             pill_w,
                             pill_h,
                             5.0 * s,
-                            [0.26, 0.20, 0.36, 1.0],
+                            self.ui.pick(UiRole::Accent, [0.26, 0.20, 0.36, 1.0]),
                         );
                         self.draw_string_scaled(
                             header_text,
                             main_header_x + 12.0 * s,
                             text_y,
-                            [1.0, 1.0, 1.0, 1.0],
+                            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
                             1.05,
                         );
                         main_header_drawn = true;
@@ -1119,10 +1145,10 @@ impl Renderer {
                             header_text,
                             start_x,
                             text_y,
-                            [0.875, 0.882, 0.902, 1.0],
+                            self.ui.pick(UiRole::TextSecondary, [0.875, 0.882, 0.902, 1.0]),
                             1.05,
                         );
-                        self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.10]);
+                        self.push_rect(sep_x, sep_y, sep_w, 1.0, self.ui.ink(0.10));
                     }
 
                     units += SETTINGS_FAQ_HEADER_STEP;
@@ -1144,7 +1170,8 @@ impl Renderer {
                 let scroll_x = (start_x + cw + 5.0 * s).round();
                 let bar = settings_scrollbar(
                     (scroll_x - 5.0 * s, text_area_y, 16.0 * s, track_h),
-                    track_h, max_scroll, scroll_y, 6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    track_h, max_scroll, scroll_y, 6.0, 40.0,
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                     ui: &mut *ui_registry,
@@ -1177,7 +1204,8 @@ impl Renderer {
                 let bar = settings_scrollbar(
                     (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
                     settings_content_clip.h, *database_max_scroll, database_scroll_y,
-                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    6.0, 40.0,
+                    self.ui.pick(UiRole::ScrollbarThumb, [0.7, 0.33, 0.54, 1.0]),
                 );
                 self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                     ui: &mut *ui_registry,
@@ -1235,14 +1263,14 @@ impl Renderer {
             self.last_mouse_x,
             self.last_mouse_y,
         );
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.70]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.shadow_alpha(0.70));
         self.push_rounded_rect(
             modal_x - 1.0,
             modal_y - 1.0,
             modal_w + 2.0,
             modal_h + 2.0,
             9.0 * s,
-            [0.38, 0.30, 0.52, 1.0],
+            self.ui.pick(UiRole::Border, [0.38, 0.30, 0.52, 1.0]),
         );
         self.push_rounded_rect(
             modal_x,
@@ -1250,7 +1278,7 @@ impl Renderer {
             modal_w,
             modal_h,
             9.0 * s,
-            [0.095, 0.102, 0.14, 1.0],
+            self.ui.pick(UiRole::BgDialog, [0.095, 0.102, 0.14, 1.0]),
         );
 
         let target = tool_installer
@@ -1262,14 +1290,14 @@ impl Renderer {
             &heading,
             (modal_x + 18.0 * s).round(),
             (modal_y + 28.0 * s).round(),
-            [0.92, 0.92, 0.96, 1.0],
+            self.ui.pick(UiRole::TextPrimary, [0.92, 0.92, 0.96, 1.0]),
             0.95,
         );
         self.draw_string_scaled_stable(
             &compact_settings_text(tool_installer.detail(), 86),
             (modal_x + 18.0 * s).round(),
             (modal_y + 50.0 * s).round(),
-            [0.60, 0.62, 0.72, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.60, 0.62, 0.72, 1.0]),
             0.72,
         );
 
@@ -1283,7 +1311,7 @@ impl Renderer {
             log_w + 2.0,
             log_h + 2.0,
             5.0 * s,
-            [0.22, 0.23, 0.30, 1.0],
+            self.ui.pick(UiRole::Border, [0.22, 0.23, 0.30, 1.0]),
         );
         self.push_rounded_rect(
             log_x,
@@ -1291,7 +1319,7 @@ impl Renderer {
             log_w,
             log_h,
             5.0 * s,
-            [0.055, 0.060, 0.083, 1.0],
+            self.ui.pick(UiRole::BgCode, [0.055, 0.060, 0.083, 1.0]),
         );
         ui_registry.register_blocker(
             crate::ui_system::UiId::SettingsToolInstallLogBody,
@@ -1324,16 +1352,16 @@ impl Renderer {
         for line in tool_installer.logs().iter().skip(first).take(visible) {
             let (prefix, color) = match line.kind {
                 crate::app::tool_installer::ToolInstallLogKind::Info => {
-                    ("[info] ", [0.62, 0.66, 0.76, 1.0])
+                    ("[info] ", self.ui.pick(UiRole::Info, [0.62, 0.66, 0.76, 1.0]))
                 }
                 crate::app::tool_installer::ToolInstallLogKind::Output => {
-                    ("[out] ", [0.80, 0.81, 0.84, 1.0])
+                    ("[out] ", self.ui.pick(UiRole::TextSecondary, [0.80, 0.81, 0.84, 1.0]))
                 }
                 crate::app::tool_installer::ToolInstallLogKind::Error => {
-                    ("[error] ", [0.96, 0.52, 0.52, 1.0])
+                    ("[error] ", self.ui.pick(UiRole::Error, [0.96, 0.52, 0.52, 1.0]))
                 }
                 crate::app::tool_installer::ToolInstallLogKind::Success => {
-                    ("[ok] ", [0.48, 0.86, 0.60, 1.0])
+                    ("[ok] ", self.ui.pick(UiRole::Success, [0.48, 0.86, 0.60, 1.0]))
                 }
             };
             let text = format!("{prefix}{}", line.text);
@@ -1357,7 +1385,8 @@ impl Renderer {
         if content_h > log_h {
             let bar = settings_scrollbar(
                 (log_x + log_w - 16.0 * s, log_y + 6.0 * s, 16.0 * s, log_h - 12.0 * s),
-                log_h, content_h - log_h, scroll, 4.0, 28.0, [0.56, 0.38, 0.70, 0.95],
+                log_h, content_h - log_h, scroll, 4.0, 28.0,
+                self.ui.pick(UiRole::ScrollbarThumb, [0.56, 0.38, 0.70, 0.95]),
             );
             self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
                 ui: &mut *ui_registry,

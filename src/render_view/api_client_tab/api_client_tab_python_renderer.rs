@@ -43,14 +43,14 @@ impl Renderer {
             0.0,
         );
         let sep_y = y + signature.split('\n').count() as f32 * line_h + 2.0 * s;
-        self.push_rect(x, sep_y.round(), w, 1.0, [1.0, 1.0, 1.0, 0.08]);
+        self.push_rect(x, sep_y.round(), w, 1.0, self.ui.ink(0.08));
     }
 
     fn draw_api_line_number_gutter(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
         let bg = [
-            (self.theme.bg[0] + 0.018).min(1.0),
-            (self.theme.bg[1] + 0.018).min(1.0),
-            (self.theme.bg[2] + 0.022).min(1.0),
+            (self.ui_theme.bg[0] + 0.018).min(1.0),
+            (self.ui_theme.bg[1] + 0.018).min(1.0),
+            (self.ui_theme.bg[2] + 0.022).min(1.0),
             1.0,
         ];
         self.push_rect(x, y, w, h, bg);
@@ -59,7 +59,7 @@ impl Renderer {
             y,
             1.0_f32.max(s.round()),
             h.max(0.0),
-            [1.0, 1.0, 1.0, 0.10],
+            self.ui.ink(0.10),
         );
     }
 
@@ -89,7 +89,7 @@ impl Renderer {
                 break;
             }
             let text_y = (y - line_offset + visible_idx as f32 * line_h).round();
-            self.draw_editor_line_number_centered(first_line_no + line_idx, x, w, text_y, 1.0);
+            self.draw_editor_line_number_centered(first_line_no + line_idx, x, w, text_y, 1.0, self.ui_theme.line_num);
         }
     }
 
@@ -125,7 +125,7 @@ impl Renderer {
                     layout.x_start,
                     layout.squiggle_y,
                     layout.squiggle_w,
-                    [1.0, 0.36, 0.36, 1.0],
+                    self.ui.pick(UiRole::Error, [1.0, 0.36, 0.36, 1.0]),
                 );
             }
         }
@@ -484,7 +484,7 @@ impl Renderer {
             }
             let ch = line[idx..].chars().next().unwrap_or(' ');
             let end = idx + ch.len_utf8();
-            self.draw_json_colored_segment(&line[idx..end], self.theme.fg, x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(&line[idx..end], self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), x, y, w, &mut draw_x);
             idx = end;
         }
     }
@@ -492,7 +492,7 @@ impl Renderer {
     fn draw_header_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
         let Some(colon_idx) = line.find(':') else {
             let mut draw_x = x;
-            self.draw_json_colored_segment(line, [0.70, 0.72, 0.78, 1.0], x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(line, self.ui.pick(UiRole::TextSecondary, [0.70, 0.72, 0.78, 1.0]), x, y, w, &mut draw_x);
             return;
         };
         let (key, rest) = line.split_at(colon_idx);
@@ -502,10 +502,10 @@ impl Renderer {
             .position(|b| !matches!(*b, b':' | b' ' | b'\t'))
             .unwrap_or(rest.len());
         let mut draw_x = x;
-        self.draw_json_colored_segment(key, [1.0, 0.68, 0.26, 1.0], x, y, w, &mut draw_x);
+        self.draw_json_colored_segment(key, self.ui.pick(UiRole::TokenProperty, [1.0, 0.68, 0.26, 1.0]), x, y, w, &mut draw_x);
         self.draw_json_colored_segment(
             &rest[..value_start],
-            [0.86, 0.87, 0.91, 1.0],
+            self.ui.pick(UiRole::TokenPunctuation, [0.86, 0.87, 0.91, 1.0]),
             x,
             y,
             w,
@@ -515,21 +515,21 @@ impl Renderer {
         let value_color = if header_value_is_number(value) {
             self.ui.syntax.color(crate::theme::SyntaxRole::Constant)
         } else {
-            [0.70, 0.72, 0.78, 1.0]
+            self.ui.pick(UiRole::TextSecondary, [0.70, 0.72, 0.78, 1.0])
         };
         self.draw_json_colored_segment(value, value_color, x, y, w, &mut draw_x);
     }
 
     fn draw_curl_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
-        const CURL_CMD: [f32; 4] = [1.0, 0.36, 0.18, 1.0];
-        const CURL_GREEN: [f32; 4] = [0.44, 0.86, 0.58, 1.0];
-        const CURL_METHOD: [f32; 4] = [0.70, 0.72, 0.78, 1.0];
+        let curl_cmd: [f32; 4] = self.ui.pick(UiRole::Danger, [1.0, 0.36, 0.18, 1.0]);
+        let curl_green: [f32; 4] = self.ui.pick(UiRole::Success, [0.44, 0.86, 0.58, 1.0]);
+        let curl_method: [f32; 4] = self.ui.pick(UiRole::TextSecondary, [0.70, 0.72, 0.78, 1.0]);
 
         let start = line.len().saturating_sub(line.trim_start().len());
         let rest = &line[start..];
         let mut draw_x = x;
         if start > 0 {
-            self.draw_json_colored_segment(&line[..start], CURL_GREEN, x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(&line[..start], curl_green, x, y, w, &mut draw_x);
         }
         if rest.starts_with("curl")
             && rest
@@ -537,7 +537,7 @@ impl Renderer {
                 .get(4)
                 .is_none_or(|b| b.is_ascii_whitespace())
         {
-            self.draw_json_colored_segment("curl", CURL_CMD, x, y, w, &mut draw_x);
+            self.draw_json_colored_segment("curl", curl_cmd, x, y, w, &mut draw_x);
             self.draw_curl_green_or_slash(&rest[4..], x, y, w, &mut draw_x);
             return;
         }
@@ -547,7 +547,7 @@ impl Renderer {
                 .get(2)
                 .is_none_or(|b| b.is_ascii_whitespace())
         {
-            self.draw_json_colored_segment("-X", CURL_GREEN, x, y, w, &mut draw_x);
+            self.draw_json_colored_segment("-X", curl_green, x, y, w, &mut draw_x);
             let mut method_start = 2usize;
             while rest
                 .as_bytes()
@@ -559,7 +559,7 @@ impl Renderer {
             if method_start > 2 {
                 self.draw_json_colored_segment(
                     &rest[2..method_start],
-                    CURL_GREEN,
+                    curl_green,
                     x,
                     y,
                     w,
@@ -577,7 +577,7 @@ impl Renderer {
             if method_end > method_start {
                 self.draw_json_colored_segment(
                     &rest[method_start..method_end],
-                    CURL_METHOD,
+                    curl_method,
                     x,
                     y,
                     w,
@@ -598,8 +598,8 @@ impl Renderer {
         w: f32,
         draw_x: &mut f32,
     ) {
-        const CURL_GREEN: [f32; 4] = [0.44, 0.86, 0.58, 1.0];
-        const CURL_SLASH: [f32; 4] = [0.82, 0.84, 0.88, 1.0];
+        let curl_green: [f32; 4] = self.ui.pick(UiRole::Success, [0.44, 0.86, 0.58, 1.0]);
+        let curl_slash: [f32; 4] = self.ui.pick(UiRole::TextSecondary, [0.82, 0.84, 0.88, 1.0]);
 
         for ch in line.chars() {
             if *draw_x > x + w {
@@ -610,7 +610,7 @@ impl Renderer {
                 ch.encode_utf8(&mut buf),
                 *draw_x,
                 y,
-                if ch == '\\' { CURL_SLASH } else { CURL_GREEN },
+                if ch == '\\' { curl_slash } else { curl_green },
                 API_BODY_TEXT_SCALE,
             );
             *draw_x += self
@@ -658,7 +658,7 @@ mod stage5_embedded_editor_boundary_tests {
         renderer
             .vertices
             .iter()
-            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.theme.fg)
+            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.ui_theme.fg)
     }
 
     #[test]

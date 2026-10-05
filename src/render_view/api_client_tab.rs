@@ -266,11 +266,12 @@ fn api_body_schema_type_text(
     }
 }
 
-fn api_status_color(status: Option<u16>) -> [f32; 4] {
+fn api_status_color(ui: &crate::theme::UiPalette, status: Option<u16>) -> [f32; 4] {
+    use crate::theme::UiRole;
     match status {
-        Some(200..=399) => [0.48, 0.86, 0.52, 1.0],
-        Some(400..=499) => [0.35, 0.75, 1.0, 1.0],
-        Some(500..=599) => [1.0, 0.42, 0.42, 1.0],
-        _ => [0.68, 0.70, 0.78, 1.0],
+        Some(200..=399) => ui.pick(UiRole::HttpStatusSuccess, [0.48, 0.86, 0.52, 1.0]),
+        Some(400..=499) => ui.pick(UiRole::HttpStatusRedirect, [0.35, 0.75, 1.0, 1.0]),
+        Some(500..=599) => ui.pick(UiRole::HttpStatusError, [1.0, 0.42, 0.42, 1.0]),
+        _ => ui.pick(UiRole::TextMuted, [0.68, 0.70, 0.78, 1.0]),
     }
 }

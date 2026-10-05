@@ -1,4 +1,5 @@
 use crate::renderer::Renderer;
+use crate::theme::UiRole;
 use glow::HasContext;
 
 fn fit_lsp_action_widths(
@@ -287,7 +288,7 @@ impl Renderer {
                 hint,
                 (content_x + (content_w - tw) / 2.0).round(),
                 (content_y + 32.0 * s).round(),
-                [0.45, 0.45, 0.45, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.45, 1.0]),
                 text_scale,
             );
         }
@@ -352,7 +353,7 @@ impl Renderer {
                     card_w + 2.0,
                     row_h + 2.0,
                     7.0 * s,
-                    [0.35, 0.30, 0.45, 0.4],
+                    self.ui.pick(UiRole::Border, [0.35, 0.30, 0.45, 0.4]),
                 );
                 self.push_rounded_rect(
                     card_x,
@@ -360,7 +361,7 @@ impl Renderer {
                     card_w,
                     row_h,
                     6.0 * s,
-                    [0.18, 0.19, 0.24, 1.0],
+                    self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.19, 0.24, 1.0]),
                 );
 
                 let dot_r = 5.0 * s;
@@ -368,11 +369,26 @@ impl Renderer {
                 let dot_y = current_y + 16.0 * s;
 
                 let (dot_color, status_text) = match info.status {
-                    crate::lsp::LspServerStatus::Running => ([0.28, 0.85, 0.45, 1.0], "Работает"),
-                    crate::lsp::LspServerStatus::Starting => ([0.85, 0.75, 0.25, 1.0], "Запуск..."),
-                    crate::lsp::LspServerStatus::Crashed => ([0.90, 0.30, 0.30, 1.0], "Упал"),
-                    crate::lsp::LspServerStatus::Missing => ([0.95, 0.45, 0.30, 1.0], "Не найден"),
-                    crate::lsp::LspServerStatus::Disabled => ([0.45, 0.45, 0.45, 1.0], "Отключён"),
+                    crate::lsp::LspServerStatus::Running => (
+                        self.ui.pick(UiRole::LspRunning, [0.28, 0.85, 0.45, 1.0]),
+                        "Работает",
+                    ),
+                    crate::lsp::LspServerStatus::Starting => (
+                        self.ui.pick(UiRole::LspStarting, [0.85, 0.75, 0.25, 1.0]),
+                        "Запуск...",
+                    ),
+                    crate::lsp::LspServerStatus::Crashed => (
+                        self.ui.pick(UiRole::LspCrashed, [0.90, 0.30, 0.30, 1.0]),
+                        "Упал",
+                    ),
+                    crate::lsp::LspServerStatus::Missing => (
+                        self.ui.pick(UiRole::LspMissing, [0.95, 0.45, 0.30, 1.0]),
+                        "Не найден",
+                    ),
+                    crate::lsp::LspServerStatus::Disabled => (
+                        self.ui.pick(UiRole::LspDisabled, [0.45, 0.45, 0.45, 1.0]),
+                        "Отключён",
+                    ),
                 };
                 self.push_rounded_rect(
                     dot_x - dot_r,
@@ -387,7 +403,7 @@ impl Renderer {
                     info.name,
                     (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
                     (dot_y + dot_r).round(),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     text_scale,
                 );
 
@@ -535,56 +551,56 @@ impl Renderer {
                 };
 
                 let btn_bg_restart = if hover_restart {
-                    [0.35, 0.35, 0.40, 1.0]
+                    self.ui.pick(UiRole::RowHover, [0.35, 0.35, 0.40, 1.0])
                 } else {
-                    [0.26, 0.26, 0.32, 1.0]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.26, 0.26, 0.32, 1.0])
                 };
                 let btn_bg_toggle = if hover_toggle {
-                    [0.35, 0.35, 0.40, 1.0]
+                    self.ui.pick(UiRole::RowHover, [0.35, 0.35, 0.40, 1.0])
                 } else {
-                    [0.26, 0.26, 0.32, 1.0]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.26, 0.26, 0.32, 1.0])
                 };
                 let btn_bg_logs = if hover_logs {
-                    [0.35, 0.35, 0.40, 1.0]
+                    self.ui.pick(UiRole::RowHover, [0.35, 0.35, 0.40, 1.0])
                 } else {
-                    [0.26, 0.26, 0.32, 1.0]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.26, 0.26, 0.32, 1.0])
                 };
                 let btn_bg_clear_logs = if !clear_logs_enabled || !clear_logs_fits {
-                    [0.18, 0.18, 0.22, 0.6]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.18, 0.22, 0.6])
                 } else if hover_clear_logs {
-                    [0.36, 0.30, 0.20, 1.0]
+                    self.ui.pick(UiRole::Warning, [0.36, 0.30, 0.20, 1.0])
                 } else {
-                    [0.28, 0.22, 0.16, 1.0]
+                    self.ui.pick(UiRole::Warning, [0.28, 0.22, 0.16, 1.0])
                 };
                 let btn_bg_stop = if is_stopped {
-                    [0.20, 0.20, 0.25, 0.6]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.20, 0.20, 0.25, 0.6])
                 } else if hover_stop {
-                    [0.45, 0.22, 0.22, 1.0]
+                    self.ui.pick(UiRole::Danger, [0.45, 0.22, 0.22, 1.0])
                 } else {
-                    [0.32, 0.15, 0.15, 1.0]
+                    self.ui.pick(UiRole::Danger, [0.32, 0.15, 0.15, 1.0])
                 };
                 let btn_bg_fix_all = if !fix_enabled {
-                    [0.18, 0.18, 0.22, 0.6]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.18, 0.18, 0.22, 0.6])
                 } else if hover_fix_all {
-                    [0.22, 0.42, 0.28, 1.0]
+                    self.ui.pick(UiRole::Success, [0.22, 0.42, 0.28, 1.0])
                 } else {
-                    [0.15, 0.30, 0.20, 1.0]
+                    self.ui.pick(UiRole::Success, [0.15, 0.30, 0.20, 1.0])
                 };
 
                 let text_color_stop = if is_stopped {
-                    [0.55, 0.55, 0.60, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.60, 1.0])
                 } else {
-                    [0.95, 0.55, 0.55, 1.0]
+                    self.ui.pick(UiRole::Danger, [0.95, 0.55, 0.55, 1.0])
                 };
                 let text_color_fix_all = if !fix_enabled {
-                    [0.40, 0.40, 0.44, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.40, 0.40, 0.44, 1.0])
                 } else {
-                    [0.55, 0.95, 0.65, 1.0]
+                    self.ui.pick(UiRole::Success, [0.55, 0.95, 0.65, 1.0])
                 };
                 let text_color_clear_logs = if !clear_logs_enabled || !clear_logs_fits {
-                    [0.40, 0.40, 0.44, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.40, 0.40, 0.44, 1.0])
                 } else {
-                    [0.95, 0.78, 0.55, 1.0]
+                    self.ui.pick(UiRole::Warning, [0.95, 0.78, 0.55, 1.0])
                 };
 
                 let text_y1 = (btn_y1 + btn_h / 2.0 + 4.0 * s).round();
@@ -602,7 +618,7 @@ impl Renderer {
                     label_restart,
                     (btn_x_restart + (bw_restart - text_w_restart * lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad),
                 );
 
@@ -618,7 +634,7 @@ impl Renderer {
                     label_toggle,
                     (btn_x_toggle + (bw_toggle - text_w_toggle * lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad),
                 );
 
@@ -652,7 +668,7 @@ impl Renderer {
                     label_logs,
                     (btn_x_logs + (bw_logs - text_w_logs * lsp_action_text_scale(text_w_logs, bw_logs, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y2,
-                    [0.8, 0.85, 1.0, 1.0],
+                    self.ui.pick(UiRole::TextSecondary, [0.8, 0.85, 1.0, 1.0]),
                     lsp_action_text_scale(text_w_logs, bw_logs, 0.8, btn_pad),
                 );
                 if is_expanded {
@@ -714,9 +730,9 @@ impl Renderer {
                         my,
                     );
                     let input_border = if ide_panel.lsp_log_filter_focused || input_hover {
-                        [0.44, 0.28, 0.75, 0.9]
+                        self.ui.pick(UiRole::Accent, [0.44, 0.28, 0.75, 0.9])
                     } else {
-                        [0.18, 0.18, 0.22, 1.0]
+                        self.ui.pick(UiRole::Border, [0.18, 0.18, 0.22, 1.0])
                     };
                     self.push_rounded_rect(
                         chip_x - 1.0,
@@ -732,7 +748,7 @@ impl Renderer {
                         input_w,
                         filter_h,
                         4.0 * s,
-                        [0.10, 0.10, 0.13, 1.0],
+                        self.ui.pick(UiRole::BgInput, [0.10, 0.10, 0.13, 1.0]),
                     );
                     let filter_empty = lsp_log_filter_text.is_empty();
                     let filter_text = if filter_empty { "Фильтр" } else { lsp_log_filter_text.as_str() };
@@ -760,7 +776,11 @@ impl Renderer {
                         filter_scroll_x,
                         1.0,
                         0.78,
-                        if filter_empty { [0.45, 0.45, 0.50, 1.0] } else { self.theme.fg },
+                        if filter_empty {
+                            self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.50, 1.0])
+                        } else {
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
+                        },
                         0.0,
                         8.0 * s,
                     );
@@ -776,14 +796,14 @@ impl Renderer {
                         let hovered = ui_registry.register_rect(id, x, chip_y, w, chip_h, mx, my);
                         let bg = if active {
                             if hovered {
-                                [0.28, 0.32, 0.42, 1.0]
+                                renderer.ui.pick(UiRole::RowActive, [0.28, 0.32, 0.42, 1.0])
                             } else {
-                                [0.20, 0.24, 0.34, 1.0]
+                                renderer.ui.pick(UiRole::RowActive, [0.20, 0.24, 0.34, 1.0])
                             }
                         } else if hovered {
-                            [0.24, 0.24, 0.28, 1.0]
+                            renderer.ui.pick(UiRole::RowHover, [0.24, 0.24, 0.28, 1.0])
                         } else {
-                            [0.14, 0.14, 0.17, 1.0]
+                            renderer.ui.pick(UiRole::BgPanelAlt, [0.14, 0.14, 0.17, 1.0])
                         };
                         renderer.push_rounded_rect(x, chip_y, w, chip_h, 3.0 * s, bg);
                         renderer.draw_string_scaled(
@@ -791,9 +811,9 @@ impl Renderer {
                             x + chip_pad,
                             chip_y + chip_h / 2.0 + 4.0 * s,
                             if active {
-                                [0.72, 0.86, 1.0, 1.0]
+                                renderer.ui.pick(UiRole::TextPrimary, [0.72, 0.86, 1.0, 1.0])
                             } else {
-                                [0.52, 0.52, 0.57, 1.0]
+                                renderer.ui.pick(UiRole::TextMuted, [0.52, 0.52, 0.57, 1.0])
                             },
                             0.72,
                         );
@@ -850,9 +870,9 @@ impl Renderer {
                     );
 
                     let border_color = if lsp_logs_focused.as_deref() == Some(info.name) {
-                        [0.44, 0.28, 0.75, 0.8]
+                        self.ui.pick(UiRole::Accent, [0.44, 0.28, 0.75, 0.8])
                     } else {
-                        [0.1, 0.1, 0.12, 1.0]
+                        self.ui.pick(UiRole::Border, [0.1, 0.1, 0.12, 1.0])
                     };
 
                     self.push_rounded_rect(
@@ -869,7 +889,7 @@ impl Renderer {
                         log_bg_w,
                         log_bg_h,
                         4.0 * s,
-                        [0.08, 0.08, 0.10, 1.0],
+                        self.ui.pick(UiRole::BgCode, [0.08, 0.08, 0.10, 1.0]),
                     );
 
                     self.flush();
@@ -997,7 +1017,7 @@ impl Renderer {
                                                 x2c - x1c,
                                                 line_h,
                                                 0.0,
-                                                [0.40, 0.28, 0.72, 0.45],
+                                                self.ui.pick(UiRole::Selection, [0.40, 0.28, 0.72, 0.45]),
                                             );
                                         }
                                     }
@@ -1100,9 +1120,9 @@ impl Renderer {
                                             my,
                                         );
                                         let color = if is_hovered {
-                                            [0.8, 0.8, 0.9, 1.0]
+                                            self.ui.pick(UiRole::TextSecondary, [0.8, 0.8, 0.9, 1.0])
                                         } else {
-                                            [0.5, 0.5, 0.55, 1.0]
+                                            self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.55, 1.0])
                                         };
                                         self.draw_string_scaled(
                                             arrow_str,
@@ -1137,18 +1157,18 @@ impl Renderer {
                                             dots_adv,
                                             line_h - 2.0 * s,
                                             3.0 * s,
-                                            [
-                                                self.theme.bg[0] + 0.08,
-                                                self.theme.bg[1] + 0.08,
-                                                self.theme.bg[2] + 0.12,
+                                            self.ui.pick(UiRole::BgPanel, [
+                                                self.ui_theme.bg[0] + 0.08,
+                                                self.ui_theme.bg[1] + 0.08,
+                                                self.ui_theme.bg[2] + 0.12,
                                                 1.0,
-                                            ],
+                                            ]),
                                         );
                                         self.draw_string_scaled(
                                             dots_str,
                                             box_x + 4.0 * s,
                                             text_y,
-                                            self.theme.fg,
+                                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                                             0.7,
                                         );
                                     }
@@ -1286,14 +1306,21 @@ impl Renderer {
                     w + 4.0,
                     h + 4.0,
                     5.0 * s,
-                    [0.20, 0.20, 0.25, 1.0],
+                    self.ui.pick(UiRole::Border, [0.20, 0.20, 0.25, 1.0]),
                 );
-                self.push_rounded_rect(x, y, w, h, 4.0 * s, [0.14, 0.15, 0.19, 1.0]);
+                self.push_rounded_rect(
+                    x,
+                    y,
+                    w,
+                    h,
+                    4.0 * s,
+                    self.ui.pick(UiRole::BgDialog, [0.14, 0.15, 0.19, 1.0]),
+                );
                 self.draw_string_scaled(
                     "Загрузка...",
                     x + 12.0 * s,
                     y + h / 2.0 + 6.0 * s,
-                    [0.5, 0.5, 0.5, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.5, 1.0]),
                     0.9,
                 );
             }
@@ -1322,7 +1349,7 @@ impl Renderer {
             menu_w,
             menu_h,
             6.0 * s,
-            [0.0, 0.0, 0.0, 0.45],
+            self.ui.shadow_alpha(0.45),
         );
         // Фон меню + рамка
         self.push_rounded_rect(
@@ -1331,7 +1358,7 @@ impl Renderer {
             menu_w + 2.0,
             menu_h + 2.0,
             6.0 * s,
-            [0.35, 0.25, 0.50, 0.6],
+            self.ui.pick(UiRole::Border, [0.35, 0.25, 0.50, 0.6]),
         );
         self.push_rounded_rect(
             mx_pos,
@@ -1339,7 +1366,7 @@ impl Renderer {
             menu_w,
             menu_h,
             5.0 * s,
-            [0.12, 0.13, 0.17, 1.0],
+            self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.17, 1.0]),
         );
 
         let mut prev_group = layout
@@ -1365,7 +1392,7 @@ impl Renderer {
                     item_y - 1.0,
                     menu_w - 24.0 * s,
                     1.5,
-                    [1.0, 1.0, 1.0, 0.08],
+                    self.ui.ink(0.08),
                 );
             }
             prev_group = group;
@@ -1375,10 +1402,10 @@ impl Renderer {
                 mx >= mx_pos && mx <= mx_pos + menu_w && my >= item_y && my <= item_y + item_h;
 
             let group_color = match group {
-                1 => [0.38, 0.75, 1.0, 1.0],  // Синий для фиксов
-                2 => [0.75, 0.50, 1.0, 1.0],  // Фиолетовый для noqa
-                3 => [0.45, 0.90, 0.60, 1.0], // Зеленый для глобальных действий
-                _ => [1.0, 1.0, 1.0, 1.0],
+                1 => self.ui.pick(UiRole::Info, [0.38, 0.75, 1.0, 1.0]),  // Синий для фиксов
+                2 => self.ui.pick(UiRole::Accent, [0.75, 0.50, 1.0, 1.0]),  // Фиолетовый для noqa
+                3 => self.ui.pick(UiRole::Success, [0.45, 0.90, 0.60, 1.0]), // Зеленый для глобальных действий
+                _ => self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
             };
 
             if is_selected || is_hovered {
@@ -1395,7 +1422,7 @@ impl Renderer {
                     menu_w - 6.0 * s,
                     item_h - 2.0,
                     4.0 * s,
-                    hi_color,
+                    self.ui.pick(UiRole::RowActive, hi_color),
                 );
             }
 
@@ -1414,7 +1441,7 @@ impl Renderer {
                 crate::app::LspActionItem::FixAll
                 | crate::app::LspActionItem::OrganizeImports
                 | crate::app::LspActionItem::CompleteImports => group_color,
-                _ => self.theme.fg,
+                _ => self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;

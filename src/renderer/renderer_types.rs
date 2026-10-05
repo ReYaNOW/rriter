@@ -116,6 +116,7 @@ impl GraphicsDiagnostics {
 
 #[derive(Clone)]
 pub struct Theme {
+    pub id: crate::theme::ThemeId,
     pub bg: [f32; 4],
     pub fg: [f32; 4],
     pub sel: [f32; 4],
@@ -428,6 +429,11 @@ pub struct Renderer {
 
     pub theme: Theme,
     pub ui: crate::theme::UiPalette,
+    /// Role palette of the editor theme, for chrome that sits on the editor surface (search bar, diff overlay, Markdown Reader).
+    pub editor_ui: crate::theme::UiPalette,
+    /// While set, `IconButton::render` takes its colours from `theme`/`editor_ui` instead of `ui_theme`/`ui`.
+    pub icons_on_editor: bool,
+    pub ui_theme: Theme,
     pub theme_gen: u64,
     pub width: f32,
     pub height: f32,
@@ -471,12 +477,15 @@ pub struct Renderer {
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, IconAtlasEntry>,
     pub icon_logo: Option<glow::Texture>,
-    /// Кэш SVG-иконок для дерева файлов. Ключ = &'static str из file_icons_map.
-    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, IconAtlasEntry>,
+    /// Кэш SVG-иконок для дерева файлов. Ключ содержит вариант темы.
+    pub file_icon_cache: rustc_hash::FxHashMap<(&'static str, bool), IconAtlasEntry>,
     pub(crate) rasterized_file_icons:
-        rustc_hash::FxHashMap<&'static str, crate::app::file_tree::RasterizedIconState>,
+        rustc_hash::FxHashMap<(&'static str, bool), crate::app::file_tree::RasterizedIconState>,
     /// On-demand file icon rasterizations still allowed in this frame; reset at frame start.
     pub(crate) icon_rasterize_budget: u8,
+    /// An icon was skipped this frame because the budget ran out; the frame loop
+    /// requests one more redraw so the rest is rasterized without user input.
+    pub(crate) icon_raster_deferred: bool,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub phys_to_visual_editor_version: u64,

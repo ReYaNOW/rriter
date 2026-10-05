@@ -52,7 +52,7 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
         let layout = api_overlay_layout(self.width, self.height, s, 860.0, 700.0, 24.0);
         let box_w = layout.box_w;
@@ -67,8 +67,8 @@ impl Renderer {
             box_h,
             6.0 * s,
             (1.0 * s).max(1.0),
-            [0.60, 0.35, 0.85, 0.90],
-            [0.12, 0.13, 0.17, 1.0],
+            self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 0.90]),
+            self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.17, 1.0]),
         );
         let close_size = layout.close_size;
         let close = IconButton {
@@ -96,7 +96,7 @@ impl Renderer {
             "Подробный гайд по мокам",
             box_x + pad,
             (box_y + 40.0 * s).round(),
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.12,
         );
         let content_x = box_x + pad;
@@ -245,7 +245,7 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
         let layout = api_overlay_layout(self.width, self.height, s, 720.0, 560.0, 22.0);
         let box_w = layout.box_w;
@@ -260,8 +260,8 @@ impl Renderer {
             box_h,
             6.0 * s,
             (1.0 * s).max(1.0),
-            [0.60, 0.35, 0.85, 0.90],
-            [0.12, 0.13, 0.17, 1.0],
+            self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 0.90]),
+            self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.17, 1.0]),
         );
         let close_size = layout.close_size;
         let close = IconButton {
@@ -286,7 +286,7 @@ impl Renderer {
             );
         }
         let mut cy = (box_y + 38.0 * s).round();
-        self.draw_string_scaled_stable("Статус и логи мок-сервера", box_x + pad, cy, self.theme.fg, 1.02);
+        self.draw_string_scaled_stable("Статус и логи мок-сервера", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.02);
         cy += 34.0 * s;
         let status = match &api.mock.server_status {
             ApiMockServerStatus::Stopped => "остановлен".to_string(),
@@ -297,7 +297,7 @@ impl Renderer {
         };
         self.draw_wrapped_api_panel_text(&status, box_x + pad, cy, box_w - pad * 2.0, s, 0.88);
         cy += 46.0 * s;
-        self.draw_string_scaled_stable("axum / access log", box_x + pad, cy, self.theme.fg, 0.92);
+        self.draw_string_scaled_stable("axum / access log", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 0.92);
         cy += 28.0 * s;
         let log_x = box_x + pad;
         let log_y = cy.round();
@@ -310,8 +310,8 @@ impl Renderer {
             log_h,
             5.0 * s,
             (1.0 * s).max(1.0),
-            [1.0, 1.0, 1.0, 0.12],
-            [0.08, 0.08, 0.10, 1.0],
+            self.ui.ink(0.12),
+            self.ui.pick(UiRole::BgTooltip, [0.08, 0.08, 0.10, 1.0]),
         );
         ui_registry.register_blocker(
             crate::ui_system::UiId::ApiMockServerLogArea,
@@ -339,7 +339,7 @@ impl Renderer {
                 "No log events yet",
                 log_x + 12.0 * s,
                 log_y + 24.0 * s,
-                [0.58, 0.61, 0.70, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.58, 0.61, 0.70, 1.0]),
                 0.84,
             );
         } else {
@@ -355,7 +355,7 @@ impl Renderer {
                         &line.text,
                         log_x + 12.0 * s,
                         line_y,
-                        [0.76, 0.79, 0.86, 1.0],
+                        self.ui.pick(UiRole::TextSecondary, [0.76, 0.79, 0.86, 1.0]),
                         0.72,
                     );
                 }
@@ -398,7 +398,7 @@ impl Renderer {
     ) {
         ui_registry.mark_overlay_start();
         ui_registry.reset_cursor_state();
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
+        self.push_rect(0.0, 0.0, self.width, self.height, self.ui.pick(UiRole::Scrim, [0.0, 0.0, 0.0, 0.42]));
         let layout = crate::app::api_client::api_python_runtime_dialog_layout(
             self.width,
             self.height,
@@ -416,14 +416,14 @@ impl Renderer {
             box_h,
             10.0 * s,
             2.0 * s,
-            self.theme.sel,
-            [0.15, 0.16, 0.20, 1.0],
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0]),
         );
         self.draw_string_scaled(
             "Python мок-сервера",
             box_x + pad,
             box_y + 38.0 * s,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.0,
         );
         let mode_label = match api.mock.uv.mode {
@@ -668,7 +668,7 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.draw_string_scaled(label, x, y + 14.0 * s, [0.55, 0.57, 0.64, 1.0], 0.74);
+        self.draw_string_scaled(label, x, y + 14.0 * s, self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]), 0.74);
         let focused = api.focused.as_ref() == Some(&focus);
         let input_y = y + 18.0 * s;
         let input_h = 34.0 * s;
@@ -678,7 +678,7 @@ impl Renderer {
             w,
             input_h,
             5.0 * s,
-            [0.08, 0.09, 0.12, 1.0],
+            self.ui.pick(UiRole::BgTooltip, [0.08, 0.09, 0.12, 1.0]),
         );
         ui_registry.register_text_input(id, x, input_y, w, input_h, mx, my);
         let (text, cursor, selection_anchor) = if focused {
@@ -717,7 +717,7 @@ impl Renderer {
         my: f32,
         draw_popup: bool,
     ) {
-        self.draw_string_scaled("Версия Python", x, y + 14.0 * s, [0.55, 0.57, 0.64, 1.0], 0.74);
+        self.draw_string_scaled("Версия Python", x, y + 14.0 * s, self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]), 0.74);
         let input_y = y + 18.0 * s;
         let input_h = 34.0 * s;
         let hovered = ui_registry.register_rect(
@@ -736,9 +736,9 @@ impl Renderer {
             input_h,
             5.0 * s,
             if hovered {
-                [0.12, 0.13, 0.17, 1.0]
+                self.ui.pick(UiRole::BgDialog, [0.12, 0.13, 0.17, 1.0])
             } else {
-                [0.08, 0.09, 0.12, 1.0]
+                self.ui.pick(UiRole::BgTooltip, [0.08, 0.09, 0.12, 1.0])
             },
         );
         let value = if api.mock.uv.python_version.trim().is_empty() {
@@ -746,12 +746,12 @@ impl Renderer {
         } else {
             api.mock.uv.python_version.clone()
         };
-        self.draw_string_scaled(&value, x + 8.0 * s, input_y + 23.0 * s, self.theme.fg, 0.92);
+        self.draw_string_scaled(&value, x + 8.0 * s, input_y + 23.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 0.92);
         self.draw_string_scaled(
             "v",
             x + w - 18.0 * s,
             input_y + 22.0 * s,
-            [0.55, 0.57, 0.64, 1.0],
+            self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0]),
             0.82,
         );
         if draw_popup && api.mock_python_version_picker_open {
@@ -780,8 +780,8 @@ impl Renderer {
                 list_h,
                 6.0 * s,
                 1.0_f32.max(s),
-                self.theme.sel,
-                [0.09, 0.10, 0.14, 1.0],
+                self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+                self.ui.pick(UiRole::BgTooltip, [0.09, 0.10, 0.14, 1.0]),
             );
             self.flush();
             unsafe {
@@ -798,7 +798,7 @@ impl Renderer {
                     "запрашиваю версии через uv...",
                     list_x + 10.0 * s,
                     (list_y + 25.0 * s).round(),
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.84,
                 );
             } else if api.mock_python_versions.is_empty() {
@@ -806,7 +806,7 @@ impl Renderer {
                     "версии не найдены",
                     list_x + 10.0 * s,
                     (list_y + 25.0 * s).round(),
-                    [0.82, 0.62, 0.42, 1.0],
+                    self.ui.pick(UiRole::Warning, [0.82, 0.62, 0.42, 1.0]),
                     0.84,
                 );
             } else {
@@ -825,7 +825,7 @@ impl Renderer {
                         hover_my,
                     );
                     if hovered {
-                        self.push_rect(list_x + 2.0 * s, row_y, list_w - 4.0 * s, row_h, [1.0, 1.0, 1.0, 0.10]);
+                        self.push_rect(list_x + 2.0 * s, row_y, list_w - 4.0 * s, row_h, self.ui.ink(0.10));
                     }
                     let mark = if row.installed { "установлена" } else { "доступна" };
                     let line = format!("{}  ·  {}", row.version, mark);
@@ -834,9 +834,9 @@ impl Renderer {
                         list_x + 10.0 * s,
                         (row_y + 20.0 * s).round(),
                         if row.installed {
-                            [0.62, 0.86, 0.62, 1.0]
+                            self.ui.pick(UiRole::Success, [0.62, 0.86, 0.62, 1.0])
                         } else {
-                            self.theme.fg
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                         },
                         0.84,
                     );
@@ -875,7 +875,7 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-        self.push_rounded_rect(x, y, w, h, 5.0 * s, [0.08, 0.09, 0.12, 1.0]);
+        self.push_rounded_rect(x, y, w, h, 5.0 * s, self.ui.pick(UiRole::BgTooltip, [0.08, 0.09, 0.12, 1.0]));
         let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
             api.mock_python_install_log.len(),
             h,
@@ -904,9 +904,9 @@ impl Renderer {
                 continue;
             }
             let color = match line.kind {
-                crate::app::api_client::ApiPythonInstallLogKind::Info => [0.70, 0.73, 0.80, 1.0],
-                crate::app::api_client::ApiPythonInstallLogKind::Ok => [0.62, 0.86, 0.62, 1.0],
-                crate::app::api_client::ApiPythonInstallLogKind::Error => [1.0, 0.45, 0.42, 1.0],
+                crate::app::api_client::ApiPythonInstallLogKind::Info => self.ui.pick(UiRole::TextSecondary, [0.70, 0.73, 0.80, 1.0]),
+                crate::app::api_client::ApiPythonInstallLogKind::Ok => self.ui.pick(UiRole::Success, [0.62, 0.86, 0.62, 1.0]),
+                crate::app::api_client::ApiPythonInstallLogKind::Error => self.ui.pick(UiRole::Error, [1.0, 0.45, 0.42, 1.0]),
             };
             self.draw_string_scaled(&line.text, x + 8.0 * s, line_y, color, 0.74);
         }
@@ -957,7 +957,7 @@ impl Renderer {
             track_w,
             geometry.track_len,
             track_w * 0.5,
-            [1.0, 1.0, 1.0, 0.08],
+            self.ui.ink(0.08),
         );
         let _ = self.draw_scrollbar(
             &scrollbar,
@@ -1005,9 +1005,9 @@ impl Renderer {
             })
             .unwrap_or(0.0);
         let text_color = if text == "не задано" {
-            [0.55, 0.57, 0.64, 1.0]
+            self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
         } else {
-            self.theme.fg
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
         };
         self.draw_one_line_selectable_text(
             text,
@@ -1049,9 +1049,9 @@ impl Renderer {
         let h = h.round();
         let hovered = ui_registry.register_rect(id, x, y, w, h, mx, my);
         let bg = if hovered {
-            [0.30, 0.32, 0.38, 1.0]
+            self.ui.pick(UiRole::RowHover, [0.30, 0.32, 0.38, 1.0])
         } else {
-            [0.22, 0.23, 0.28, 1.0]
+            self.ui.pick(UiRole::RowHover, [0.22, 0.23, 0.28, 1.0])
         };
         self.push_rounded_rect(x, y, w, h, 5.0 * s, bg);
         let tw = self.measure_ui_width(label, text_scale);
@@ -1059,7 +1059,7 @@ impl Renderer {
             label,
             x + (w - tw) / 2.0,
             (y + 21.0 * s).round(),
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             text_scale,
         );
     }
@@ -1074,7 +1074,7 @@ impl Renderer {
                 format!("{} {}", line, word)
             };
             if self.measure_ui_width(&candidate, scale) > w && !line.is_empty() {
-                self.draw_string_scaled_stable(&line, x, cy, self.theme.fg, scale);
+                self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), scale);
                 cy += 16.0 * s;
                 line.clear();
                 line.push_str(word);
@@ -1083,7 +1083,7 @@ impl Renderer {
             }
         }
         if !line.is_empty() {
-            self.draw_string_scaled_stable(&line, x, cy, self.theme.fg, scale);
+            self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), scale);
         }
     }
 
@@ -1105,25 +1105,27 @@ impl Renderer {
             h,
             5.0 * s,
             (1.0 * s).max(1.0),
-            [1.0, 1.0, 1.0, 0.10],
-            [0.08, 0.08, 0.11, 1.0],
+            self.ui.ink(0.10),
+            self.ui.pick(UiRole::BgTooltip, [0.08, 0.08, 0.11, 1.0]),
         );
         let mut cy = y + pad + 13.0 * s;
         for line in lines {
-            self.draw_string_mono_scaled(line, x + pad, cy, [0.82, 0.84, 0.90, 1.0], 0.72);
+            self.draw_string_mono_scaled(line, x + pad, cy, self.ui.pick(UiRole::TextSecondary, [0.82, 0.84, 0.90, 1.0]), 0.72);
             cy += line_h;
         }
         y + h
     }
 }
 
-pub(crate) fn method_color(method: crate::app::api_client::ApiMethod) -> [f32; 4] {
-    match method {
-        crate::app::api_client::ApiMethod::Get => [0.35, 0.75, 1.0, 1.0],
-        crate::app::api_client::ApiMethod::Post => [0.48, 0.86, 0.52, 1.0],
-        crate::app::api_client::ApiMethod::Put => [1.0, 0.76, 0.32, 1.0],
-        crate::app::api_client::ApiMethod::Patch => [0.78, 0.58, 1.0, 1.0],
-        crate::app::api_client::ApiMethod::Delete => [1.0, 0.42, 0.42, 1.0],
-        _ => [0.72, 0.76, 0.84, 1.0],
+impl Renderer {
+    pub(crate) fn method_color(&self, method: crate::app::api_client::ApiMethod) -> [f32; 4] {
+        match method {
+            crate::app::api_client::ApiMethod::Get => self.ui.pick(UiRole::HttpGet, [0.35, 0.75, 1.0, 1.0]),
+            crate::app::api_client::ApiMethod::Post => self.ui.pick(UiRole::HttpPost, [0.48, 0.86, 0.52, 1.0]),
+            crate::app::api_client::ApiMethod::Put => self.ui.pick(UiRole::HttpPut, [1.0, 0.76, 0.32, 1.0]),
+            crate::app::api_client::ApiMethod::Patch => self.ui.pick(UiRole::HttpPatch, [0.78, 0.58, 1.0, 1.0]),
+            crate::app::api_client::ApiMethod::Delete => self.ui.pick(UiRole::HttpDelete, [1.0, 0.42, 0.42, 1.0]),
+            _ => self.ui.pick(UiRole::TextSecondary, [0.72, 0.76, 0.84, 1.0]),
+        }
     }
 }

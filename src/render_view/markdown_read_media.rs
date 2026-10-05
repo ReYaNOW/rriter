@@ -8,13 +8,12 @@ use std::path::Path;
 
 use crate::app::{MediaItem, document_media};
 use crate::markdown_media::{MediaEntryView, MediaKey};
+use crate::theme::UiRole;
 
 const MEDIA_GAP: f32 = 8.0;
 const MEDIA_FRAME_PAD: f32 = 6.0;
 const MEDIA_ALT_SCALE: f32 = 0.86;
 const MEDIA_FRAME_RADIUS: f32 = 5.0;
-const MEDIA_FRAME_BG: [f32; 4] = [0.11, 0.12, 0.15, 0.96];
-const MEDIA_ERROR_COLOR: [f32; 4] = [0.92, 0.45, 0.45, 1.0];
 
 /// One element of a media block. `x` is measured from the left edge of the content frame, `y`
 /// from the top of the block; both, like `w` and `h`, are whole pixels. For a failed element
@@ -262,10 +261,26 @@ impl Renderer {
             }
             let radius = MEDIA_FRAME_RADIUS * s;
             if matches!(entry, MediaEntryView::Failed(_)) {
-                let border = faded(MEDIA_ERROR_COLOR, 0.7);
-                self.push_rounded_rect_border(x, y, item.w, item.h, radius, 1.0, border, MEDIA_FRAME_BG);
+                let border = faded(self.editor_ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]), 0.7);
+                self.push_rounded_rect_border(
+                    x,
+                    y,
+                    item.w,
+                    item.h,
+                    radius,
+                    1.0,
+                    border,
+                    self.editor_ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
+                );
             } else {
-                self.push_rounded_rect(x, y, item.w, item.h, radius, MEDIA_FRAME_BG);
+                self.push_rounded_rect(
+                    x,
+                    y,
+                    item.w,
+                    item.h,
+                    radius,
+                    self.editor_ui.pick(UiRole::BgMedia, [0.11, 0.12, 0.15, 0.96]),
+                );
             }
             if item.h >= line_h {
                 let mut scratch = std::mem::take(&mut self.scratch_buffer);
@@ -294,7 +309,7 @@ impl Renderer {
             (left + pad).round(),
             (row_top + code.line_height * 0.82).round(),
             right - left - 2.0 * pad,
-            MEDIA_ERROR_COLOR,
+            self.editor_ui.pick(UiRole::Error, [0.92, 0.45, 0.45, 1.0]),
             MEDIA_ALT_SCALE,
             &mut scratch,
         );
