@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme::UiRole;
 
 fn problems_empty_state_visible(visible_row_count: usize) -> bool {
     visible_row_count == 0
@@ -52,14 +53,14 @@ impl Renderer {
             let tw = self.measure_ui_width(t, text_scale) + 16.0 * s;
             let is_active = ide_panel.problems_tab == i;
             let bg = if is_active {
-                [1.0, 1.0, 1.0, 0.12]
+                self.ui.ink(0.12)
             } else {
-                [1.0, 1.0, 1.0, 0.0]
+                self.ui.ink(0.0)
             };
             let fg = if is_active {
-                self.theme.fg
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
             } else {
-                [0.65, 0.65, 0.65, 1.0]
+                self.ui.pick(UiRole::TextMuted, [0.65, 0.65, 0.65, 1.0])
             };
 
             let is_hovered = ui_registry.register_rect(
@@ -74,7 +75,7 @@ impl Renderer {
 
             if is_active || is_hovered {
                 let draw_bg = if is_hovered && !is_active {
-                    [1.0, 1.0, 1.0, 0.06]
+                    self.ui.ink(0.06)
                 } else {
                     bg
                 };
@@ -112,7 +113,7 @@ impl Renderer {
                     (tab_y + tab_h).round(),
                     tw,
                     2.0 * s,
-                    [0.741, 0.576, 0.976, 1.0],
+                    self.ui.pick(UiRole::Accent, [0.741, 0.576, 0.976, 1.0]),
                 );
             }
 
@@ -132,7 +133,7 @@ impl Renderer {
             header_bottom_y.round(),
             content_w,
             1.0,
-            [1.0, 1.0, 1.0, 0.08],
+            self.ui.ink(0.08),
         );
 
         self.flush();
@@ -171,7 +172,7 @@ impl Renderer {
                 hint,
                 content_x + (content_w - tw) / 2.0,
                 (list_y + 32.0 * s).round(),
-                [0.45, 0.45, 0.45, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.45, 1.0]),
                 text_scale,
             );
         } else {
@@ -207,7 +208,7 @@ impl Renderer {
                                 current_y,
                                 content_w,
                                 item_h,
-                                [1.0, 1.0, 1.0, 0.05],
+                            self.ui.ink(0.05),
                             );
                         }
 
@@ -221,7 +222,7 @@ impl Renderer {
                             icon_x,
                             current_y,
                             item_h,
-                            [0.6, 0.6, 0.6, 1.0],
+                            self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]),
                         );
 
                         let file_name = ide_panel.problem_group_name_at(idx);
@@ -239,7 +240,7 @@ impl Renderer {
                             &scratch,
                             text_x.round(),
                             text_y.round(),
-                            self.theme.fg,
+                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                             text_scale,
                         );
 
@@ -255,7 +256,7 @@ impl Renderer {
                                 &scratch,
                                 badges_x,
                                 text_y.round(),
-                                self.theme.diag_error,
+                                self.ui.pick(UiRole::Error, self.theme.diag_error),
                                 text_scale,
                             );
                             badges_x += ew + 12.0 * s;
@@ -270,7 +271,7 @@ impl Renderer {
                                 &scratch,
                                 badges_x,
                                 text_y.round(),
-                                self.theme.diag_warn,
+                                self.ui.pick(UiRole::Warning, self.theme.diag_warn),
                                 text_scale,
                             );
                         }
@@ -307,20 +308,20 @@ impl Renderer {
                             current_y,
                             content_w - 14.0 * s,
                             item_h,
-                            [1.0, 1.0, 1.0, 0.05],
+                                self.ui.ink(0.05),
                         );
                     }
 
                     let (icon, color) = match diag.severity {
                         crate::lsp::DiagSeverity::Error => (
                             crate::widgets::IconType::Error,
-                            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+                            self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78]),
                         ),
                         crate::lsp::DiagSeverity::Warning => (
                             crate::widgets::IconType::Warning,
-                            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+                            self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78]),
                         ),
-                        _ => (crate::widgets::IconType::Problems, [0.5, 0.5, 0.5, 1.0]),
+                        _ => (crate::widgets::IconType::Problems, self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.5, 1.0])),
                     };
 
                     self.draw_atlas_icon(icon, icon_x, icon_y, icon_sz, color);
@@ -339,7 +340,7 @@ impl Renderer {
                         &scratch,
                         text_x.round(),
                         text_y.round(),
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                         text_scale,
                     );
 
@@ -353,7 +354,7 @@ impl Renderer {
                         &scratch,
                         current_tx,
                         text_y.round(),
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                         text_scale,
                     );
                     current_tx += msg_w + self.measure_ui_width(" ", text_scale).round();
@@ -377,7 +378,7 @@ impl Renderer {
                         &scratch,
                         current_tx,
                         text_y.round(),
-                        [0.55, 0.55, 0.6, 1.0],
+                        self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]),
                         text_scale,
                     );
                     self.scratch_buffer = scratch;
@@ -385,7 +386,7 @@ impl Renderer {
                     if let Some(code) = &diag.code {
                         let sfx_x = current_tx + p_w;
                         let sfx_w = self.measure_ui_width(code, text_scale).round();
-                        let link_color = [0.72, 0.52, 1.0, 1.0];
+                        let link_color = self.ui.pick(UiRole::Link, [0.72, 0.52, 1.0, 1.0]);
                         let sfx_color = if diag.code_href.is_some() {
                             link_color
                         } else {
@@ -397,7 +398,7 @@ impl Renderer {
                             ")",
                             sfx_x + sfx_w,
                             text_y.round(),
-                            [0.55, 0.55, 0.6, 1.0],
+                            self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]),
                             text_scale,
                         );
 
