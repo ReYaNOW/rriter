@@ -471,7 +471,9 @@ fn switch_to_tab(session: &mut crate::headless::HeadlessSession, tab: usize) {
 
 fn theme_shot_path(name: &str) -> std::path::PathBuf {
     let dir = std::path::Path::new("/tmp/rriter-themes");
-    std::fs::create_dir_all(dir).expect("create theme screenshot directory");
+    let Ok(()) = std::fs::create_dir_all(dir) else {
+        panic!("create theme screenshot directory");
+    };
     let name = if name.ends_with(".png") { name.to_string() } else { format!("{name}.png") };
     dir.join(format!("{}-{name}", std::process::id()))
 }

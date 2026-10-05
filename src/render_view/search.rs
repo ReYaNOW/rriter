@@ -93,6 +93,60 @@ impl Renderer {
             );
         }
 
+        let (input_x, input_y, input_w, input_h) = self.draw_search_panel_input(
+            (search_x, search_anim_y, search_w, search_h),
+            geometry.input_w,
+            search_editor,
+            search_focused,
+            blink_alpha,
+            ui_registry,
+        );
+        let counter_reserve = geometry.counter_reserve;
+        let text_y = input_y + input_h / 2.0 + 6.0 * s;
+        if search_count != self.last_search_len
+            || search_current_idx != self.last_search_idx
+            || search_pending != self.last_search_pending
+        {
+            self.search_res_string.clear();
+            format_search_counter(&mut self.search_res_string, search_current_idx, search_count, search_pending);
+            self.last_search_len = search_count;
+            self.last_search_idx = search_current_idx;
+            self.last_search_pending = search_pending;
+        }
+        let temp_res_text = std::mem::take(&mut self.search_res_string);
+        let (res_text, text_color) = if !show_search {
+            ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+        } else if search_count == 0 {
+            if search_editor.get_full_text().is_empty() {
+                ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+            } else if search_pending {
+                ("...", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+            } else {
+                ("Нет", self.editor_ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]))
+            }
+        } else {
+            (temp_res_text.as_str(), self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+        };
+        if counter_reserve > 0.0 && !res_text.is_empty() {
+            let counter_x = input_x + input_w + 10.0 * s;
+            self.draw_string_mono_scaled(res_text, counter_x, text_y, text_color, 0.9);
+        }
+        self.search_res_string = temp_res_text;
+        self.draw_search_panel_controls(geometry, search_anim_y, search_case_sensitive, ui_registry);
+        wants_pointer || ui_registry.wants_pointer()
+    }
+
+    fn draw_search_panel_input(
+        &mut self,
+        panel: (f32, f32, f32, f32),
+        input_w: f32,
+        search_editor: &Editor,
+        search_focused: bool,
+        blink_alpha: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) -> (f32, f32, f32, f32) {
+        let s = self.scale_factor;
+        let (search_x, search_anim_y, search_w, search_h) = panel;
         self.push_rounded_rect(
             search_x,
             search_anim_y,
@@ -112,7 +166,6 @@ impl Renderer {
                 [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
             ),
         );
-
         self.push_rounded_rect(
             search_x,
             search_anim_y,
@@ -121,25 +174,13 @@ impl Renderer {
             6.0 * s,
             self.editor_ui.pick(
                 UiRole::BgInput,
-                [
-                    self.theme.minimap_bg[0],
-                    self.theme.minimap_bg[1],
-                    self.theme.minimap_bg[2],
-                    1.0,
-                ],
+                [self.theme.minimap_bg[0], self.theme.minimap_bg[1], self.theme.minimap_bg[2], 1.0],
             ),
         );
 
         let input_x = search_x + 10.0 * s;
         let input_y = search_anim_y + 11.0 * s;
         let input_h = 30.0 * s;
-        let btn_size = 36.0 * s;
-        let btn_gap = (10.0 * s).min(search_w * 0.025);
-        let show_nav = search_w >= 250.0 * s;
-        let show_case = search_w >= 330.0 * s;
-        let input_w = geometry.input_w;
-        let counter_reserve = geometry.counter_reserve;
-
         if input_w > 0.0 {
             ui_registry.register_text_input(
                 crate::ui_system::UiId::SearchInput,
@@ -176,8 +217,22 @@ impl Renderer {
             5.0 * s,
             4.0 * s,
         );
+        (input_x, input_y, input_w, input_h)
+    }
 
-        let text_y = input_y + input_h / 2.0 + 6.0 * s;
+    fn draw_search_panel_controls(
+        &mut self,
+        geometry: SearchPanelGeometry,
+        search_anim_y: f32,
+        search_case_sensitive: bool,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let s = self.scale_factor;
+        let search_w = geometry.w;
+        let btn_size = 36.0 * s;
+        let btn_gap = (10.0 * s).min(search_w * 0.025);
+        let show_nav = search_w >= 250.0 * s;
+        let show_case = search_w >= 330.0 * s;
         let btn_y = search_anim_y + 8.0 * s;
 
         let close_size = geometry.close_size;
@@ -193,7 +248,6 @@ impl Renderer {
             custom_color: None,
         };
         current_x -= btn_gap;
-
         let btn_down = if show_nav {
             current_x -= btn_size;
             let button = IconButton {
@@ -223,46 +277,8 @@ impl Renderer {
             })
         } else { None };
 
-        if search_count != self.last_search_len
-            || search_current_idx != self.last_search_idx
-            || search_pending != self.last_search_pending
-        {
-            self.search_res_string.clear();
-            format_search_counter(&mut self.search_res_string, search_current_idx, search_count, search_pending);
-            self.last_search_len = search_count;
-            self.last_search_idx = search_current_idx;
-            self.last_search_pending = search_pending;
-        }
-
-        let temp_res_text = std::mem::take(&mut self.search_res_string);
-
-        let (res_text, text_color) = if !show_search {
-            ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
-        } else if search_count == 0 {
-            if search_editor.get_full_text().is_empty() {
-                ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
-            } else if search_pending {
-                ("...", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
-            } else {
-                ("Нет", self.editor_ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]))
-            }
-        } else {
-            (
-                temp_res_text.as_str(),
-                self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]),
-            )
-        };
-
-        if counter_reserve > 0.0 && !res_text.is_empty() {
-            let counter_x = input_x + input_w + 10.0 * s;
-            self.draw_string_mono_scaled(res_text, counter_x, text_y, text_color, 0.9);
-        }
-
-        self.search_res_string = temp_res_text;
-
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
-
         // The panel sits on the editor surface: its icons take the editor theme too.
         self.icons_on_editor = true;
         if let Some(btn_case) = &btn_case {
@@ -290,8 +306,6 @@ impl Renderer {
             false,
         );
         self.icons_on_editor = false;
-
-        wants_pointer || ui_registry.wants_pointer()
     }
 }
 

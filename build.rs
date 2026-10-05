@@ -514,19 +514,20 @@ fn main() {
     file_stems.sort();
     for stem in &file_stems {
         let dark_stem = format!("{}_dark", stem);
-        if existing_files.contains(&dark_stem) {
-            writeln!(
-                bytes_out,
-                "        \"{}\" if is_dark => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
+        let dark_arm = if existing_files.contains(&dark_stem) {
+            format!(
+                "        \"{}\" if is_dark => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),\n",
                 escape(stem),
                 escape(&manifest),
                 escape(&dark_stem)
             )
-            .unwrap();
-        }
+        } else {
+            String::new()
+        };
         writeln!(
             bytes_out,
-            "        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
+            "{}        \"{}\" => include_bytes!(\"{}/src/icons/atom/icons/files/{}.svg\"),",
+            dark_arm,
             escape(stem),
             escape(&manifest),
             escape(stem)
