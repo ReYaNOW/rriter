@@ -127,8 +127,21 @@ def scan_file(path: Path):
 
 
 def is_pick_second_arg(source: str, offset: int) -> bool:
-    prefix = source[max(0, offset - 240):offset]
-    return re.search(r"\.pick\s*\(\s*UiRole::[A-Za-z_][A-Za-z_0-9]*\s*,\s*[^)]*$", prefix) is not None
+    # Climb out through the brackets enclosing `offset`: nested calls such as
+    # `pick(UiRole::X, [theme.bg[0].min(1.0), ..])` must still count as wrapped.
+    depth = 0
+    for i in range(offset - 1, max(-1, offset - 2000), -1):
+        char = source[i]
+        if char in ")]":
+            depth += 1
+        elif char in "([":
+            if depth:
+                depth -= 1
+            elif char == "(" and re.search(r"\.pick\s*$", source[max(0, i - 40):i]):
+                return re.match(r"\s*UiRole::[A-Za-z_][A-Za-z_0-9]*\s*,", source[i + 1:offset]) is not None
+        elif char in ";{}" and not depth:
+            return False
+    return False
 
 
 def numeric_color(value: str) -> tuple[float, ...] | None:
