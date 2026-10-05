@@ -258,6 +258,8 @@ pub(crate) fn settings_scrollbar(
             radius: Some(3.0),
             track_color: None,
             thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: ScrollbarAxis::Vertical,
         lane,

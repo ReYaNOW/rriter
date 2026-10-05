@@ -12,6 +12,7 @@
 
 use crate::renderer::Renderer;
 use crate::scroll::ScrollbarThumb;
+use crate::theme::{UiPalette, UiRole};
 use crate::ui_system::{UiId, UiRegistry};
 
 /// `(x, y, w, h)` in physical pixels.
@@ -21,6 +22,26 @@ pub(crate) type ScrollbarRect = (f32, f32, f32, f32);
 pub(crate) enum ScrollbarAxis {
     Vertical,
     Horizontal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScrollbarPaint {
+    Literal,
+    Ink,
+    Role(UiRole),
+}
+
+impl ScrollbarPaint {
+    fn resolve(self, ui: &UiPalette, literal: [f32; 4]) -> [f32; 4] {
+        match self {
+            Self::Literal => literal,
+            Self::Ink => ui.ink(literal[3]),
+            Self::Role(role) => {
+                let color = ui.pick(role, literal);
+                [color[0], color[1], color[2], literal[3]]
+            }
+        }
+    }
 }
 
 /// Look of a scrollbar. Lengths are logical pixels (multiplied by the UI scale).
@@ -40,6 +61,8 @@ pub(crate) struct ScrollbarStyle {
     /// Filled over the whole lane when set.
     pub track_color: Option<[f32; 4]>,
     pub thumb_color: [f32; 4],
+    pub thumb_paint: ScrollbarPaint,
+    pub track_paint: ScrollbarPaint,
 }
 
 impl ScrollbarStyle {
@@ -52,11 +75,14 @@ impl ScrollbarStyle {
         radius: None,
         track_color: None,
         thumb_color: [1.0, 1.0, 1.0, 0.22],
+        thumb_paint: ScrollbarPaint::Literal,
+        track_paint: ScrollbarPaint::Literal,
     };
     /// Editor vertical bar: 10 px lane, 8 px accent thumb.
     pub(crate) const EDITOR_Y: Self = Self {
         edge_gap: Some(1.0),
         thumb_color: [0.7, 0.33, 0.54, 0.8],
+        thumb_paint: ScrollbarPaint::Role(UiRole::ScrollbarThumb),
         ..Self::BASE
     };
     /// Editor horizontal bar: 14 px lane with a theme-coloured track (set by the caller).
@@ -64,26 +90,31 @@ impl ScrollbarStyle {
         thumb_thickness: 6.0,
         min_thumb: 40.0,
         thumb_color: [0.7, 0.33, 0.54, 1.0],
+        thumb_paint: ScrollbarPaint::Role(UiRole::ScrollbarThumb),
         ..Self::BASE
     };
     pub(crate) const TERMINAL: Self = Self {
         thumb_color: [0.7, 0.33, 0.54, 0.8],
+        thumb_paint: ScrollbarPaint::Role(UiRole::ScrollbarThumb),
         ..Self::BASE
     };
     /// Thin white thumb of side panels (file tree).
     pub(crate) const FILE_TREE: Self = Self {
         thumb_thickness: 3.0,
+        thumb_paint: ScrollbarPaint::Ink,
         ..Self::BASE
     };
     pub(crate) const GIT_LOGS: Self = Self {
         thumb_thickness: 3.0,
         min_thumb: 10.0,
+        thumb_paint: ScrollbarPaint::Ink,
         ..Self::BASE
     };
     pub(crate) const GIT_GRAPH: Self = Self {
         thumb_thickness: 6.0,
         track_pad: 4.0,
         min_thumb: 10.0,
+        thumb_paint: ScrollbarPaint::Ink,
         ..Self::BASE
     };
     /// 12 px lane, 6 px thumb flush with the lane start.
@@ -98,11 +129,13 @@ impl ScrollbarStyle {
         thumb_thickness: 4.0,
         track_pad: 8.0,
         thumb_color: [1.0, 1.0, 1.0, 1.0],
+        thumb_paint: ScrollbarPaint::Ink,
         ..Self::BASE
     };
     /// Markdown Reader vertical bar; thumb colour follows the theme (set by the caller).
     pub(crate) const MARKDOWN_READ: Self = Self {
         edge_gap: Some(1.0),
+        thumb_paint: ScrollbarPaint::Ink,
         ..Self::BASE
     };
 }
@@ -359,6 +392,7 @@ impl Renderer {
         if alpha > 0.0 {
             if let Some(color) = bar.style.track_color {
                 let (x, y, w, h) = geometry.lane;
+                let color = bar.style.track_paint.resolve(&self.ui, color);
                 self.push_rect(x, y, w, h, with_alpha(color, alpha));
             }
             let (x, y, w, h) = geometry.thumb_rect;
@@ -369,7 +403,10 @@ impl Renderer {
                     w,
                     h,
                     geometry.radius,
-                    with_alpha(bar.style.thumb_color, alpha),
+                    with_alpha(
+                        bar.style.thumb_paint.resolve(&self.ui, bar.style.thumb_color),
+                        alpha,
+                    ),
                 );
             }
         }
@@ -501,5 +538,38 @@ mod tests {
         };
         let rect = fill.geometry(1.0).expect("bar").thumb_rect;
         assert_eq!((rect.1, rect.3), (51.0, 8.0));
+    }
+
+    #[test]
+    fn paint_resolution_preserves_dracula_and_uses_light_theme_colours() {
+        let literal = [1.0, 1.0, 1.0, 0.36];
+        let dracula = UiPalette::for_id(crate::theme::ThemeId::Dracula);
+        assert_eq!(ScrollbarPaint::Literal.resolve(&dracula, literal), literal);
+        assert_eq!(ScrollbarPaint::Ink.resolve(&dracula, literal), literal);
+        assert_eq!(
+            ScrollbarPaint::Role(UiRole::ScrollbarThumb).resolve(&dracula, literal),
+            literal,
+        );
+
+        let role_color = [0.24, 0.35, 0.46, 0.95];
+        let light = UiPalette {
+            dracula: false,
+            is_dark: false,
+            text: [0.12, 0.23, 0.34, 1.0],
+            roles: {
+                let mut roles = dracula.roles;
+                roles[UiRole::ScrollbarThumb as usize] = role_color;
+                roles
+            },
+            ..dracula
+        };
+        assert_eq!(
+            ScrollbarPaint::Ink.resolve(&light, literal),
+            [0.12, 0.23, 0.34, literal[3]],
+        );
+        assert_eq!(
+            ScrollbarPaint::Role(UiRole::ScrollbarThumb).resolve(&light, literal),
+            [role_color[0], role_color[1], role_color[2], literal[3]],
+        );
     }
 }

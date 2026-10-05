@@ -36,6 +36,7 @@ pub(crate) fn lsp_log_scrollbar(
             track_pad: 7.0,
             min_thumb: 20.0,
             thumb_color: [1.0, 1.0, 1.0, 0.22],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Ink,
             ..ScrollbarStyle::BASE
         },
         axis,
@@ -82,6 +83,7 @@ pub(crate) fn lsp_panel_scrollbar(
             track_pad: 5.0,
             min_thumb: 40.0,
             thumb_color: [1.0, 1.0, 1.0, 0.22],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Ink,
             ..ScrollbarStyle::BASE
         },
         axis: ScrollbarAxis::Vertical,

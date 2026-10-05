@@ -156,6 +156,7 @@ pub(crate) fn markdown_read_scrollbar(
     Scrollbar {
         style: ScrollbarStyle {
             thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
             ..ScrollbarStyle::MARKDOWN_READ
         },
         axis: ScrollbarAxis::Vertical,

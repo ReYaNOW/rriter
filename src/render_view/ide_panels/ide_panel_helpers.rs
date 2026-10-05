@@ -3,7 +3,7 @@ use crate::render_view::{
     language_display_name_for_ext, selected_char_count,
 };
 use crate::renderer::Renderer;
-use crate::theme::UiRole;
+use crate::theme::{UiPalette, UiRole};
 use crate::widgets::{Button, IconButton};
 use glow::HasContext;
 
@@ -651,6 +651,7 @@ fn git_stage_controls_disabled(workspace_disabled: bool, git_pending: bool) -> b
 }
 
 fn git_checkbox_color(
+    ui: &UiPalette,
     staged: bool,
     partial: bool,
     controls_disabled: bool,
@@ -660,7 +661,7 @@ fn git_checkbox_color(
         ([0.48, 0.82, 0.52, alpha], [0.07, 0.09, 0.12, alpha])
     } else if partial {
         (
-            [1.0, 1.0, 1.0, if controls_disabled { 0.10 } else { 0.20 }],
+            ui.ink(if controls_disabled { 0.10 } else { 0.20 }),
             [
                 0.72,
                 0.76,
@@ -670,19 +671,21 @@ fn git_checkbox_color(
         )
     } else {
         (
-            [1.0, 1.0, 1.0, if controls_disabled { 0.07 } else { 0.12 }],
+            ui.ink(if controls_disabled { 0.07 } else { 0.12 }),
             [0.0; 4],
         )
     }
 }
 
 fn git_stage_checkbox_color(
+    ui: &UiPalette,
     staged: bool,
     partial: bool,
     workspace_disabled: bool,
     git_pending: bool,
 ) -> ([f32; 4], [f32; 4]) {
     git_checkbox_color(
+        ui,
         staged,
         partial,
         git_stage_controls_disabled(workspace_disabled, git_pending),
@@ -1409,6 +1412,12 @@ fn database_connection_dialog_scrollbar(
             radius: None,
             track_color: Some([0.20, 0.21, 0.25, 0.55]),
             thumb_color: [0.48, 0.50, 0.58, 0.90],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Role(
+                crate::theme::UiRole::ScrollbarThumb,
+            ),
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Role(
+                crate::theme::UiRole::BgInput,
+            ),
         },
         axis: ScrollbarAxis::Vertical,
         lane: (track.x, track.y, track.w, track.h),
