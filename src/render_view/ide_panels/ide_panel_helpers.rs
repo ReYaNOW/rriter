@@ -417,7 +417,8 @@ impl Renderer {
                 rect.w,
                 rect.h,
                 5.0 * scale,
-                self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], alpha]),
+                // Translucent tint of the label colour: `pick` would return the opaque role colour and hide the label.
+                [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], alpha],
             );
             let visible_label = if layout.compact_mode {
                 "↔"
@@ -454,7 +455,7 @@ impl Renderer {
                         toc_rect.w,
                         toc_rect.h,
                         5.0 * scale,
-                        self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], alpha]),
+                        [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], alpha],
                     );
                     self.draw_string_scaled_stable(
                         "≡",

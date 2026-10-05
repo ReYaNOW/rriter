@@ -59,10 +59,10 @@ impl Renderer {
                 let diag = lsp_diagnostics[idx];
                 // Цвет по severity
                 let color: [f32; 4] = match diag.severity {
-                    crate::lsp::DiagSeverity::Error => self.ui.pick(crate::theme::UiRole::Error, [0.96, 0.26, 0.21, 0.90]),
-                    crate::lsp::DiagSeverity::Warning => self.ui.pick(crate::theme::UiRole::Warning, [0.95, 0.9, 0.3, 0.90]),
-                    crate::lsp::DiagSeverity::Info => self.ui.pick(crate::theme::UiRole::Info, [0.26, 0.73, 0.90, 0.80]),
-                    crate::lsp::DiagSeverity::Hint => self.ui.pick(crate::theme::UiRole::TextMuted, [0.50, 0.50, 0.50, 0.70]),
+                    crate::lsp::DiagSeverity::Error => self.editor_ui.pick(crate::theme::UiRole::Error, [0.96, 0.26, 0.21, 0.90]),
+                    crate::lsp::DiagSeverity::Warning => self.editor_ui.pick(crate::theme::UiRole::Warning, [0.95, 0.9, 0.3, 0.90]),
+                    crate::lsp::DiagSeverity::Info => self.editor_ui.pick(crate::theme::UiRole::Info, [0.26, 0.73, 0.90, 0.80]),
+                    crate::lsp::DiagSeverity::Hint => self.editor_ui.pick(crate::theme::UiRole::TextMuted, [0.50, 0.50, 0.50, 0.70]),
                 };
                 let line = diag.start_line as usize;
                 if line >= editor.line_offsets.len() {

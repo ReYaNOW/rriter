@@ -1404,7 +1404,7 @@ impl Renderer {
                     continue;
                 };
                 let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-                self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn));
+                self.push_rect(bar_x, y, bar_w, indicator_h, self.editor_ui.pick(UiRole::Warning, self.theme.diag_warn));
             }
         }
 
@@ -1414,7 +1414,7 @@ impl Renderer {
                 continue;
             };
             let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-            self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Error, self.ui_theme.diag_error));
+            self.push_rect(bar_x, y, bar_w, indicator_h, self.editor_ui.pick(UiRole::Error, self.theme.diag_error));
         }
     }
     /// Рисует весёлый cowsay-экран когда в IDE-режиме нет открытых вкладок.

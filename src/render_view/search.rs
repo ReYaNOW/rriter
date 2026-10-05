@@ -99,7 +99,7 @@ impl Renderer {
             search_w,
             search_h,
             6.0 * s,
-            self.ui.pick(UiRole::Border, [0.18, 0.20, 0.22, 1.0]),
+            self.editor_ui.pick(UiRole::Border, [0.18, 0.20, 0.22, 1.0]),
         );
         self.push_rounded_rect(
             search_x - 1.0,
@@ -107,7 +107,7 @@ impl Renderer {
             search_w + 2.0,
             search_h + 2.0,
             6.0 * s,
-            self.ui.pick(
+            self.editor_ui.pick(
                 UiRole::Selection,
                 [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.6],
             ),
@@ -119,7 +119,7 @@ impl Renderer {
             search_w,
             search_h,
             6.0 * s,
-            self.ui.pick(
+            self.editor_ui.pick(
                 UiRole::BgInput,
                 [
                     self.theme.minimap_bg[0],
@@ -237,19 +237,19 @@ impl Renderer {
         let temp_res_text = std::mem::take(&mut self.search_res_string);
 
         let (res_text, text_color) = if !show_search {
-            ("", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+            ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
         } else if search_count == 0 {
             if search_editor.get_full_text().is_empty() {
-                ("", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+                ("", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
             } else if search_pending {
-                ("...", self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
+                ("...", self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]))
             } else {
-                ("Нет", self.ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]))
+                ("Нет", self.editor_ui.pick(UiRole::Error, [0.95, 0.35, 0.45, 1.0]))
             }
         } else {
             (
                 temp_res_text.as_str(),
-                self.ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]),
+                self.editor_ui.pick(UiRole::TextMuted, [0.6, 0.6, 0.6, 1.0]),
             )
         };
 
@@ -263,6 +263,8 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
+        // The panel sits on the editor surface: its icons take the editor theme too.
+        self.icons_on_editor = true;
         if let Some(btn_case) = &btn_case {
             ui_registry.register_icon_button(
                 crate::ui_system::UiId::SearchCaseToggle, btn_case, self, mx, my, s, false,
@@ -287,6 +289,7 @@ impl Renderer {
             s,
             false,
         );
+        self.icons_on_editor = false;
 
         wants_pointer || ui_registry.wants_pointer()
     }

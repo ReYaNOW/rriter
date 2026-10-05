@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 
 
@@ -46,7 +47,6 @@ EDITOR_THEME_WHOLE_FILE_EXCEPTIONS = {
     "src/render_view/markdown_read_media.rs": "Markdown Reader media surfaces",
     "src/render_view/markdown_read_text_layout.rs": "Markdown Reader content layout",
     "src/render_view/markdown_code_scroll.rs": "Markdown Reader code blocks",
-    "src/render_view/markdown_toc.rs": "Markdown Reader table of contents",
 }
 EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/renderer/renderer_init_methods.rs", "theme.clone"): "Initial renderer UI palette is synchronized with its editor palette before theme selection is applied",
@@ -61,6 +61,23 @@ EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/terminal_ui.rs", "self.theme.terminal_cursor"): "Terminal cursor",
     ("src/render_view/terminal_ui.rs", "&ansi_colors"): "Alias of the terminal ANSI palette",
     ("src/render_view/terminal_ui.rs", "border_color"): "Alias of the terminal content border colour",
+    ("src/render_view/markdown_toc.rs", "self.theme.sel"): "Markdown Reader contents panel border and selected row: editor theme, same palette as its editor_ui background",
+    ("src/render_view/markdown_toc.rs", "self.theme.fg"): "Markdown Reader contents panel text: editor theme, same palette as its editor_ui background",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.syntax"): "Inline diff popup code text uses editor syntax colours",
+    ("src/render_view/root_frame_helpers.rs", "&syntax"): "Alias of the editor syntax palette in the inline diff popup",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.sel"): "Editor diff overlay border",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.minimap_bg"): "Editor diff overlay background",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.fg"): "Editor diff overlay text",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.line_num"): "Editor diff overlay counters and disabled controls",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.diff_added"): "Editor diff overlay added rows",
+    ("src/render_view/root_frame_helpers.rs", "self.theme.diff_deleted"): "Editor diff overlay deleted rows",
+    ("src/render_view/search.rs", "self.theme.sel"): "Editor search bar outline (search is editor-theme per spec)",
+    ("src/render_view/search.rs", "self.theme.minimap_bg"): "Editor search bar background (search is editor-theme per spec)",
+    ("src/render_view/ui.rs", "self.theme.diag_warn"): "Diagnostic ruler on the editor scrollbar track (editor gutter diagnostics)",
+    ("src/render_view/ui.rs", "self.theme.diag_error"): "Diagnostic ruler on the editor scrollbar track (editor gutter diagnostics)",
+    ("src/widgets.rs", "&renderer.theme"): "IconButton on the editor surface (Renderer::icons_on_editor) reads the editor theme",
+    ("src/widgets.rs", "theme.sel"): "IconButton on the editor surface: selection fallback of the editor palette",
+    ("src/widgets.rs", "theme.fg"): "IconButton on the editor surface: icon fallback of the editor palette",
 }
 EDITOR_THEME_FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/terminal_ui.rs", "terminal_default_cell_text_uses_theme_ansi_seven"): "Test of terminal text using the editor theme's ANSI palette",
@@ -74,11 +91,7 @@ EDITOR_THEME_FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/root_frame_overlay_helpers.rs", "draw_empty_ide_frame"): "Blank editor surface background",
     ("src/render_view/root_frame_overlay_helpers.rs", "draw_blank_editor_area"): "Blank editor surface background",
     ("src/render_view/root_frame_overlay_helpers.rs", "draw_editor_horizontal_scrollbar"): "Editor horizontal scrollbar",
-    ("src/render_view/root_frame_helpers.rs", "draw_inline_git_popup_panel"): "Inline editor diff overlay",
-    ("src/render_view/root_frame_helpers.rs", "draw_inline_git_text_line"): "Inline editor diff text",
-    ("src/render_view/root_frame_helpers.rs", "draw_git_diff_hunk_panel"): "Editor diff overlay",
     ("src/render_view/ui.rs", "draw_empty_ide"): "Empty editor surface background",
-    ("src/render_view/search.rs", "draw_search_panel"): "Editor text search overlay",
     ("src/render_view/sticky.rs", "draw_sticky_lines"): "Sticky editor context lines",
 }
 EXCEPTIONS: dict[tuple[str, str], str] = {
@@ -369,10 +382,11 @@ def swallowed_code(path: Path):
 
 
 def numeric_color(value: str) -> tuple[float, ...] | None:
-    if not is_color_array(value):
+    inner = value.strip()[1:-1]
+    if not is_color_array(inner):
         return None
     channels = []
-    for part in (part.strip() for part in value.strip()[1:-1].split(",")):
+    for part in (part.strip() for part in inner.split(",")):
         byte = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*255\.0", part)
         number = byte or re.fullmatch(r"(\d+(?:\.\d+)?)(?:f32)?", part)
         if not number:
@@ -413,6 +427,20 @@ def pick_representatives(files: list[Path]):
                 if numeric is not None:
                     picks.setdefault(match.group(1), Counter())[numeric] += 1
     return picks
+
+
+def used_roles(files: list[Path]) -> set[str]:
+    """Roles referenced anywhere in production code, whatever the fallback expression is."""
+    used: set[str] = set()
+    pattern = re.compile(r"\bUiRole::([A-Za-z_][A-Za-z_0-9]*)")
+    for path in files:
+        if not path.is_file() or is_test_file(path):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == "src/theme.rs":
+            continue
+        used.update(pattern.findall(path.read_text(encoding="utf-8")))
+    return used
 
 
 def main() -> int:
@@ -472,7 +500,8 @@ def main() -> int:
             print(f"WHITE {rel}:{line}: {value} | {context}")
         roles, representatives = role_catalog()
         picks = pick_representatives(files)
-        unused = [role for role in roles if not picks.get(role)]
+        referenced = used_roles(files)
+        unused = [role for role in roles if role not in referenced]
         mismatches = []
         for role in roles:
             counts = picks.get(role)

@@ -89,7 +89,7 @@ impl Renderer {
                 break;
             }
             let text_y = (y - line_offset + visible_idx as f32 * line_h).round();
-            self.draw_editor_line_number_centered(first_line_no + line_idx, x, w, text_y, 1.0);
+            self.draw_editor_line_number_centered(first_line_no + line_idx, x, w, text_y, 1.0, self.ui_theme.line_num);
         }
     }
 
