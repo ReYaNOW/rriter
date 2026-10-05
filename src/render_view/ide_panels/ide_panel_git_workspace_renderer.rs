@@ -36,6 +36,8 @@ fn git_workspace_scrollbar(
             radius: Some(1.5),
             track_color: None,
             thumb_color,
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
         lane: (panel_x + panel_w - 8.0 * scale, list_y, 8.0 * scale, list_h),
@@ -1150,6 +1152,7 @@ impl Renderer {
                         }
 
                         let (checkbox_color, check_color) = git_stage_checkbox_color(
+                            &self.ui,
                             file.staged,
                             false,
                             workspace_disabled,
@@ -1242,6 +1245,7 @@ impl Renderer {
                         let check_x = folder_layout.check_x;
                         let check_y = folder_layout.check_y;
                         let (checkbox_color, check_color) = git_stage_checkbox_color(
+                            &self.ui,
                             matches!(
                                 folder_stage,
                                 Some(crate::app::git_panel::GitFolderStageState::All)

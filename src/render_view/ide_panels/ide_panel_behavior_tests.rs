@@ -278,23 +278,27 @@ mod tests {
 
     #[test]
     fn git_checkbox_color_keeps_staged_state_visible_when_disabled() {
-        let (active_bg, active_mark) = git_checkbox_color(true, false, false);
-        let (disabled_bg, disabled_mark) = git_checkbox_color(true, false, true);
+        let ui = crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula);
+        let (active_bg, active_mark) = git_checkbox_color(&ui, true, false, false);
+        let (disabled_bg, disabled_mark) = git_checkbox_color(&ui, true, false, true);
 
         assert_eq!(&active_bg[..3], &[0.48, 0.82, 0.52]);
         assert_eq!(&disabled_bg[..3], &[0.48, 0.82, 0.52]);
         assert!(disabled_bg[3] > 0.0 && disabled_bg[3] < active_bg[3]);
         assert!(disabled_mark[3] > 0.0 && disabled_mark[3] < active_mark[3]);
 
-        let (partial_bg, partial_mark) = git_checkbox_color(false, true, true);
+        let (partial_bg, partial_mark) = git_checkbox_color(&ui, false, true, true);
         assert!(partial_bg[3] > 0.0);
         assert!(partial_mark[3] > 0.0);
     }
 
     #[test]
     fn git_pending_state_dims_stage_checkboxes_like_other_disabled_controls() {
-        let (active_bg, active_mark) = git_stage_checkbox_color(true, false, false, false);
-        let (pending_bg, pending_mark) = git_stage_checkbox_color(true, false, false, true);
+        let ui = crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula);
+        let (active_bg, active_mark) =
+            git_stage_checkbox_color(&ui, true, false, false, false);
+        let (pending_bg, pending_mark) =
+            git_stage_checkbox_color(&ui, true, false, false, true);
 
         assert!(pending_bg[3] < active_bg[3]);
         assert!(pending_mark[3] < active_mark[3]);

@@ -301,6 +301,8 @@ fn database_table_scrollbar_with_ui(
             radius: Some(3.0),
             track_color: Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
             thumb_color: ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
+            track_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Literal,
         },
         axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
         lane,

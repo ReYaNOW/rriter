@@ -240,6 +240,7 @@ pub(crate) fn api_python_scrollbar(
             track_pad: 0.0,
             min_thumb: 18.0,
             thumb_color: [1.0, 1.0, 1.0, 0.36],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Ink,
             ..ScrollbarStyle::BASE
         },
         axis: ScrollbarAxis::Vertical,
@@ -375,6 +376,7 @@ pub(crate) fn api_mock_server_log_scrollbar(
             track_pad: 7.0,
             min_thumb: 24.0,
             thumb_color: [1.0, 1.0, 1.0, 0.24],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Ink,
             ..ScrollbarStyle::BASE
         },
         axis: ScrollbarAxis::Vertical,
@@ -408,6 +410,7 @@ pub(crate) fn api_mock_guide_scrollbar(
             track_pad: 7.0,
             min_thumb: 28.0,
             thumb_color: [1.0, 1.0, 1.0, 0.28],
+            thumb_paint: crate::render_view::scrollbar_widget::ScrollbarPaint::Ink,
             ..ScrollbarStyle::BASE
         },
         axis: ScrollbarAxis::Vertical,
