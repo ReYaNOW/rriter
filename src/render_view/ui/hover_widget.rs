@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::IdePanelState;
 use crate::lsp::Diagnostic;
+use crate::theme::UiRole;
 use crate::ui_system::UiRegistry;
 
 pub struct DiagChar {
@@ -555,19 +556,22 @@ impl Renderer {
         hover.interaction_rect = (frame_surface.outer_rect.2 > 0.0
             && frame_surface.outer_rect.3 > 0.0)
             .then_some(frame_surface.outer_rect);
-        let base_fill_color = [
+        let base_fill_color = self.ui.pick(UiRole::BgTooltip, [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
             self.theme.minimap_bg[2],
             1.0,
-        ];
-        let diagnostic_fill_color = [
+        ]);
+        let diagnostic_fill_color = self.ui.pick(UiRole::BgTooltip, [
             (self.theme.minimap_bg[0] + 0.035).min(1.0),
             (self.theme.minimap_bg[1] + 0.035).min(1.0),
             (self.theme.minimap_bg[2] + 0.035).min(1.0),
             1.0,
-        ];
-        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+        ]);
+        let border_color = self.ui.pick(
+            UiRole::Selection,
+            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
+        );
         if frame_surface.outer_rect.2 > 0.0 && frame_surface.outer_rect.3 > 0.0 {
             self.push_hover_surface_fill(frame_surface, base_fill_color);
             self.flush();
@@ -606,7 +610,7 @@ impl Renderer {
                     sep_y,
                     sep_w.round(),
                     1.0_f32.max(s.round()),
-                    [1.0, 1.0, 1.0, 0.10],
+                    self.ui.ink(0.10),
                 );
             }
         }
@@ -635,10 +639,10 @@ impl Renderer {
         for (i, &(idx, _, _, _, _)) in hovered_diags_cache.iter().enumerate() {
             let diag = lsp_diagnostics[idx];
             let border_color = match diag.severity {
-                crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 1.0],
-                crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 1.0],
-                crate::lsp::DiagSeverity::Info => [0.26, 0.73, 0.90, 1.0],
-                crate::lsp::DiagSeverity::Hint => [0.50, 0.50, 0.50, 1.0],
+                crate::lsp::DiagSeverity::Error => self.ui.pick(UiRole::Error, [0.96, 0.26, 0.21, 1.0]),
+                crate::lsp::DiagSeverity::Warning => self.ui.pick(UiRole::Warning, [0.95, 0.9, 0.3, 1.0]),
+                crate::lsp::DiagSeverity::Info => self.ui.pick(UiRole::Info, [0.26, 0.73, 0.90, 1.0]),
+                crate::lsp::DiagSeverity::Hint => self.ui.pick(UiRole::TextMuted, [0.50, 0.50, 0.50, 1.0]),
             };
 
             let source_str = diag.source.as_deref().unwrap_or("LSP");
@@ -669,7 +673,7 @@ impl Renderer {
                             && item.byte_offset >= sel_start
                             && item.byte_offset < sel_end
                         {
-                            self.push_rect(draw_x, ch_y, adv, line_h, self.theme.sel);
+                            self.push_rect(draw_x, ch_y, adv, line_h, self.ui.pick(UiRole::Selection, self.theme.sel));
                         }
                     }
 
@@ -693,13 +697,13 @@ impl Renderer {
                 draw_x = (bx + pad).round() + *last_line_w + 8.0 * s;
             }
 
-            self.draw_string_mono_scaled("(", draw_x, text_y.round(), [0.55, 0.55, 0.6, 1.0], 1.0);
+            self.draw_string_mono_scaled("(", draw_x, text_y.round(), self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]), 1.0);
             draw_x += self.measure_mono_width("(", 1.0);
             self.draw_string_mono_scaled(
                 source_str,
                 draw_x,
                 text_y.round(),
-                [0.55, 0.55, 0.6, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]),
                 1.0,
             );
             draw_x += self.measure_mono_width(source_str, 1.0);
@@ -709,7 +713,7 @@ impl Renderer {
                     " ",
                     draw_x,
                     text_y.round(),
-                    [0.55, 0.55, 0.6, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]),
                     1.0,
                 );
                 draw_x += self.measure_mono_width(" ", 1.0);
@@ -722,7 +726,7 @@ impl Renderer {
                     && my >= text_y.round() - line_h
                     && my <= text_y.round() + 2.0 * s;
 
-                let link_color: [f32; 4] = [0.72, 0.52, 1.0, 1.0];
+                let link_color: [f32; 4] = self.ui.pick(UiRole::Link, [0.72, 0.52, 1.0, 1.0]);
                 let sfx_color = if sfx_hovered {
                     link_color
                 } else {
@@ -736,7 +740,7 @@ impl Renderer {
                         text_y.round() + 1.0,
                         sfx_w,
                         1.0,
-                        [link_color[0], link_color[1], link_color[2], ul_alpha],
+                        self.ui.pick(UiRole::Link, [link_color[0], link_color[1], link_color[2], ul_alpha]),
                     );
                     if sfx_hovered {
                         *wants_pointer = true;
@@ -757,7 +761,7 @@ impl Renderer {
                 draw_x += sfx_w;
             }
 
-            self.draw_string_mono_scaled(")", draw_x, text_y.round(), [0.55, 0.55, 0.6, 1.0], 1.0);
+            self.draw_string_mono_scaled(")", draw_x, text_y.round(), self.ui.pick(UiRole::TextMuted, [0.55, 0.55, 0.6, 1.0]), 1.0);
 
             let total_text_h = *line_count as f32 * line_h;
             self.push_rect(bx + 4.0 * s, current_y, 3.0 * s, total_text_h, border_color);
@@ -777,7 +781,7 @@ impl Renderer {
                     icon_sz + 8.0 * s,
                     icon_sz + 4.0 * s,
                     4.0 * s,
-                    [1.0, 1.0, 1.0, 0.1],
+                    self.ui.ink(0.1),
                 );
                 *wants_pointer = true;
             }
@@ -787,9 +791,9 @@ impl Renderer {
                 crate::widgets::IconType::Copy
             };
             let icon_color = if is_copied {
-                [0.3, 0.9, 0.4, 1.0]
+                self.ui.pick(UiRole::Success, [0.3, 0.9, 0.4, 1.0])
             } else {
-                self.theme.fg
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
             };
             let icon_render_sz = 16.0 * s;
             let offset = (icon_sz - icon_render_sz) / 2.0;
@@ -1155,8 +1159,8 @@ impl Renderer {
                     && frame_surface.outer_rect.3 > 0.0)
                     .then_some(frame_surface.outer_rect);
             }
-            let fill_color = fade_hover_color(self.theme.minimap_bg, opacity);
-            let border_color = fade_hover_color(self.theme.sel, opacity);
+            let fill_color = self.ui.pick(UiRole::BgTooltip, fade_hover_color(self.theme.minimap_bg, opacity));
+            let border_color = self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity));
             self.push_hover_popup_frame(
                 frame_x,
                 frame_y,
@@ -1216,7 +1220,7 @@ impl Renderer {
                         rounded_top + (cur_line_h * 0.5).round(),
                         (box_w - pad * 2.0).round(),
                         1.0_f32.max(s.round()),
-                        [1.0, 1.0, 1.0, 0.10 * opacity],
+                        self.ui.ink(0.10 * opacity),
                     );
                     current_top += cur_line_h;
                     idx += 1;
@@ -1250,7 +1254,7 @@ impl Renderer {
                             code_w.round(),
                             code_h.round(),
                             4.0 * s,
-                            [0.15, 0.16, 0.20, 0.96 * opacity],
+                            self.ui.pick(UiRole::BgCode, [0.15, 0.16, 0.20, 0.96 * opacity]),
                         );
                     }
                 }
@@ -1294,7 +1298,7 @@ impl Renderer {
                                         rounded_top,
                                         adv.ceil() + 1.0,
                                         cur_line_h.ceil() + 1.0,
-                                        fade_hover_color(self.theme.sel, opacity),
+                                        self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity)),
                                     );
                                 }
                             }
@@ -1348,7 +1352,7 @@ impl Renderer {
                                     (draw_x - run_x + 1.0 * s).max(2.0 * s),
                                     (cur_line_h - 2.0 * s).round(),
                                     3.0 * s,
-                                    [0.22, 0.23, 0.28, 0.98 * opacity],
+                                    self.ui.pick(UiRole::BgCode, [0.22, 0.23, 0.28, 0.98 * opacity]),
                                 );
                             }
                         }
@@ -1361,7 +1365,7 @@ impl Renderer {
                             (draw_x - run_x + 1.0 * s).max(2.0 * s),
                             (cur_line_h - 2.0 * s).round(),
                             3.0 * s,
-                            [0.22, 0.23, 0.28, 0.98 * opacity],
+                            self.ui.pick(UiRole::BgCode, [0.22, 0.23, 0.28, 0.98 * opacity]),
                         );
                     }
 
@@ -1376,7 +1380,7 @@ impl Renderer {
                                     rounded_top,
                                     adv.ceil() + 1.0,
                                     cur_line_h.ceil() + 1.0,
-                                    fade_hover_color(self.theme.sel, opacity),
+                                    self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity)),
                                 );
                             }
                         }
