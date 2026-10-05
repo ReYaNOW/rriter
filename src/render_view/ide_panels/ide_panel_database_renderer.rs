@@ -94,7 +94,18 @@ impl Renderer {
 
         let database = &ide_panel.database;
         let toolbar_h = 34.0 * s;
-        self.push_rect(panel_x, panel_y, panel_w, panel_h, [0.129, 0.133, 0.173, 1.0]);
+        self.push_rect(
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
+            [
+                self.theme.terminal_bg[0],
+                self.theme.terminal_bg[1],
+                self.theme.terminal_bg[2],
+                1.0,
+            ],
+        );
         ui_registry.register_blocker(
             UiId::DatabasePanelBody,
             panel_x,

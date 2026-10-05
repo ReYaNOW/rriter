@@ -35,6 +35,16 @@ impl GitFileStatus {
             Self::Renamed => [0.48, 0.74, 1.0, 1.0],
         }
     }
+
+    pub fn role(self) -> crate::theme::UiRole {
+        use crate::theme::UiRole;
+        match self {
+            Self::Added | Self::Untracked => UiRole::GitAdded,
+            Self::Modified | Self::TypeChange => UiRole::GitModified,
+            Self::Deleted => UiRole::GitDeleted,
+            Self::Renamed => UiRole::GitRenamed,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
