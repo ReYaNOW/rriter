@@ -131,6 +131,53 @@ def is_pick_second_arg(source: str, offset: int) -> bool:
     return re.search(r"\.pick\s*\(\s*UiRole::[A-Za-z_][A-Za-z_0-9]*\s*,\s*[^)]*$", prefix) is not None
 
 
+def numeric_color(value: str) -> tuple[float, ...] | None:
+    if not is_color_array(value):
+        return None
+    channels = []
+    for part in (part.strip() for part in value.strip()[1:-1].split(",")):
+        byte = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*255\.0", part)
+        number = byte or re.fullmatch(r"(\d+(?:\.\d+)?)(?:f32)?", part)
+        if not number:
+            return None
+        channel = float(number.group(1))
+        if byte:
+            channel /= 255.0
+        channels.append(channel)
+    return tuple(channels)
+
+
+def role_catalog():
+    theme = (SRC / "theme.rs").read_text(encoding="utf-8")
+    enum = re.search(r"enum UiRole\s*\{(.*?)\n\}", theme, re.S)
+    roles_block = re.search(r"roles:\s*\[\s*\n(.*?)\n\s*\],", theme, re.S)
+    if not enum or not roles_block:
+        return [], {}
+    roles = re.findall(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*,", enum.group(1), re.M)
+    values = [numeric_color(match.group(0)) for match in ARRAY.finditer(roles_block.group(1))]
+    return roles, dict(zip(roles, values))
+
+
+def pick_representatives(files: list[Path]):
+    picks: dict[str, Counter] = {}
+    pick_pattern = re.compile(r"\.pick\s*\(\s*UiRole::([A-Za-z_][A-Za-z_0-9]*)\s*,")
+    for path in files:
+        if not path.is_file() or is_test_file(path):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if not is_ui_path(rel):
+            continue
+        source = path.read_text(encoding="utf-8")
+        for match in pick_pattern.finditer(source):
+            tail = source[match.end():].lstrip()
+            color = ARRAY.match(tail)
+            if color and is_color_array(color.group(1)):
+                numeric = numeric_color(color.group(0))
+                if numeric is not None:
+                    picks.setdefault(match.group(1), Counter())[numeric] += 1
+    return picks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
@@ -175,7 +222,25 @@ def main() -> int:
             print(f"{rel}:{line}: {value} | {context}")
         for rel, line, value, context in white:
             print(f"WHITE {rel}:{line}: {value} | {context}")
-        return 1 if remaining or white else 0
+        roles, representatives = role_catalog()
+        picks = pick_representatives(files)
+        unused = [role for role in roles if not picks.get(role)]
+        mismatches = []
+        for role in roles:
+            counts = picks.get(role)
+            expected = representatives.get(role)
+            if not counts or expected is None:
+                continue
+            frequency = max(counts.values())
+            common = [value for value, count in counts.items() if count == frequency]
+            if expected not in common:
+                mismatches.append((role, expected, common[0], frequency))
+        for role in unused:
+            print(f"unused role: {role}")
+        for role, expected, most_frequent, count in mismatches:
+            print(f"representative: {role} roles={expected} most_frequent={most_frequent} ({count} calls)")
+        print(f"--check summary: remaining={len(remaining) + len(white)} unused_roles={len(unused)} representative_mismatches={len(mismatches)}")
+        return 1 if remaining or white or unused or mismatches else 0
     for rel, line, value, context, kind, _offset in records:
         print(f"{rel}:{line}: {value} | {context}")
     return 0
