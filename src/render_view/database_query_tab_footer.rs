@@ -1,5 +1,6 @@
 fn ensure_database_query_review_message_layout(
     state: &crate::app::database::DatabaseQueryTabState,
+    ui: &crate::theme::UiPalette,
     max_text_width: f32,
     scale: f32,
     mut char_advance: impl FnMut(char) -> f32,
@@ -17,7 +18,7 @@ fn ensure_database_query_review_message_layout(
     let line_height = (20.0 * scale).round().max(16.0);
     let item_gap = (8.0 * scale).round();
     let pad = (10.0 * scale).round();
-    let source_items = database_query_review_message_items(state);
+    let source_items = database_query_review_message_items(state, ui);
     let mut items = Vec::with_capacity(source_items.len());
     let mut total_height = pad;
     for (text, color) in source_items {
@@ -51,6 +52,7 @@ fn ensure_database_query_review_message_layout(
 
 fn database_query_review_message_items(
     state: &crate::app::database::DatabaseQueryTabState,
+    ui: &crate::theme::UiPalette,
 ) -> Vec<(String, [f32; 4])> {
     let mut items = Vec::with_capacity(
         state
@@ -62,10 +64,10 @@ fn database_query_review_message_items(
     );
     items.push((
         "Изменения ещё не подтверждены. Примените транзакцию или отмените её.".to_string(),
-        [0.95, 0.72, 0.30, 1.0],
+        ui.pick(UiRole::Warning, [0.95, 0.72, 0.30, 1.0]),
     ));
     items.extend(
-        database_query_notice_items(state)
+        database_query_notice_items(state, ui)
             .into_iter()
             .map(|(text, color, _)| (text, color)),
     );
@@ -100,6 +102,7 @@ fn database_query_execution_summary(
 
 fn database_query_notice_items(
     state: &crate::app::database::DatabaseQueryTabState,
+    ui: &crate::theme::UiPalette,
 ) -> Vec<(String, [f32; 4], Option<usize>)> {
     state
         .messages
@@ -114,7 +117,7 @@ fn database_query_notice_items(
                 text.push_str(" · Подсказка: ");
                 text.push_str(hint);
             }
-            (text, [0.82, 0.84, 0.90, 1.0], None)
+            (text, ui.pick(UiRole::TextSecondary, [0.82, 0.84, 0.90, 1.0]), None)
         })
         .collect()
 }
@@ -156,11 +159,11 @@ fn draw_query_button(
                 s,
                 false,
                 ButtonStyle {
-                    border: [0.32, 0.76, 0.43, 1.0],
-                    background: [0.16, 0.48, 0.26, 1.0],
-                    hover_background: [0.20, 0.58, 0.31, 1.0],
-                    pressed_background: [0.12, 0.40, 0.22, 1.0],
-                    content: renderer.theme.fg,
+                    border: renderer.ui.pick(UiRole::Success, [0.32, 0.76, 0.43, 1.0]),
+                    background: renderer.ui.pick(UiRole::Success, [0.16, 0.48, 0.26, 1.0]),
+                    hover_background: renderer.ui.pick(UiRole::Success, [0.20, 0.58, 0.31, 1.0]),
+                    pressed_background: renderer.ui.pick(UiRole::Success, [0.12, 0.40, 0.22, 1.0]),
+                    content: renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
                 },
             );
         } else {
@@ -207,11 +210,11 @@ fn draw_query_tab(
         h,
         (5.0 * s).round(),
         if active {
-            [0.28, 0.24, 0.38, 1.0]
+            renderer.ui.pick(UiRole::RowActive, [0.28, 0.24, 0.38, 1.0])
         } else if hovered {
-            [0.18, 0.19, 0.24, 1.0]
+            renderer.ui.pick(UiRole::RowHover, [0.18, 0.19, 0.24, 1.0])
         } else {
-            [0.13, 0.135, 0.17, 1.0]
+            renderer.ui.pick(UiRole::BgPanelAlt, [0.13, 0.135, 0.17, 1.0])
         },
     );
     let mut scratch = String::new();
@@ -220,11 +223,46 @@ fn draw_query_tab(
         x + (10.0 * s).round(),
         Renderer::tree_row_text_y(y, h, s),
         (w - 20.0 * s).max(4.0),
-        renderer.theme.fg,
+        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
         0.68,
         &mut scratch,
     );
     ui.register_rect_clipped(id, x, y, w, h, clip, mx, my);
 }
 
+impl Renderer {
+    pub(crate) fn database_query_scrollbar(
+        lane: (f32, f32, f32, f32), viewport: f32, max_scroll: f32,
+        offset: f32, horizontal: bool,
+    ) -> crate::render_view::scrollbar_widget::Scrollbar {
+        Self::database_query_scrollbar_with_ui(
+            lane,
+            viewport,
+            max_scroll,
+            offset,
+            horizontal,
+            &crate::theme::UiPalette::for_id(crate::theme::ThemeId::Dracula),
+        )
+    }
 
+    fn database_query_scrollbar_with_ui(
+        lane: (f32, f32, f32, f32), viewport: f32, max_scroll: f32,
+        offset: f32, horizontal: bool, ui: &crate::theme::UiPalette,
+    ) -> crate::render_view::scrollbar_widget::Scrollbar {
+        use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
+        Scrollbar {
+            style: ScrollbarStyle {
+                thumb_thickness: 0.0,
+                edge_gap: Some(2.0),
+                track_pad: 0.0,
+                min_thumb: if horizontal { 36.0 } else { 28.0 },
+                radius: Some(3.0),
+                track_color: Some(ui.pick(UiRole::BgPanel, [0.055, 0.058, 0.075, 1.0])),
+                thumb_color: ui.pick(UiRole::ScrollbarThumb, [0.62, 0.38, 0.82, 0.9]),
+            },
+            axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
+            lane,
+            extent: ScrollbarExtent::with_max(viewport, max_scroll, offset),
+        }
+    }
+}
