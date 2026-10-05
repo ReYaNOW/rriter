@@ -1,3 +1,4 @@
+use crate::theme::UiRole;
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub(crate) fn draw_editor_line_number(
@@ -424,7 +425,7 @@ impl Renderer {
         for source_line in text.split('\n') {
             let line = source_line.trim_end_matches('\r');
             let (kind, content_start, content) = api_description_line_parts(line);
-            let color = api_description_line_color(kind, self.theme.fg);
+            let color = api_description_line_color(kind, self.ui.pick(UiRole::TextPrimary, self.theme.fg));
             let (text_scale, line_h, baseline_offset, content_x, available_w) = match kind {
                 ApiDescriptionLineKind::Heading => (1.02, 25.0 * s, 19.0 * s, x, w),
                 ApiDescriptionLineKind::ListItem => (
@@ -512,7 +513,7 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.push_rect(x, y, w, h, self.theme.bg);
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.theme.bg));
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, x, y, w, h, mx, my);
         let manual_route = match &tab_meta.route_identity {
             Some(crate::app::api_client::ApiClientRouteIdentity::Manual { stable_id }) => ide_panel
@@ -533,7 +534,7 @@ impl Renderer {
                 "Спецификация загружается или кэш пустой",
                 x + 28.0 * s,
                 y + 46.0 * s,
-                [0.72, 0.74, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.74, 0.82, 1.0]),
                 0.95,
             );
             return;
@@ -565,7 +566,7 @@ impl Renderer {
                 "В спецификации нет routes",
                 x + 28.0 * s,
                 y + 46.0 * s,
-                [0.72, 0.74, 0.82, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.72, 0.74, 0.82, 1.0]),
                 0.95,
             );
             return;
@@ -689,7 +690,7 @@ impl Renderer {
             "Авторизация",
             x + pad,
             cy + 24.0 * s,
-            self.theme.fg,
+            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
             1.18,
         );
         cy += 38.0 * s;
@@ -698,7 +699,7 @@ impl Renderer {
                 "Схем авторизации нет",
                 x + pad,
                 cy + 20.0 * s,
-                [0.68, 0.70, 0.78, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                 0.90,
             );
         } else {
@@ -768,7 +769,7 @@ impl Renderer {
                         &display_path,
                         x + pad + method_w + 20.0 * s,
                         row_y + 22.0 * s,
-                        self.theme.fg,
+                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                         0.86,
                     );
                     if !route.summary.is_empty() {
@@ -777,7 +778,7 @@ impl Renderer {
                             &route.summary,
                             x + pad + method_w + path_w + 32.0 * s,
                             row_y + 22.0 * s,
-                            [0.62, 0.64, 0.72, 1.0],
+                            self.ui.pick(UiRole::TextSecondary, [0.62, 0.64, 0.72, 1.0]),
                             0.78,
                         );
                     }
@@ -795,7 +796,7 @@ impl Renderer {
                         row_y + 34.0 * s,
                         content_w,
                         1.0,
-                        [1.0, 1.0, 1.0, 0.08],
+                        self.ui.ink(0.08),
                     );
                     drawn += 1;
                 }

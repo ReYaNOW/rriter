@@ -9,18 +9,18 @@ impl Renderer {
             y,
             (w - line_h * 2.0).max(0.0),
             line_h,
-            [1.0, 1.0, 1.0, 0.13],
+            self.ui.ink(0.13),
         );
     }
 
     fn draw_api_meta_inline(&mut self, label: &str, value: &str, x: f32, y: f32, s: f32) {
-        self.draw_string_scaled_stable(label, x, y, [0.68, 0.70, 0.78, 1.0], API_FIELD_META_SCALE);
+        self.draw_string_scaled_stable(label, x, y, self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]), API_FIELD_META_SCALE);
         let label_w = self.measure_ui_width(label, API_FIELD_META_SCALE);
         self.draw_string_scaled_stable(
             value,
             x + label_w + 4.0 * s,
             y,
-            [0.82, 0.83, 0.88, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.82, 0.83, 0.88, 1.0]),
             API_FIELD_META_SCALE,
         );
     }
@@ -239,7 +239,7 @@ impl Renderer {
     ) where
         F: Fn(usize) -> crate::ui_system::UiId,
     {
-        self.draw_string_scaled_stable(label, x, y, [0.68, 0.70, 0.78, 1.0], API_FIELD_META_SCALE);
+        self.draw_string_scaled_stable(label, x, y, self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]), API_FIELD_META_SCALE);
         let label_w = self.measure_ui_width(label, API_FIELD_META_SCALE) + 5.0 * s;
         let sep = "┃";
         let sep_w = self.measure_ui_width(sep, API_FIELD_META_SCALE) + 6.0 * s;
@@ -262,7 +262,7 @@ impl Renderer {
                     sep,
                     cx,
                     draw_y,
-                    [0.50, 0.54, 0.62, 1.0],
+                    self.ui.pick(UiRole::TextMuted, [0.50, 0.54, 0.62, 1.0]),
                     API_FIELD_META_SCALE,
                 );
                 cx += sep_w;
@@ -282,14 +282,14 @@ impl Renderer {
                     draw_y - 12.0 * s,
                     hit_w + 4.0 * s,
                     18.0 * s,
-                    [1.0, 1.0, 1.0, 0.08],
+                    self.ui.ink(0.08),
                 );
             }
             self.draw_string_scaled_stable(
                 value,
                 cx,
                 draw_y,
-                [0.35, 0.75, 1.0, 1.0],
+                self.ui.pick(UiRole::Info, [0.35, 0.75, 1.0, 1.0]),
                 API_FIELD_META_SCALE,
             );
             cx += value_w + 6.0 * s;
@@ -337,14 +337,14 @@ impl Renderer {
                 chip_h,
                 4.0 * s,
                 1.0,
-                [0.35, 0.75, 1.0, 0.42],
-                [0.16, 0.22, 0.28, 1.0],
+                self.ui.pick(UiRole::AccentSoft, [0.35, 0.75, 1.0, 0.42]),
+                self.ui.pick(UiRole::RowActive, [0.16, 0.22, 0.28, 1.0]),
             );
             self.draw_string_scaled_stable(
                 item,
                 cx + 8.0 * s,
                 api_centered_text_y(chip_y, chip_h, s),
-                [0.70, 0.88, 1.0, 1.0],
+                self.ui.pick(UiRole::Info, [0.70, 0.88, 1.0, 1.0]),
                 API_FIELD_META_SCALE,
             );
             cx += chip_w + 5.0 * s;
@@ -363,7 +363,7 @@ impl Renderer {
                 draft,
                 cx,
                 api_centered_text_y(draft_y, line_h.min(y + h - draft_y), s),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 API_FIELD_VALUE_SCALE,
             );
         }
@@ -452,7 +452,7 @@ impl Renderer {
         let x1 = (x + sel_x).max(x);
         let x2 = (x + sel_x + sel_w).min(x + w);
         if x2 > x1 {
-            self.push_rect(x1, y, x2 - x1, h, [0.55, 0.36, 0.90, 0.36]);
+            self.push_rect(x1, y, x2 - x1, h, self.ui.pick(UiRole::InputSelection, [0.55, 0.36, 0.90, 0.36]));
         }
     }
 
@@ -489,11 +489,11 @@ impl Renderer {
             5.0 * s,
             (1.0 * s).max(1.0),
             if focused {
-                [0.60, 0.35, 0.85, 1.0]
+                self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
             } else {
-                [1.0, 1.0, 1.0, 0.12]
+                self.ui.ink(0.12)
             },
-            [0.13, 0.14, 0.18, 1.0],
+            self.ui.pick(UiRole::BgInput, [0.13, 0.14, 0.18, 1.0]),
         );
         ui_registry.register_text_input(id, x, y, w, h, mx, my);
         let scroll_x = if focused { input_scroll_x.round() } else { 0.0 };
@@ -1116,7 +1116,7 @@ impl Renderer {
             if matches!(b, b'+' | b'-') {
                 self.draw_json_colored_segment(
                     &main[idx..idx + 1],
-                    [1.0, 0.68, 0.26, 1.0],
+                    self.ui.pick(UiRole::TokenProperty, [1.0, 0.68, 0.26, 1.0]),
                     x,
                     y,
                     w,
@@ -1175,12 +1175,12 @@ impl Renderer {
             }
             let ch = main[idx..].chars().next().unwrap_or(' ');
             let end = idx + ch.len_utf8();
-            self.draw_json_colored_segment(&main[idx..end], self.theme.fg, x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(&main[idx..end], self.ui.pick(UiRole::TextPrimary, self.theme.fg), x, y, w, &mut draw_x);
             idx = end;
         }
         if let Some(meta) = meta {
-            self.draw_json_colored_segment("  ", [0.56, 0.58, 0.64, 1.0], x, y, w, &mut draw_x);
-            self.draw_json_colored_segment(meta, [0.56, 0.58, 0.64, 1.0], x, y, w, &mut draw_x);
+            self.draw_json_colored_segment("  ", self.ui.pick(UiRole::TextMuted, [0.56, 0.58, 0.64, 1.0]), x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(meta, self.ui.pick(UiRole::TextMuted, [0.56, 0.58, 0.64, 1.0]), x, y, w, &mut draw_x);
         }
     }
 
@@ -1202,7 +1202,7 @@ impl Renderer {
             return;
         }
         let track_w = (4.0 * s).max(3.0);
-        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
+        self.push_rect(x, y, track_w, h, self.ui.pick(UiRole::ScrollbarThumb, [0.52, 0.54, 0.60, 0.36]));
         let scrollbar = crate::app::api_client::api_text_scrollbar(
             (x - 5.0 * s, y, 13.0 * s, h),
             h,
@@ -1244,7 +1244,7 @@ impl Renderer {
             return;
         }
         let track_w = (4.0 * s).max(3.0);
-        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
+        self.push_rect(x, y, track_w, h, self.ui.pick(UiRole::ScrollbarThumb, [0.52, 0.54, 0.60, 0.36]));
         let scrollbar = crate::app::api_client::api_text_scrollbar(
             (x - 5.0 * s, y, 13.0 * s, h),
             h,
@@ -1288,7 +1288,7 @@ impl Renderer {
         if max_scroll <= 0.5 {
             return;
         }
-        self.push_rect(x, y, track_w, 3.0, [0.52, 0.54, 0.60, 0.22]);
+        self.push_rect(x, y, track_w, 3.0, self.ui.pick(UiRole::ScrollbarThumb, [0.52, 0.54, 0.60, 0.22]));
         let scrollbar = crate::app::api_client::api_text_scrollbar(
             (x, y - 5.0, track_w, 13.0),
             track_w,

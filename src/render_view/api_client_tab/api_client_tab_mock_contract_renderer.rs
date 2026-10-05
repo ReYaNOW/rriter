@@ -22,7 +22,7 @@ impl Renderer {
             "Контракт Python",
             x,
             api_mock_contract_row_text_y(cy, 28.0 * s, s),
-            [0.68, 0.70, 0.78, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
             0.78,
         );
         cy += 38.0 * s;
@@ -160,7 +160,7 @@ impl Renderer {
                 text,
                 chips_x,
                 api_mock_contract_status_text_y(cy, toggle_h, s),
-                [0.52, 0.54, 0.62, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.52, 0.54, 0.62, 1.0]),
                 1.0,
             );
         }
@@ -243,14 +243,14 @@ impl Renderer {
                 5.0 * s,
                 if field.enabled {
                     if hovered {
-                        [0.33, 0.36, 0.42, 1.0]
+                        self.ui.pick(UiRole::RowHover, [0.33, 0.36, 0.42, 1.0])
                     } else {
-                        [0.24, 0.26, 0.31, 1.0]
+                        self.ui.pick(UiRole::RowActive, [0.24, 0.26, 0.31, 1.0])
                     }
                 } else if hovered {
-                    [0.24, 0.24, 0.28, 1.0]
+                    self.ui.pick(UiRole::RowHover, [0.24, 0.24, 0.28, 1.0])
                 } else {
-                    [0.17, 0.18, 0.22, 1.0]
+                    self.ui.pick(UiRole::BgPanelAlt, [0.17, 0.18, 0.22, 1.0])
                 },
             );
             let mark = if field.enabled { "on" } else { "off" };
@@ -267,9 +267,9 @@ impl Renderer {
                 mark_x,
                 text_y,
                 if field.enabled {
-                    [0.50, 0.90, 0.55, 1.0]
+                    self.ui.pick(UiRole::ApiMockRoute, [0.50, 0.90, 0.55, 1.0])
                 } else {
-                    [0.58, 0.60, 0.66, 1.0]
+                    self.ui.pick(UiRole::TextSecondary, [0.58, 0.60, 0.66, 1.0])
                 },
                 text_scale,
             );
@@ -278,9 +278,9 @@ impl Renderer {
                 label_x,
                 text_y,
                 if field.enabled {
-                    self.theme.fg
+                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
                 } else {
-                    [0.55, 0.57, 0.64, 1.0]
+                    self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
                 },
                 text_scale,
             );
@@ -292,7 +292,7 @@ impl Renderer {
                 text,
                 x.round(),
                 api_mock_contract_status_text_y(y, row_h, s),
-                [0.52, 0.54, 0.62, 1.0],
+                self.ui.pick(UiRole::TextMuted, [0.52, 0.54, 0.62, 1.0]),
                 1.0,
             );
         }
@@ -321,9 +321,9 @@ impl Renderer {
         let h = h.round();
         let hovered = ui_registry.register_rect(id, x, y, w, h, mx, my);
         let bg = if hovered {
-            [0.28, 0.30, 0.33, 1.0]
+            self.ui.pick(UiRole::RowHover, [0.28, 0.30, 0.33, 1.0])
         } else {
-            [0.22, 0.24, 0.26, 1.0]
+            self.ui.pick(UiRole::RowHover, [0.22, 0.24, 0.26, 1.0])
         };
         self.push_rounded_rect_border(
             x,
@@ -332,7 +332,7 @@ impl Renderer {
             h,
             4.0 * s,
             (1.0 * s).round().max(1.0),
-            self.theme.sel,
+            self.ui.pick(UiRole::Selection, self.theme.sel),
             bg,
         );
 
@@ -351,7 +351,7 @@ impl Renderer {
                 content_x,
                 y + ((h - icon_size).max(0.0) * 0.5).round(),
                 icon_size,
-                [1.0, 1.0, 1.0, 1.0],
+                self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
             );
             content_x += icon_size + gap_w;
         }
@@ -360,7 +360,7 @@ impl Renderer {
                 label,
                 content_x,
                 api_mock_contract_button_text_y(y, h, text_scale, s),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 text_scale,
             );
         }
@@ -394,7 +394,7 @@ impl Renderer {
                 cy,
                 w,
                 (1.0 * s).max(1.0),
-                [1.0, 1.0, 1.0, 0.08],
+                self.ui.ink(0.08),
             );
             let title = api_mock_contract_field_label(field);
             let title_scale = 0.82;
@@ -403,7 +403,7 @@ impl Renderer {
                 &title,
                 x,
                 title_y,
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 title_scale,
             );
             let type_text = api_mock_contract_field_type_text(field);
@@ -412,7 +412,7 @@ impl Renderer {
                 &type_text,
                 type_x,
                 title_y,
-                [0.58, 0.61, 0.70, 1.0],
+                self.ui.pick(UiRole::TextSecondary, [0.58, 0.61, 0.70, 1.0]),
                 title_scale,
             );
             let add_w = 146.0 * s;
@@ -554,7 +554,7 @@ impl Renderer {
         let item_h = 26.0 * s;
         let items = api_mock_contract_constraint_options();
         let h = items.len() as f32 * item_h + 6.0 * s;
-        self.push_rounded_rect(x, y, w, h, 5.0 * s, [0.10, 0.11, 0.14, 0.98]);
+        self.push_rounded_rect(x, y, w, h, 5.0 * s, self.ui.pick(UiRole::BgPanelAlt, [0.10, 0.11, 0.14, 0.98]));
         for (idx, (label, prop)) in items.into_iter().enumerate() {
             let row_y = y + 3.0 * s + idx as f32 * item_h;
             let hovered = ui_registry.register_rect(
@@ -569,13 +569,13 @@ impl Renderer {
                 my,
             );
             if hovered {
-                self.push_rect(x + 2.0 * s, row_y, w - 4.0 * s, item_h, [1.0, 1.0, 1.0, 0.10]);
+                self.push_rect(x + 2.0 * s, row_y, w - 4.0 * s, item_h, self.ui.ink(0.10));
             }
             self.draw_string_scaled_stable(
                 label,
                 x + 8.0 * s,
                 api_mock_contract_row_text_y(row_y, item_h, s),
-                self.theme.fg,
+                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 0.76,
             );
         }
@@ -628,7 +628,7 @@ impl Renderer {
             label,
             x,
             api_mock_contract_prop_label_text_y(y, input_h, s),
-            [0.58, 0.61, 0.70, 1.0],
+            self.ui.pick(UiRole::TextSecondary, [0.58, 0.61, 0.70, 1.0]),
             API_MOCK_CONTRACT_PROP_LABEL_SCALE,
         );
         let value = if is_focused {
@@ -645,11 +645,11 @@ impl Renderer {
                 5.0 * s,
                 (1.0 * s).max(1.0),
                 if is_focused {
-                    [0.60, 0.35, 0.85, 1.0]
+                    self.ui.pick(UiRole::Accent, [0.60, 0.35, 0.85, 1.0])
                 } else {
-                    [1.0, 1.0, 1.0, 0.12]
+                    self.ui.ink(0.12)
                 },
-                [0.13, 0.14, 0.18, 1.0],
+                self.ui.pick(UiRole::BgInput, [0.13, 0.14, 0.18, 1.0]),
             );
             ui_registry.register_text_input(id, input_x, y, input_w, input_h, mx, my);
             let field_w = input_w - 16.0 * s;
@@ -669,7 +669,7 @@ impl Renderer {
                     y + cursor_row as f32 * 32.0 * s + (32.0 * s - 22.0 * s) * 0.5,
                     1.5 * s,
                     22.0 * s,
-                    self.theme.fg,
+                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
                 );
             }
             return;
