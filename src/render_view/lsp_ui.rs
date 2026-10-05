@@ -1077,25 +1077,9 @@ impl Renderer {
                                                         }
                                                     }
 
-                                                    if let Some(g) = self.get_glyph(c) {
-                                                        let q_x =
-                                                            (current_x + g.offset_x * 0.7).round();
-                                                        let q_y =
-                                                            (text_y - g.offset_y * 0.7).round();
-                                                        let q_w = (current_x
-                                                            + g.offset_x * 0.7
-                                                            + g.width * 0.7)
-                                                            .round()
-                                                            - q_x;
-                                                        let q_h = (text_y - g.offset_y * 0.7
-                                                            + g.height * 0.7)
-                                                            .round()
-                                                            - q_y;
-                                                        self.push_quad(
-                                                            q_x, q_y, q_w, q_h, g.u, g.v, g.uw,
-                                                            g.vh, color, g.is_emoji,
-                                                        );
-                                                    }
+                                                    self.push_mono_glyph_at_scale(
+                                                        c, current_x, text_y, 0.7, color, false,
+                                                    );
                                                 }
                                             }
                                             current_x += adv;

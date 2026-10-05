@@ -308,9 +308,9 @@ impl Renderer {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
-            if let Some(g) = self.get_ui_glyph(c) {
-                let glyph_top = -g.offset_y * scale;
-                let glyph_bottom = (g.height - g.offset_y) * scale;
+            if let Some(g) = self.ui_glyph_at_scale(c, scale) {
+                let glyph_top = g.top();
+                let glyph_bottom = g.bottom();
                 if seen {
                     top = top.min(glyph_top);
                     bottom = bottom.max(glyph_bottom);

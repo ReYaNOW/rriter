@@ -653,8 +653,11 @@ impl Renderer {
                         );
                     }
                 }
-                let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(glyph_x, y, g, scale);
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                if mono {
+                    self.push_mono_glyph_at_scale(c, glyph_x, y, scale, color, false);
+                } else {
+                    self.push_ui_glyph_at_scale(c, glyph_x, y, scale, color, false);
+                }
                 draw_x += adv;
             }
         }

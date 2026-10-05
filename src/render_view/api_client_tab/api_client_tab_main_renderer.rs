@@ -107,11 +107,7 @@ impl Renderer {
                     self.ui_theme.sel,
                 );
             }
-            let q_x = (draw_x + glyph.offset_x * scale).round();
-            let q_y = (baseline_y - glyph.offset_y * scale).round();
-            let q_w = (glyph.width * scale).round().max(1.0);
-            let q_h = (glyph.height * scale).round().max(1.0);
-            self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
+            self.push_ui_glyph_at_scale(ch, draw_x, baseline_y, scale, color, bold);
             draw_x += advance;
         }
         draw_x - x.round()

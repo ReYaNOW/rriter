@@ -5,6 +5,56 @@ use glow::HasContext;
 
 include!("core_text_editor_helpers.rs");
 
+/// Glyph resolved for text drawn at a UI `scale` (see `Renderer::ui_glyph_at_scale`).
+/// Normally `glyph` is rasterized at the final pixel size and `quad_scale` is 1.0.
+/// If that rasterization fails, `glyph` is the base bitmap and `quad_scale` is the
+/// text scale, i.e. the old resampled quad instead of a full-size base bitmap.
+#[derive(Clone, Copy)]
+pub(crate) struct ScaledGlyph {
+    glyph: crate::renderer::GlyphInfo,
+    quad_scale: f32,
+    /// `snapped_text_advance(base.advance, scale)`, the rule UI width measurement uses.
+    pub(crate) advance: f32,
+}
+
+impl ScaledGlyph {
+    #[inline(always)]
+    fn new(
+        base: crate::renderer::GlyphInfo,
+        sized: Option<crate::renderer::GlyphInfo>,
+        scale: f32,
+    ) -> Self {
+        let advance = Renderer::snapped_text_advance(base.advance, scale);
+        match sized {
+            Some(glyph) => Self { glyph, quad_scale: 1.0, advance },
+            None => Self { glyph: base, quad_scale: scale, advance },
+        }
+    }
+
+    /// Ink top relative to the baseline (negative is above it).
+    #[inline(always)]
+    pub(crate) fn top(&self) -> f32 {
+        -self.glyph.offset_y * self.quad_scale
+    }
+
+    /// Ink bottom relative to the baseline.
+    #[inline(always)]
+    pub(crate) fn bottom(&self) -> f32 {
+        (self.glyph.height - self.glyph.offset_y) * self.quad_scale
+    }
+
+    /// Ink left edge relative to the pen position.
+    #[inline(always)]
+    pub(crate) fn left(&self) -> f32 {
+        self.glyph.offset_x * self.quad_scale
+    }
+
+    #[inline(always)]
+    pub(crate) fn width(&self) -> f32 {
+        self.glyph.width * self.quad_scale
+    }
+}
+
 #[cfg(test)]
 mod tests {
     include!("core_text_tests.rs");
@@ -108,6 +158,117 @@ impl Renderer {
     pub(crate) fn snapped_text_advance(advance: f32, scale: f32) -> f32 {
         let px = (advance * scale).round();
         if px <= 0.0 && advance > 0.0 { 1.0 } else { px }
+    }
+
+    /// Single placement point for UI-font glyphs drawn at a UI `scale`.
+    /// The bitmap is rasterized at the final integer pixel size and pushed 1:1 at an
+    /// integer origin, so no glyph is resampled: a base-size bitmap squeezed by a
+    /// fractional `scale` gets its top and bottom rounded independently, which moves
+    /// each glyph's baseline by a different sub-pixel amount (letters jump in a word).
+    /// The advance stays `snapped_text_advance(base.advance, scale)`, the rule every
+    /// UI width measurement uses. Returns `None` when the font has no glyph.
+    #[inline]
+    pub(crate) fn push_ui_glyph_at_scale(
+        &mut self,
+        c: char,
+        draw_x: f32,
+        baseline_y: f32,
+        scale: f32,
+        color: [f32; 4],
+        bold: bool,
+    ) -> Option<f32> {
+        let glyph = self.ui_glyph_at_scale(c, scale)?;
+        self.push_scaled_glyph(glyph, draw_x, baseline_y, color, bold);
+        Some(glyph.advance)
+    }
+
+    #[inline]
+    pub(crate) fn push_mono_glyph_at_scale(
+        &mut self,
+        c: char,
+        draw_x: f32,
+        baseline_y: f32,
+        scale: f32,
+        color: [f32; 4],
+        bold: bool,
+    ) -> Option<f32> {
+        let glyph = self.mono_glyph_at_scale(c, scale)?;
+        self.push_scaled_glyph(glyph, draw_x, baseline_y, color, bold);
+        Some(glyph.advance)
+    }
+
+    /// Final pixel size for text at `scale`, or `None` when the base bitmap
+    /// (rasterized at `font_size`) already has that size and can be pushed 1:1.
+    /// `font_size` itself may be fractional (18 * 1.3333), so the comparison is
+    /// against its rounded size too; otherwise scale 1.0 would add a second copy
+    /// of every glyph to the atlas.
+    #[inline(always)]
+    fn sized_text_pixel_size(&self, scale: f32) -> Option<f32> {
+        let pixel_size = self.final_text_pixel_size(scale);
+        if pixel_size.to_bits() == self.font_size.to_bits()
+            || pixel_size.to_bits() == self.final_text_pixel_size(1.0).to_bits()
+        {
+            None
+        } else {
+            Some(pixel_size)
+        }
+    }
+
+    /// UI-font glyph for text at `scale`; use its `top`/`bottom` for vertical
+    /// layout so measurement matches what `push_scaled_glyph` draws.
+    #[inline]
+    pub(crate) fn ui_glyph_at_scale(&mut self, c: char, scale: f32) -> Option<ScaledGlyph> {
+        let base = self.get_ui_glyph(c)?;
+        let sized = match self.sized_text_pixel_size(scale) {
+            None => Some(base),
+            Some(pixel_size) => self.get_ui_glyph_at_size(c, pixel_size),
+        };
+        Some(ScaledGlyph::new(base, sized, scale))
+    }
+
+    #[inline]
+    pub(crate) fn mono_glyph_at_scale(&mut self, c: char, scale: f32) -> Option<ScaledGlyph> {
+        let base = self.get_glyph(c)?;
+        let sized = match self.sized_text_pixel_size(scale) {
+            None => Some(base),
+            Some(pixel_size) => self.get_glyph_at_size(c, pixel_size),
+        };
+        Some(ScaledGlyph::new(base, sized, scale))
+    }
+
+    #[inline]
+    pub(crate) fn terminal_glyph_at_scale(
+        &mut self,
+        c: char,
+        prefer_color: Option<bool>,
+        scale: f32,
+    ) -> Option<ScaledGlyph> {
+        // Sized lookup first: one cache hit per cell on the hot path; the base glyph is
+        // only needed for the fallback quad (terminal cells ignore `advance`).
+        if let Some(pixel_size) = self.sized_text_pixel_size(scale)
+            && let Some(glyph) = self.get_terminal_glyph_at_size(c, prefer_color, pixel_size)
+        {
+            return Some(ScaledGlyph { glyph, quad_scale: 1.0, advance: glyph.advance.round() });
+        }
+        let base = self.get_terminal_glyph(c, prefer_color)?;
+        let sized = self.sized_text_pixel_size(scale).is_none().then_some(base);
+        Some(ScaledGlyph::new(base, sized, scale))
+    }
+
+    #[inline(always)]
+    pub(crate) fn push_scaled_glyph(
+        &mut self,
+        glyph: ScaledGlyph,
+        draw_x: f32,
+        baseline_y: f32,
+        color: [f32; 4],
+        bold: bool,
+    ) {
+        if let Some((q_x, q_y, q_w, q_h)) =
+            pixel_stable_glyph_rect(draw_x, baseline_y, glyph.glyph, glyph.quad_scale)
+        {
+            self.push_weighted_glyph_quad(glyph.glyph, q_x, q_y, q_w, q_h, color, bold);
+        }
     }
 
     #[inline(always)]
@@ -1078,18 +1239,7 @@ impl Renderer {
         color: [f32; 4],
         scale: f32,
     ) {
-        let mut draw_x = x.round();
-        let y = y.round();
-        for c in text.chars() {
-            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                continue;
-            }
-            if let Some(g) = self.get_ui_glyph(c) {
-                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(draw_x, y, g, scale);
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                draw_x += Self::snapped_text_advance(g.advance, scale);
-            }
-        }
+        self.draw_string_scaled_pixel_snapped_weighted(text, x, y, color, scale, false);
     }
 
     pub(crate) fn draw_string_scaled_pixel_snapped(
@@ -1118,11 +1268,8 @@ impl Renderer {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
-            if let Some(glyph) = self.get_ui_glyph(c) {
-                if let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, scale) {
-                    self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
-                }
-                draw_x += Self::snapped_text_advance(glyph.advance, scale);
+            if let Some(advance) = self.push_ui_glyph_at_scale(c, draw_x, baseline_y, scale, color, bold) {
+                draw_x += advance;
             }
         }
     }
@@ -1202,66 +1349,39 @@ impl Renderer {
             if draw_x > max_x {
                 return;
             }
-            if let Some(glyph) = self.get_ui_glyph(ch) {
-                let mut color = if span_color[0].is_nan() {
-                    palette.color(crate::theme::SyntaxRole::Fg)
-                } else {
-                    span_color
-                };
-                color[3] *= alpha;
-                if ch != ' ' && ch != '\t'
-                    && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, scale)
-                {
-                    self.push_quad(
-                        q_x,
-                        q_y,
-                        q_w,
-                        q_h,
-                        glyph.u,
-                        glyph.v,
-                        glyph.uw,
-                        glyph.vh,
-                        color,
-                        glyph.is_emoji,
-                    );
-                }
-                draw_x += Self::snapped_text_advance(glyph.advance, scale);
+            let mut color = if span_color[0].is_nan() {
+                palette.color(crate::theme::SyntaxRole::Fg)
+            } else {
+                span_color
+            };
+            color[3] *= alpha;
+            if let Some(advance) = self.push_ui_glyph_at_scale(ch, draw_x, baseline_y, scale, color, false) {
+                draw_x += advance;
             }
         });
         draw_x
     }
 
+    /// Pen step of one mono character at `scale`; the only step rule used by both
+    /// mono drawing (`draw_string_mono_scaled*`) and mono measurement (`measure_mono_width*`).
+    #[inline(always)]
+    fn mono_text_step(&mut self, ch: char, scale: f32) -> f32 {
+        Self::snapped_text_advance(self.char_advance(ch), scale)
+    }
+
     pub fn draw_string_mono_scaled(
         &mut self,
         text: &str,
-        mut x: f32,
+        x: f32,
         y: f32,
         color: [f32; 4],
         scale: f32,
     ) {
-        x = x.round();
-        let y = y.round();
-        for c in text.chars() {
-            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                continue;
-            }
-            if let Some(g) = self.get_glyph(c) {
-                let (q_x, q_y, q_w, q_h) = glyph_quad_rect(x, y, g, scale);
-                self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                x += g.advance * scale;
-            }
-        }
+        self.draw_string_mono_scaled_pixel_snapped(text, x, y, color, scale, false);
     }
 
     pub fn measure_mono_width(&mut self, text: &str, scale: f32) -> f32 {
-        let mut w = 0.0;
-        for c in text.chars() {
-            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                continue;
-            }
-            w += self.char_advance(c) * scale;
-        }
-        w
+        self.measure_mono_width_pixel_snapped(text, scale)
     }
 
     pub(crate) fn draw_string_mono_scaled_pixel_snapped(
@@ -1279,12 +1399,11 @@ impl Renderer {
             if ch == '\n' || ch == '\r' || ch == '\u{FE0F}' || ch == '\u{200D}' {
                 continue;
             }
-            let advance = Self::snapped_text_advance(self.char_advance(ch), scale);
+            let advance = self.mono_text_step(ch, scale);
             if !matches!(ch, ' ' | '\t')
-                && let Some(glyph) = self.get_glyph(ch)
-                && let Some((q_x, q_y, q_w, q_h)) = pixel_stable_glyph_rect(draw_x, baseline_y, glyph, scale)
+                && let Some(glyph) = self.mono_glyph_at_scale(ch, scale)
             {
-                self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
+                self.push_scaled_glyph(glyph, draw_x, baseline_y, color, bold);
             }
             draw_x += advance;
         }
@@ -1321,7 +1440,7 @@ impl Renderer {
     pub(crate) fn measure_mono_width_pixel_snapped(&mut self, text: &str, scale: f32) -> f32 {
         text.chars()
             .filter(|ch| !matches!(*ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}'))
-            .map(|ch| Self::snapped_text_advance(self.char_advance(ch), scale))
+            .map(|ch| self.mono_text_step(ch, scale))
             .sum()
     }
 

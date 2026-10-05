@@ -480,6 +480,16 @@ impl Renderer {
         c: char,
         prefer_color: Option<bool>,
     ) -> Option<GlyphInfo> {
+        self.get_terminal_glyph_at_size(c, prefer_color, self.font_size)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn get_terminal_glyph_at_size(
+        &mut self,
+        c: char,
+        prefer_color: Option<bool>,
+        pixel_size: f32,
+    ) -> Option<GlyphInfo> {
         let cache_presentation = if terminal_force_text_presentation(c) {
             GLYPH_PRESENTATION_TEXT
         } else {
@@ -489,7 +499,7 @@ impl Renderer {
                 None => GLYPH_PRESENTATION_TERMINAL,
             }
         };
-        let cache_key = (c, cache_presentation, glyph_size_key(self.font_size));
+        let cache_key = (c, cache_presentation, glyph_size_key(pixel_size));
         if let Some(g) = self.glyphs.get(&cache_key) {
             return Some(*g);
         }
@@ -498,20 +508,20 @@ impl Renderer {
         }
 
         let glyph = if terminal_force_text_presentation(c) || prefer_color == Some(false) {
-            self.get_glyph_for_color_preference(c, Some(false))
+            self.get_glyph_for_color_preference_at_size(c, Some(false), pixel_size)
                 .or_else(|| {
                     if terminal_force_text_presentation(c) {
                         None
                     } else {
-                        self.get_glyph_for_color_preference(c, Some(true))
+                        self.get_glyph_for_color_preference_at_size(c, Some(true), pixel_size)
                     }
                 })
         } else {
-            self.get_glyph_for_color_preference(c, prefer_color)
+            self.get_glyph_for_color_preference_at_size(c, prefer_color, pixel_size)
         }
         .or_else(|| {
                 if c != '□' {
-                    self.get_glyph_for_color_preference('□', Some(false))
+                    self.get_glyph_for_color_preference_at_size('□', Some(false), pixel_size)
                 } else {
                     None
                 }

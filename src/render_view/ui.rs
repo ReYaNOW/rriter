@@ -8,6 +8,10 @@ mod problems_panel;
 
 pub(crate) use hover_widget::diag_popup_byte_at;
 
+fn icon_tint(color: [f32; 4], is_colored: bool) -> [f32; 4] {
+    if is_colored { [1.0, 1.0, 1.0, color[3]] } else { color }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AutocompleteBadgeStyle {
     letter: Option<char>,
@@ -503,6 +507,30 @@ impl Renderer {
         size: f32,
         color: [f32; 4],
     ) {
+        self.draw_atlas_icon_tinted(icon, x, y, size, color, false);
+    }
+
+    /// Activity rail: colored icons keep their own colors, only the tint alpha applies.
+    pub(crate) fn draw_rail_icon(
+        &mut self,
+        icon: crate::widgets::IconType,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: [f32; 4],
+    ) {
+        self.draw_atlas_icon_tinted(icon, x, y, size, color, true);
+    }
+
+    fn draw_atlas_icon_tinted(
+        &mut self,
+        icon: crate::widgets::IconType,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: [f32; 4],
+        keep_own_color: bool,
+    ) {
         let entry = if let Some(&entry) = self.icons.get(&icon) {
             entry
         } else {
@@ -517,6 +545,7 @@ impl Renderer {
         } else {
             color
         };
+        let color = icon_tint(color, keep_own_color && entry.color);
         self.push_quad(
             x,
             y,
@@ -608,7 +637,7 @@ impl Renderer {
             entry.v,
             entry.uw,
             entry.vh,
-            self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]),
+            icon_tint(self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0]), entry.color),
             if entry.color {
                 crate::renderer::COLOR_ATLAS_MODE
             } else {
@@ -837,25 +866,12 @@ impl Renderer {
             }
 
             if let Some(letter) = badge.letter {
-                if let Some(g) = self.get_ui_glyph(letter) {
-                    let char_scale = 0.82;
-                    let actual_w = g.width * char_scale;
-                    let actual_h = g.height * char_scale;
-                    let char_x = badge_x + (badge_w - actual_w) / 2.0;
-                    let char_y = row_y + (step - actual_h) / 2.0;
-
-                    self.push_quad(
-                        char_x.round(),
-                        char_y.round(),
-                        actual_w,
-                        actual_h,
-                        g.u,
-                        g.v,
-                        g.uw,
-                        g.vh,
-                        badge.fg,
-                        0.0,
-                    );
+                let char_scale = 0.82;
+                if let Some(g) = self.ui_glyph_at_scale(letter, char_scale) {
+                    let ink_h = g.bottom() - g.top();
+                    let char_x = badge_x + (badge_w - g.width()) / 2.0;
+                    let ink_top = row_y + (step - ink_h) / 2.0;
+                    self.push_scaled_glyph(g, char_x - g.left(), ink_top - g.top(), badge.fg, false);
                 }
             }
             let mut cx = x + icon_sz + icon_gap;

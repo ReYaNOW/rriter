@@ -333,6 +333,7 @@ impl Renderer {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn reset_texture_atlas(&mut self) {
+        self.alpha_atlas_resets += 1;
         self.flush();
         self.glyphs.clear();
         self.ui_glyphs.clear();
@@ -490,6 +491,7 @@ impl Renderer {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn reset_color_texture_atlas(&mut self) {
+        self.color_atlas_resets += 1;
         self.flush();
         self.glyphs.clear();
         self.ui_glyphs.clear();
@@ -910,8 +912,8 @@ mod tests {
 
     #[test]
     fn renderer_constants_keep_expected_atlas_and_batch_sizes() {
-        assert_eq!(ATLAS_SIZE_W, 1024);
-        assert_eq!(ATLAS_SIZE_H, 1024);
+        assert_eq!(ATLAS_SIZE_W, 2048);
+        assert_eq!(ATLAS_SIZE_H, 2048);
         assert_eq!(COLOR_ATLAS_SIZE_W, 512);
         assert_eq!(COLOR_ATLAS_SIZE_H, 512);
         assert_eq!(PRIMARY_ATLAS_INTERNAL_FORMAT, glow::R8);
@@ -982,7 +984,12 @@ mod tests {
 
         {
             let renderer = app.renderer.as_mut().expect("renderer");
+            assert!(renderer.ensure_color_texture().is_some());
+            renderer.color_atlas_width = COLOR_ATLAS_MAX_SIZE;
+            renderer.color_atlas_height = COLOR_ATLAS_MAX_SIZE;
             renderer.update_scale_factor(1.5);
+            assert_eq!(renderer.color_atlas_width, COLOR_ATLAS_SIZE_W);
+            assert_eq!(renderer.color_atlas_height, COLOR_ATLAS_SIZE_H);
             assert!(
                 renderer.ui_glyphs.is_empty(),
                 "DPI reset must invalidate every UI glyph size/UV"
@@ -1060,6 +1067,60 @@ mod tests {
             renderer.measure_ui_width_at_pixel_size("A", pixel_size),
             Renderer::snapped_text_advance(heading.advance, 1.0)
         );
+    }
+
+    /// Small UI text at a fractional display scale (2560x1440 @ 1.3333, hotkeys page ids
+    /// at 0.65) must not resample atlas bitmaps: each quad spans exactly its texel rows
+    /// from an integer top, and letters without descenders share one bottom row. Tops are
+    /// not compared: hinting legitimately gives some glyphs an extra antialias row.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn scaled_ui_text_at_fractional_display_scale_keeps_glyphs_one_to_one_on_one_baseline() {
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture("", 900.0, 1.3333);
+        let renderer = app.renderer.as_mut().expect("renderer");
+        for scale in [0.62, 0.65, 0.76, 0.83, 0.9] {
+            renderer.vertices.clear();
+            renderer.draw_string_scaled("иквнmnrx", 100.0, 200.0, [1.0; 4], scale);
+            assert_eq!(renderer.vertices.len(), 8 * 6, "scale {scale}");
+            let mut rows = None;
+            for quad in renderer.vertices.chunks_exact(6) {
+                let (top, bottom) = (quad[0].pos[1], quad[2].pos[1]);
+                let texel_rows = (quad[2].uv[1] - quad[0].uv[1]) * ATLAS_SIZE_H as f32;
+                assert_eq!(top, top.round(), "scale {scale}: fractional glyph top");
+                assert!(
+                    ((bottom - top) - texel_rows).abs() < 0.01,
+                    "scale {scale}: quad {} px tall for {texel_rows} texel rows",
+                    bottom - top
+                );
+                let baseline_row = *rows.get_or_insert(bottom);
+                assert_eq!(bottom, baseline_row, "scale {scale}: glyph off the shared baseline row");
+            }
+
+            renderer.vertices.clear();
+            renderer.draw_string_mono_scaled_pixel_snapped(
+                "иквнmnrx",
+                100.0,
+                200.0,
+                [1.0; 4],
+                scale,
+                false,
+            );
+            assert_eq!(renderer.vertices.len(), 8 * 6, "mono scale {scale}");
+            let mut rows = None;
+            for quad in renderer.vertices.chunks_exact(6) {
+                let (top, bottom) = (quad[0].pos[1], quad[2].pos[1]);
+                let texel_rows = (quad[2].uv[1] - quad[0].uv[1]) * ATLAS_SIZE_H as f32;
+                assert_eq!(top, top.round(), "mono scale {scale}: fractional glyph top");
+                assert!(
+                    ((bottom - top) - texel_rows).abs() < 0.01,
+                    "mono scale {scale}: quad {} px tall for {texel_rows} texel rows",
+                    bottom - top
+                );
+                let baseline_row = *rows.get_or_insert(bottom);
+                assert_eq!(bottom, baseline_row, "mono scale {scale}: glyph off the shared baseline row");
+            }
+        }
     }
 }
 

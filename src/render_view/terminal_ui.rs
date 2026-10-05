@@ -330,6 +330,21 @@ fn terminal_glyph_anchor(
     (x, y, fit_scale)
 }
 
+#[inline(always)]
+fn terminal_block_glyph_rect(
+    c: char,
+    cell_left: f32,
+    cell_right: f32,
+    row_top: f32,
+    row_height: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    matches!(c, '\u{2580}'..='\u{259F}').then(|| {
+        let top = row_top.round();
+        let bottom = (row_top + row_height).round();
+        (cell_left, top, cell_right - cell_left, bottom - top)
+    })
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_terminal_panel(
@@ -706,12 +721,16 @@ impl Renderer {
                                     crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
                                     _ => None,
                                 };
-                                if let Some(g) = self.get_terminal_glyph(cell.c, prefer_color) {
-                                    let baseline_y = draw_y + self.baseline_offset * term_scale;
+                                let baseline_y = draw_y + self.baseline_offset * term_scale;
+                                if crate::renderer::terminal_force_text_presentation(cell.c)
+                                    && let Some(g) = self.get_terminal_glyph(cell.c, prefer_color)
+                                    && g.is_emoji == 0.0
+                                {
                                     let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
                                         cell.c, g, cx, draw_y, cell_w, char_h, baseline_y,
                                         term_scale,
                                     );
+                                    // lint: subpixel-glyph-ok check marks are shrunk by a computed fit scale.
                                     let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(
                                         glyph_x,
                                         glyph_y,
@@ -722,6 +741,27 @@ impl Renderer {
                                         q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, fg_color,
                                         g.is_emoji,
                                     );
+                                } else if let Some(g) =
+                                    self.terminal_glyph_at_scale(cell.c, prefer_color, term_scale)
+                                {
+                                    if let Some((x, y, w, h)) = terminal_block_glyph_rect(
+                                        cell.c, cx, next_cx, draw_y, char_h,
+                                    ) && let Some(block_glyph) = self.get_terminal_glyph_at_size(
+                                        cell.c,
+                                        prefer_color,
+                                        self.final_text_pixel_size(term_scale),
+                                    ) {
+                                        // lint: subpixel-glyph-ok block elements fill the cell
+                                        self.push_quad(
+                                            x, y, w, h, block_glyph.u, block_glyph.v,
+                                            block_glyph.uw, block_glyph.vh, fg_color,
+                                            block_glyph.is_emoji,
+                                        );
+                                    } else {
+                                        // TERMINAL_TEXT_SCALE is fractional (1.05): draw the glyph
+                                        // rasterized at the final size 1:1, like UI text.
+                                        self.push_scaled_glyph(g, cx, baseline_y, fg_color, false);
+                                    }
                                 }
                             }
                         }
@@ -1089,6 +1129,15 @@ mod tests {
             terminal_glyph_anchor('✅', emoji, 10.0, 20.0, 12.0, 28.0, 40.0, 1.05),
             (10.0, 40.0, 1.05)
         );
+    }
+
+    #[test]
+    fn terminal_block_glyph_quad_fills_rounded_cell_and_row_edges() {
+        assert_eq!(
+            terminal_block_glyph_rect('█', 32.0, 48.0, 10.4, 20.4),
+            Some((32.0, 10.0, 16.0, 21.0))
+        );
+        assert_eq!(terminal_block_glyph_rect('─', 32.0, 48.0, 10.4, 20.4), None);
     }
 
     #[test]
