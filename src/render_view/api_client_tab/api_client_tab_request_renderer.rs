@@ -26,7 +26,7 @@ impl Renderer {
             cy + 23.0 * s,
             cy,
             34.0 * s,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.14,
             false,
             0,
@@ -323,7 +323,7 @@ impl Renderer {
                     &label,
                     menu_x + 10.0 * s,
                     api_centered_text_y(item_y, 28.0 * s, s),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.80,
                 );
             }
@@ -820,7 +820,7 @@ impl Renderer {
                     label,
                     sx + 10.0 * s,
                     api_centered_text_y(cy, 32.0 * s, s),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     server_text_scale,
                 );
                 sx += chip_w + 8.0 * s;

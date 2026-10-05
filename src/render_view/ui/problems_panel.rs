@@ -58,7 +58,7 @@ impl Renderer {
                 self.ui.ink(0.0)
             };
             let fg = if is_active {
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
             } else {
                 self.ui.pick(UiRole::TextMuted, [0.65, 0.65, 0.65, 1.0])
             };
@@ -240,7 +240,7 @@ impl Renderer {
                             &scratch,
                             text_x.round(),
                             text_y.round(),
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             text_scale,
                         );
 
@@ -256,7 +256,7 @@ impl Renderer {
                                 &scratch,
                                 badges_x,
                                 text_y.round(),
-                                self.ui.pick(UiRole::Error, self.theme.diag_error),
+                                self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
                                 text_scale,
                             );
                             badges_x += ew + 12.0 * s;
@@ -271,7 +271,7 @@ impl Renderer {
                                 &scratch,
                                 badges_x,
                                 text_y.round(),
-                                self.ui.pick(UiRole::Warning, self.theme.diag_warn),
+                                self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn),
                                 text_scale,
                             );
                         }
@@ -315,11 +315,11 @@ impl Renderer {
                     let (icon, color) = match diag.severity {
                         crate::lsp::DiagSeverity::Error => (
                             crate::widgets::IconType::Error,
-                            self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78]),
+                            self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.78]),
                         ),
                         crate::lsp::DiagSeverity::Warning => (
                             crate::widgets::IconType::Warning,
-                            self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78]),
+                            self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.78]),
                         ),
                         _ => (crate::widgets::IconType::Problems, self.ui.pick(UiRole::TextMuted, [0.5, 0.5, 0.5, 1.0])),
                     };
@@ -340,7 +340,7 @@ impl Renderer {
                         &scratch,
                         text_x.round(),
                         text_y.round(),
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         text_scale,
                     );
 
@@ -354,7 +354,7 @@ impl Renderer {
                         &scratch,
                         current_tx,
                         text_y.round(),
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         text_scale,
                     );
                     current_tx += msg_w + self.measure_ui_width(" ", text_scale).round();

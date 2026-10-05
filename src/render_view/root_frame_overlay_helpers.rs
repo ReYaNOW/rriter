@@ -436,7 +436,7 @@ impl Renderer {
             text,
             x + pad_x,
             y + h * 0.5 + 5.0 * s,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.0,
         );
     }

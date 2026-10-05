@@ -22,7 +22,7 @@ impl Renderer {
             layout.w,
             layout.h,
             6.0 * s,
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
         );
         self.push_rounded_rect(
             layout.x + 1.0,
@@ -31,9 +31,9 @@ impl Renderer {
             (layout.h - 2.0).max(0.0),
             5.0 * s,
             self.ui.pick(UiRole::BgTooltip, [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
+                self.ui_theme.minimap_bg[0],
+                self.ui_theme.minimap_bg[1],
+                self.ui_theme.minimap_bg[2],
                 0.98,
             ]),
         );
@@ -43,7 +43,7 @@ impl Renderer {
             layout.x + pad_x,
             (layout.y + layout.h * 0.5 + 5.0 * s).round(),
             layout.text_w,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             tooltip_scale,
             &mut scratch,
         );
@@ -649,7 +649,7 @@ impl Renderer {
                             line_top.round(),
                             adv.ceil() + 1.0,
                             line_h.ceil(),
-                            self.ui.pick(UiRole::Selection, self.theme.sel),
+                            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
                         );
                     }
                 }
@@ -843,7 +843,7 @@ impl Renderer {
             tooltip_h,
             7.0 * s,
             (1.0 * s).round().max(1.0),
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
             self.ui.pick(UiRole::BgTooltip, [0.11, 0.12, 0.16, 0.98]),
         );
 
@@ -861,7 +861,7 @@ impl Renderer {
             + date_icon_extra_drop)
             .round();
         let author_x = (content_x + title_icon_size + title_icon_gap).round();
-        let title_count_color = self.ui.pick(UiRole::Selection, self.theme.sel);
+        let title_count_color = self.ui.pick(UiRole::Selection, self.ui_theme.sel);
         let title_count_text_color = self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]);
         let (newest_count, oldest_count) =
             git_graph_tooltip_branch_counts(commits, target.commit_idx);
@@ -880,7 +880,7 @@ impl Renderer {
             content_x.round(),
             author_icon_y,
             title_icon_size,
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
         );
         let row_start = self.push_git_graph_tooltip_text_row(
             &commit.author_name,
@@ -923,7 +923,7 @@ impl Renderer {
             content_x.round(),
             date_icon_y,
             title_icon_size,
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
         );
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(

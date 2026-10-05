@@ -379,9 +379,9 @@ impl Renderer {
                     );
                     if has_error || has_warn {
                         let sq_color = if has_error {
-                            self.ui.pick(UiRole::Error, self.theme.diag_error)
+                            self.ui.pick(UiRole::Error, self.ui_theme.diag_error)
                         } else {
-                            self.ui.pick(UiRole::Warning, self.theme.diag_warn)
+                            self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn)
                         };
                         self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                     }
@@ -408,9 +408,9 @@ impl Renderer {
                     );
                     if has_error || has_warn {
                         let sq_color = if has_error {
-                            self.ui.pick(UiRole::Error, self.theme.diag_error)
+                            self.ui.pick(UiRole::Error, self.ui_theme.diag_error)
                         } else {
-                            self.ui.pick(UiRole::Warning, self.theme.diag_warn)
+                            self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn)
                         };
                         self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
                     }
@@ -462,7 +462,7 @@ impl Renderer {
                         &label,
                         ghost_x + 9.0 * s,
                         ghost_y + 18.0 * s,
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         tree_text_scale,
                     );
                 }
@@ -916,15 +916,15 @@ impl Renderer {
                 real_height,
                 self.ui.pick(
                     UiRole::TextPrimary,
-                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
+                    [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.10],
                 ),
             );
 
             let title_h = 32.0 * s;
             let title_bg = self.ui.pick(UiRole::BgPanelAlt, [
-                (self.theme.bg[0] + 0.07).min(1.0),
-                (self.theme.bg[1] + 0.07).min(1.0),
-                (self.theme.bg[2] + 0.08).min(1.0),
+                (self.ui_theme.bg[0] + 0.07).min(1.0),
+                (self.ui_theme.bg[1] + 0.07).min(1.0),
+                (self.ui_theme.bg[2] + 0.08).min(1.0),
                 1.0,
             ]);
             self.push_rect(panel_x, 0.0, panel_left_w, title_h, self.ui.pick(UiRole::BgPanelAlt, title_bg));
@@ -946,7 +946,7 @@ impl Renderer {
                     label,
                     panel_x + 12.0 * s,
                     title_h / 2.0 + 6.0 * s,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.9,
                 );
             } else {
@@ -961,9 +961,9 @@ impl Renderer {
                     let tw = self.measure_ui_width(label, 0.85) + 20.0 * s;
                     if i == 0 {
                         let act_bg = self.ui.pick(UiRole::RowActive, [
-                            (self.theme.bg[0] + 0.12).min(1.0),
-                            (self.theme.bg[1] + 0.12).min(1.0),
-                            (self.theme.bg[2] + 0.13).min(1.0),
+                            (self.ui_theme.bg[0] + 0.12).min(1.0),
+                            (self.ui_theme.bg[1] + 0.12).min(1.0),
+                            (self.ui_theme.bg[2] + 0.13).min(1.0),
                             1.0,
                         ]);
                         self.push_rect(tx, 0.0, tw, title_h, act_bg);
@@ -973,7 +973,7 @@ impl Renderer {
                         label,
                         tx + 10.0 * s,
                         title_h / 2.0 + 6.0 * s,
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         0.85,
                     );
                     tx += tw;

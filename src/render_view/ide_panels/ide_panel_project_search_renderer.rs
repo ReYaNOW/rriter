@@ -422,7 +422,7 @@ impl Renderer {
             "Поиск по рабочим областям",
             x + side_pad,
             y + 38.0 * scale,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.0,
         );
         let content_factor = project_search_help_content_factor(h, scale);
@@ -687,9 +687,9 @@ impl Renderer {
             rect.h,
             4.0 * scale,
             if enabled {
-                self.ui.pick(UiRole::BgPanel, [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0])
+                self.ui.pick(UiRole::BgPanel, [self.ui_theme.bg[0], self.ui_theme.bg[1], self.ui_theme.bg[2], 1.0])
             } else {
-                self.ui.pick(UiRole::BgPanel, [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 0.58])
+                self.ui.pick(UiRole::BgPanel, [self.ui_theme.bg[0], self.ui_theme.bg[1], self.ui_theme.bg[2], 0.58])
             },
         );
         if enabled {
@@ -785,7 +785,7 @@ impl Renderer {
                     }
                 }
                 let text_color = if enabled {
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                 } else {
                     self.ui.pick(UiRole::TextMuted, [0.48, 0.49, 0.54, 1.0])
                 };
@@ -805,7 +805,7 @@ impl Renderer {
                     (text_y - 13.0 * scale).round(),
                     (2.0 * scale).max(1.0),
                     (line_h - 2.0 * scale).max(1.0),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 );
             }
         }
@@ -823,7 +823,7 @@ impl Renderer {
                 (text_y - 13.0 * scale).round(),
                 (2.0 * scale).max(1.0),
                 (line_h - 2.0 * scale).max(1.0),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             );
         }
 
@@ -1078,7 +1078,7 @@ impl Renderer {
             text_x.round(),
             project_search_row_text_y(row_y, row_h, scale),
             max_w,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             0.82,
             scratch,
         );

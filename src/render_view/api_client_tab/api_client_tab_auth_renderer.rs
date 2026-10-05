@@ -107,7 +107,7 @@ impl Renderer {
             x + ((w - label_w) * 0.5).round(),
             api_centered_text_y(y, h, s),
             if active {
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
             } else {
                 self.ui.pick(UiRole::TextSecondary, [0.64, 0.66, 0.74, 1.0])
             },
@@ -158,7 +158,7 @@ impl Renderer {
             label_x,
             text_y,
             label_max_w,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             0.90,
             &mut label_scratch,
         );
@@ -444,7 +444,7 @@ impl Renderer {
             s,
             value,
             mask,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             focused,
             input_scroll_x,
             editor,
@@ -498,7 +498,7 @@ impl Renderer {
         let name_w = self.measure_ui_width(name, API_FIELD_NAME_SCALE);
         let name_x = (label_right - name_w).max(x + 12.0 * s);
         let name_y = api_split_label_text_y(input_y, input_h, s, false);
-        self.draw_string_scaled_stable(name, name_x, name_y, self.ui.pick(UiRole::TextPrimary, self.theme.fg), API_FIELD_NAME_SCALE);
+        self.draw_string_scaled_stable(name, name_x, name_y, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), API_FIELD_NAME_SCALE);
         if required {
             self.draw_string_scaled_stable(
                 "*",
@@ -574,7 +574,7 @@ impl Renderer {
                 api_centered_text_y(input_y, input_h, s),
                 text_w,
                 field_scroll_x,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 API_FIELD_VALUE_SCALE,
             );
         }
@@ -597,7 +597,7 @@ impl Renderer {
                 cursor_y,
                 1.5 * s,
                 22.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             );
         }
         if is_file {
@@ -733,7 +733,7 @@ impl Renderer {
             &param.name,
             name_x,
             name_y,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             API_FIELD_NAME_SCALE,
         );
         if param.required {
@@ -803,7 +803,7 @@ impl Renderer {
                 api_centered_text_y(input_y, input_h, s),
                 field_w,
                 field_scroll_x,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 API_FIELD_VALUE_SCALE,
             );
         }
@@ -826,7 +826,7 @@ impl Renderer {
                 cursor_y,
                 1.5 * s,
                 22.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             );
         }
         let right_x = x + layout.right_x;

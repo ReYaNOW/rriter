@@ -403,7 +403,7 @@ impl Renderer {
                     info.name,
                     (card_x + pad_x + dot_r * 2.0 + 8.0 * s).round(),
                     (dot_y + dot_r).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     text_scale,
                 );
 
@@ -618,7 +618,7 @@ impl Renderer {
                     label_restart,
                     (btn_x_restart + (bw_restart - text_w_restart * lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad),
                 );
 
@@ -634,7 +634,7 @@ impl Renderer {
                     label_toggle,
                     (btn_x_toggle + (bw_toggle - text_w_toggle * lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad),
                 );
 
@@ -779,7 +779,7 @@ impl Renderer {
                         if filter_empty {
                             self.ui.pick(UiRole::TextMuted, [0.45, 0.45, 0.50, 1.0])
                         } else {
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                         },
                         0.0,
                         8.0 * s,
@@ -1158,9 +1158,9 @@ impl Renderer {
                                             line_h - 2.0 * s,
                                             3.0 * s,
                                             self.ui.pick(UiRole::BgPanel, [
-                                                self.theme.bg[0] + 0.08,
-                                                self.theme.bg[1] + 0.08,
-                                                self.theme.bg[2] + 0.12,
+                                                self.ui_theme.bg[0] + 0.08,
+                                                self.ui_theme.bg[1] + 0.08,
+                                                self.ui_theme.bg[2] + 0.12,
                                                 1.0,
                                             ]),
                                         );
@@ -1168,7 +1168,7 @@ impl Renderer {
                                             dots_str,
                                             box_x + 4.0 * s,
                                             text_y,
-                                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                                             0.7,
                                         );
                                     }
@@ -1441,7 +1441,7 @@ impl Renderer {
                 crate::app::LspActionItem::FixAll
                 | crate::app::LspActionItem::OrganizeImports
                 | crate::app::LspActionItem::CompleteImports => group_color,
-                _ => self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                _ => self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             };
 
             let text_y = item_y + item_h / 2.0 + 6.0 * s;

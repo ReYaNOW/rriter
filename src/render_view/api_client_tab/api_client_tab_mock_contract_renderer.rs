@@ -278,7 +278,7 @@ impl Renderer {
                 label_x,
                 text_y,
                 if field.enabled {
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                 } else {
                     self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
                 },
@@ -332,7 +332,7 @@ impl Renderer {
             h,
             4.0 * s,
             (1.0 * s).round().max(1.0),
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
             bg,
         );
 
@@ -360,7 +360,7 @@ impl Renderer {
                 label,
                 content_x,
                 api_mock_contract_button_text_y(y, h, text_scale, s),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 text_scale,
             );
         }
@@ -403,7 +403,7 @@ impl Renderer {
                 &title,
                 x,
                 title_y,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 title_scale,
             );
             let type_text = api_mock_contract_field_type_text(field);
@@ -575,7 +575,7 @@ impl Renderer {
                 label,
                 x + 8.0 * s,
                 api_mock_contract_row_text_y(row_y, item_h, s),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.76,
             );
         }
@@ -669,7 +669,7 @@ impl Renderer {
                     y + cursor_row as f32 * 32.0 * s + (32.0 * s - 22.0 * s) * 0.5,
                     1.5 * s,
                     22.0 * s,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 );
             }
             return;

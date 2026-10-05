@@ -76,7 +76,7 @@ fn draw_database_table_nav_button(
         h,
         (4.0 * s).round(),
         (1.0 * s).round().max(1.0),
-        if hovered { renderer.ui.pick(UiRole::Selection, renderer.theme.sel) } else { renderer.ui.ink(0.10) },
+        if hovered { renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel) } else { renderer.ui.ink(0.10) },
         if active { renderer.ui.pick(UiRole::RowActive, [0.15, 0.16, 0.20, 1.0]) } else { renderer.ui.pick(UiRole::BgPanelAlt, [0.10, 0.105, 0.13, 1.0]) },
     );
     let text_scale = 1.08;
@@ -85,7 +85,7 @@ fn draw_database_table_nav_button(
         text,
         (x + (w - text_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, h, s),
-        if active { renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg) } else { renderer.ui.pick(UiRole::TextMuted, [0.40, 0.42, 0.48, 1.0]) },
+        if active { renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg) } else { renderer.ui.pick(UiRole::TextMuted, [0.40, 0.42, 0.48, 1.0]) },
         text_scale,
     );
 }
@@ -233,7 +233,7 @@ fn draw_database_calendar_footer_button(
         label,
         (x + (w - text_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, h, s),
-        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         scale,
     );
 }
@@ -433,7 +433,7 @@ fn draw_database_date_picker(
             h,
             (5.0 * s).round(),
             1.0,
-            if hovered { renderer.ui.pick(UiRole::Selection, renderer.theme.sel) } else { renderer.ui.pick(UiRole::Border, [0.32, 0.34, 0.42, 1.0]) },
+            if hovered { renderer.ui.pick(UiRole::Selection, renderer.ui_theme.sel) } else { renderer.ui.pick(UiRole::Border, [0.32, 0.34, 0.42, 1.0]) },
             if hovered { renderer.ui.pick(UiRole::RowHover, [0.18, 0.20, 0.28, 1.0]) } else { renderer.ui.pick(UiRole::BgPanelAlt, [0.13, 0.14, 0.18, 1.0]) },
         );
         let label = "Сейчас UTC";
@@ -443,7 +443,7 @@ fn draw_database_date_picker(
             label,
             (x + (w - text_w) * 0.5).round(),
             Renderer::tree_row_text_y(y, h, s),
-            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+            renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
             scale,
         );
         return;
@@ -511,7 +511,7 @@ fn draw_database_date_picker(
             label,
             (button_x + (arrow_w - text_w) * 0.5).round(),
             Renderer::tree_row_text_y(y, header_h, s),
-            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+            renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
             arrow_scale,
         );
     }
@@ -527,7 +527,7 @@ fn draw_database_date_picker(
         &title,
         (x + (width - title_w) * 0.5).round(),
         Renderer::tree_row_text_y(y, header_h, s),
-        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         title_scale,
     );
 
@@ -539,7 +539,7 @@ fn draw_database_date_picker(
             label,
             (x + index as f32 * cell_w + (cell_w - label_w) * 0.5).round(),
             Renderer::tree_row_text_y(weekdays_y, weekday_h, s),
-            renderer.ui.pick(UiRole::TextMuted, renderer.theme.line_num),
+            renderer.ui.pick(UiRole::TextMuted, renderer.ui_theme.line_num),
             weekday_scale,
         );
     }
@@ -582,7 +582,7 @@ fn draw_database_date_picker(
             &day_text,
             (dx + (cell_w - day_w) * 0.5).round(),
             Renderer::tree_row_text_y(dy, cell_h, s),
-            renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+            renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
             day_scale,
         );
     }

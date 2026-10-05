@@ -48,9 +48,9 @@ impl Renderer {
 
     fn draw_api_line_number_gutter(&mut self, x: f32, y: f32, w: f32, h: f32, s: f32) {
         let bg = [
-            (self.theme.bg[0] + 0.018).min(1.0),
-            (self.theme.bg[1] + 0.018).min(1.0),
-            (self.theme.bg[2] + 0.022).min(1.0),
+            (self.ui_theme.bg[0] + 0.018).min(1.0),
+            (self.ui_theme.bg[1] + 0.018).min(1.0),
+            (self.ui_theme.bg[2] + 0.022).min(1.0),
             1.0,
         ];
         self.push_rect(x, y, w, h, bg);
@@ -484,7 +484,7 @@ impl Renderer {
             }
             let ch = line[idx..].chars().next().unwrap_or(' ');
             let end = idx + ch.len_utf8();
-            self.draw_json_colored_segment(&line[idx..end], self.ui.pick(UiRole::TextPrimary, self.theme.fg), x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(&line[idx..end], self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), x, y, w, &mut draw_x);
             idx = end;
         }
     }
@@ -658,7 +658,7 @@ mod stage5_embedded_editor_boundary_tests {
         renderer
             .vertices
             .iter()
-            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.theme.fg)
+            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.ui_theme.fg)
     }
 
     #[test]

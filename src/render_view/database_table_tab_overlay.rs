@@ -150,7 +150,7 @@ impl Renderer {
             self.ui.pick(UiRole::BgDialog, [0.105, 0.11, 0.145, 1.0]),
         );
         ui.register_blocker(UiId::DatabaseTableModalBody, x, y, width, height, mx, my);
-        self.draw_string_scaled_pixel_snapped(title, x + 20.0 * s, y + 32.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.0);
+        self.draw_string_scaled_pixel_snapped(title, x + 20.0 * s, y + 32.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.0);
 
         match modal {
             crate::app::database::DatabaseTableModal::SqlPreview {
@@ -268,7 +268,7 @@ impl Renderer {
                 if let Some(error) = error.as_deref() {
                     self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + 126.0 * s, self.ui.pick(UiRole::Error, [0.95, 0.38, 0.42, 1.0]), 0.76);
                 } else {
-                    self.draw_string_scaled_pixel_snapped("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.ui.pick(UiRole::TextMuted, self.theme.line_num), 0.74);
+                    self.draw_string_scaled_pixel_snapped("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num), 0.74);
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
@@ -315,7 +315,7 @@ impl Renderer {
                     &format!("Добавлено: {}   Изменено: {}   Ячеек: {}   Удалено: {}", summary.inserted_rows, summary.updated_rows, summary.changed_cells, summary.deleted_rows),
                     x + 20.0 * s,
                     y + 66.0 * s,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.82,
                 );
                 self.draw_string_scaled_pixel_snapped(
@@ -372,7 +372,7 @@ impl Renderer {
                         notice_scratch.push_str(text);
                         (notice_scratch.as_str(), self.ui.pick(UiRole::Warning, [0.95, 0.72, 0.28, 1.0]))
                     } else {
-                        (text, self.ui.pick(UiRole::TextPrimary, self.theme.fg))
+                        (text, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg))
                     };
                     self.draw_tree_label_clipped(
                         label,
@@ -524,7 +524,7 @@ impl Renderer {
                 &(line_index + 1).to_string(),
                 outer_x + (8.0 * s).round(),
                 baseline,
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.78,
             );
             let selected_start = selection_start.max(byte_offset).min(line_end);
@@ -540,7 +540,7 @@ impl Renderer {
                     (baseline - 19.0 * s).round(),
                     selected_w.round(),
                     line_h,
-                    self.ui.pick(UiRole::Selection, self.theme.sel),
+                    self.ui.pick(UiRole::Selection, self.ui_theme.sel),
                 );
             }
             if cursor >= byte_offset && cursor <= line_end && selection_start == selection_end {
@@ -551,7 +551,7 @@ impl Renderer {
                     (baseline - 19.0 * s).round(),
                     (1.0 * s).round().max(1.0),
                     line_h,
-                    self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], blink_alpha]),
+                    self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], blink_alpha]),
                 );
             }
             self.draw_database_sql_line(

@@ -44,7 +44,7 @@ impl Renderer {
                 dialog.kind.title(),
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
 
@@ -101,7 +101,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     input_y + input_h + 20.0 * s,
-                    self.ui.pick(UiRole::Error, self.theme.diag_error),
+                    self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
                     0.8,
                 );
             }
@@ -170,7 +170,7 @@ impl Renderer {
                 "Переименовать",
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
 
@@ -220,7 +220,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     input_y + input_h + 20.0 * s,
-                    self.ui.pick(UiRole::Error, self.theme.diag_error),
+                    self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
                     0.8,
                 );
             }
@@ -265,7 +265,7 @@ impl Renderer {
                 "Подтвердить перемещение",
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
             let message = crate::app::file_tree::file_tree_move_dialog_message(
@@ -284,7 +284,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     y + 100.0 * s,
-                    self.ui.pick(UiRole::Error, self.theme.diag_error),
+                    self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
                     0.8,
                 );
             }
@@ -329,7 +329,7 @@ impl Renderer {
                 "Удалить в корзину",
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
             let message = crate::app::file_tree::file_tree_delete_dialog_message(&dialog.paths);
@@ -345,7 +345,7 @@ impl Renderer {
                     error,
                     x + side_pad,
                     y + 100.0 * s,
-                    self.ui.pick(UiRole::Error, self.theme.diag_error),
+                    self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
                     0.8,
                 );
             }
@@ -390,7 +390,7 @@ impl Renderer {
                 "Удалить OpenAPI",
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
             self.draw_string_scaled(
@@ -466,7 +466,7 @@ impl Renderer {
                 "Удалить переменную",
                 x + side_pad,
                 y + 38.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
             self.draw_string_scaled(
@@ -522,7 +522,7 @@ impl Renderer {
             let y = ((self.height - h) / 2.0).round();
             let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * s;
             self.draw_file_tree_dialog_shell(x, y, w, h, s);
-            self.draw_string_scaled("Сбросить мок", x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.0);
+            self.draw_string_scaled("Сбросить мок", x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.0);
             self.draw_string_scaled(
                 "Удалить все настройки мока для route?",
                 x + side_pad,
@@ -585,7 +585,7 @@ impl Renderer {
                     "Откатить",
                 ),
             };
-            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.0);
+            self.draw_string_scaled(title, x + side_pad, y + 38.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.0);
             self.draw_string_scaled(
                 message,
                 x + side_pad,

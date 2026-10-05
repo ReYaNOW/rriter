@@ -96,7 +96,7 @@ impl Renderer {
             "Подробный гайд по мокам",
             box_x + pad,
             (box_y + 40.0 * s).round(),
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.12,
         );
         let content_x = box_x + pad;
@@ -286,7 +286,7 @@ impl Renderer {
             );
         }
         let mut cy = (box_y + 38.0 * s).round();
-        self.draw_string_scaled_stable("Статус и логи мок-сервера", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 1.02);
+        self.draw_string_scaled_stable("Статус и логи мок-сервера", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 1.02);
         cy += 34.0 * s;
         let status = match &api.mock.server_status {
             ApiMockServerStatus::Stopped => "остановлен".to_string(),
@@ -297,7 +297,7 @@ impl Renderer {
         };
         self.draw_wrapped_api_panel_text(&status, box_x + pad, cy, box_w - pad * 2.0, s, 0.88);
         cy += 46.0 * s;
-        self.draw_string_scaled_stable("axum / access log", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 0.92);
+        self.draw_string_scaled_stable("axum / access log", box_x + pad, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 0.92);
         cy += 28.0 * s;
         let log_x = box_x + pad;
         let log_y = cy.round();
@@ -416,14 +416,14 @@ impl Renderer {
             box_h,
             10.0 * s,
             2.0 * s,
-            self.ui.pick(UiRole::Selection, self.theme.sel),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
             self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0]),
         );
         self.draw_string_scaled(
             "Python мок-сервера",
             box_x + pad,
             box_y + 38.0 * s,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.0,
         );
         let mode_label = match api.mock.uv.mode {
@@ -746,7 +746,7 @@ impl Renderer {
         } else {
             api.mock.uv.python_version.clone()
         };
-        self.draw_string_scaled(&value, x + 8.0 * s, input_y + 23.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 0.92);
+        self.draw_string_scaled(&value, x + 8.0 * s, input_y + 23.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 0.92);
         self.draw_string_scaled(
             "v",
             x + w - 18.0 * s,
@@ -780,7 +780,7 @@ impl Renderer {
                 list_h,
                 6.0 * s,
                 1.0_f32.max(s),
-                self.ui.pick(UiRole::Selection, self.theme.sel),
+                self.ui.pick(UiRole::Selection, self.ui_theme.sel),
                 self.ui.pick(UiRole::BgTooltip, [0.09, 0.10, 0.14, 1.0]),
             );
             self.flush();
@@ -798,7 +798,7 @@ impl Renderer {
                     "запрашиваю версии через uv...",
                     list_x + 10.0 * s,
                     (list_y + 25.0 * s).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.84,
                 );
             } else if api.mock_python_versions.is_empty() {
@@ -836,7 +836,7 @@ impl Renderer {
                         if row.installed {
                             self.ui.pick(UiRole::Success, [0.62, 0.86, 0.62, 1.0])
                         } else {
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                         },
                         0.84,
                     );
@@ -1007,7 +1007,7 @@ impl Renderer {
         let text_color = if text == "не задано" {
             self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
         } else {
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
         };
         self.draw_one_line_selectable_text(
             text,
@@ -1059,7 +1059,7 @@ impl Renderer {
             label,
             x + (w - tw) / 2.0,
             (y + 21.0 * s).round(),
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             text_scale,
         );
     }
@@ -1074,7 +1074,7 @@ impl Renderer {
                 format!("{} {}", line, word)
             };
             if self.measure_ui_width(&candidate, scale) > w && !line.is_empty() {
-                self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.theme.fg), scale);
+                self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), scale);
                 cy += 16.0 * s;
                 line.clear();
                 line.push_str(word);
@@ -1083,7 +1083,7 @@ impl Renderer {
             }
         }
         if !line.is_empty() {
-            self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.theme.fg), scale);
+            self.draw_string_scaled_stable(&line, x, cy, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), scale);
         }
     }
 

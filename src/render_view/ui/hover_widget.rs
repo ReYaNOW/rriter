@@ -557,20 +557,20 @@ impl Renderer {
             && frame_surface.outer_rect.3 > 0.0)
             .then_some(frame_surface.outer_rect);
         let base_fill_color = self.ui.pick(UiRole::BgTooltip, [
-            self.theme.minimap_bg[0],
-            self.theme.minimap_bg[1],
-            self.theme.minimap_bg[2],
+            self.ui_theme.minimap_bg[0],
+            self.ui_theme.minimap_bg[1],
+            self.ui_theme.minimap_bg[2],
             1.0,
         ]);
         let diagnostic_fill_color = self.ui.pick(UiRole::BgTooltip, [
-            (self.theme.minimap_bg[0] + 0.035).min(1.0),
-            (self.theme.minimap_bg[1] + 0.035).min(1.0),
-            (self.theme.minimap_bg[2] + 0.035).min(1.0),
+            (self.ui_theme.minimap_bg[0] + 0.035).min(1.0),
+            (self.ui_theme.minimap_bg[1] + 0.035).min(1.0),
+            (self.ui_theme.minimap_bg[2] + 0.035).min(1.0),
             1.0,
         ]);
         let border_color = self.ui.pick(
             UiRole::Selection,
-            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0],
+            [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 1.0],
         );
         if frame_surface.outer_rect.2 > 0.0 && frame_surface.outer_rect.3 > 0.0 {
             self.push_hover_surface_fill(frame_surface, base_fill_color);
@@ -673,7 +673,7 @@ impl Renderer {
                             && item.byte_offset >= sel_start
                             && item.byte_offset < sel_end
                         {
-                            self.push_rect(draw_x, ch_y, adv, line_h, self.ui.pick(UiRole::Selection, self.theme.sel));
+                            self.push_rect(draw_x, ch_y, adv, line_h, self.ui.pick(UiRole::Selection, self.ui_theme.sel));
                         }
                     }
 
@@ -793,7 +793,7 @@ impl Renderer {
             let icon_color = if is_copied {
                 self.ui.pick(UiRole::Success, [0.3, 0.9, 0.4, 1.0])
             } else {
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
             };
             let icon_render_sz = 16.0 * s;
             let offset = (icon_sz - icon_render_sz) / 2.0;
@@ -1159,8 +1159,8 @@ impl Renderer {
                     && frame_surface.outer_rect.3 > 0.0)
                     .then_some(frame_surface.outer_rect);
             }
-            let fill_color = self.ui.pick(UiRole::BgTooltip, fade_hover_color(self.theme.minimap_bg, opacity));
-            let border_color = self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity));
+            let fill_color = self.ui.pick(UiRole::BgTooltip, fade_hover_color(self.ui_theme.minimap_bg, opacity));
+            let border_color = self.ui.pick(UiRole::Selection, fade_hover_color(self.ui_theme.sel, opacity));
             self.push_hover_popup_frame(
                 frame_x,
                 frame_y,
@@ -1298,7 +1298,7 @@ impl Renderer {
                                         rounded_top,
                                         adv.ceil() + 1.0,
                                         cur_line_h.ceil() + 1.0,
-                                        self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity)),
+                                        self.ui.pick(UiRole::Selection, fade_hover_color(self.ui_theme.sel, opacity)),
                                     );
                                 }
                             }
@@ -1380,7 +1380,7 @@ impl Renderer {
                                     rounded_top,
                                     adv.ceil() + 1.0,
                                     cur_line_h.ceil() + 1.0,
-                                    self.ui.pick(UiRole::Selection, fade_hover_color(self.theme.sel, opacity)),
+                                    self.ui.pick(UiRole::Selection, fade_hover_color(self.ui_theme.sel, opacity)),
                                 );
                             }
                         }

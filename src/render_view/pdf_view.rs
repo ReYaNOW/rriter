@@ -18,7 +18,7 @@ impl Renderer {
         my: f32,
         ui_registry: &mut UiRegistry,
     ) {
-        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.theme.bg));
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         let offset = tab.scroll.current.round() as i32;
         let clip = UiClipRect { x, y, w, h };
         self.flush();
@@ -78,7 +78,7 @@ impl Renderer {
                     &caption,
                     (px + (page_w - text_w) * 0.5).round(),
                     (py + page_h * 0.5).round(),
-                    self.ui.pick(UiRole::PdfText, self.theme.fg),
+                    self.ui.pick(UiRole::PdfText, self.ui_theme.fg),
                     caption_scale,
                 );
                 self.scratch_buffer = caption;
@@ -165,7 +165,7 @@ impl Renderer {
                         progress,
                         (x + (w - progress_w) * 0.5).round(),
                         first_y,
-                        self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                        self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                         text_scale,
                     );
                 }
@@ -228,7 +228,7 @@ impl Renderer {
                 rects.clear();
                 crate::app::pdf_tab::text::line_rects(&text.chars, start, end, rects);
                 let color = self.ui.pick(UiRole::Selection, [
-                    self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55,
+                    self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.55,
                 ]);
                 fill(self, rects.as_slice(), color);
             }
@@ -242,7 +242,7 @@ impl Renderer {
             message,
             (x + (w - text_w) * 0.5).round(),
             (y + h * 0.5).round(),
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             text_scale,
         );
     }

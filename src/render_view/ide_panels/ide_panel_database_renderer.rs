@@ -100,9 +100,9 @@ impl Renderer {
             panel_w,
             panel_h,
             [
-                self.theme.terminal_bg[0],
-                self.theme.terminal_bg[1],
-                self.theme.terminal_bg[2],
+                self.ui_theme.terminal_bg[0],
+                self.ui_theme.terminal_bg[1],
+                self.ui_theme.terminal_bg[2],
                 1.0,
             ],
         );
@@ -325,7 +325,7 @@ impl Renderer {
                     panel_x + 58.0 * s,
                     Self::tree_row_text_y(row_y, row_h, s),
                     max_w,
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.86,
                     &mut label_scratch,
                 );
@@ -457,7 +457,7 @@ impl Renderer {
                             panel_x + 65.0 * s,
                             Self::tree_row_text_y(row_y, row_h, s),
                             (panel_w - 73.0 * s).max(10.0),
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             0.84,
                             &mut label_scratch,
                         );
@@ -526,7 +526,7 @@ impl Renderer {
                                     panel_x + 86.0 * s,
                                     Self::tree_row_text_y(row_y, row_h, s),
                                     (panel_w - 94.0 * s).max(10.0),
-                                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                                     0.82,
                                     &mut label_scratch,
                                 );
@@ -730,7 +730,7 @@ impl Renderer {
             },
             x + 20.0 * s,
             y + 30.0 * s,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.05,
         );
 
@@ -1220,7 +1220,7 @@ fn draw_database_confirmation(
         x + 22.0 * s,
         y + 36.0 * s,
         (w - 44.0 * s).max(4.0),
-        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         1.0,
         &mut scratch,
     );
@@ -1339,7 +1339,7 @@ fn draw_database_host_key_confirmation(
         x + 22.0 * s,
         y + 36.0 * s,
         (w - 44.0 * s).max(4.0),
-        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         1.0,
         &mut scratch,
     );

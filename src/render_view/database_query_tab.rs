@@ -336,7 +336,7 @@ impl Renderer {
             } else if analysis_warnings > 0 {
                 self.ui.pick(UiRole::Warning, [0.95, 0.72, 0.30, 1.0])
             } else {
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num)
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num)
             },
             QUERY_STATUS_TEXT_SCALE,
             &mut scratch,
@@ -480,7 +480,7 @@ impl Renderer {
                 x + (10.0 * s).round(),
                 Self::tree_row_text_y(y + tabs_h, summary_h, s),
                 (w - 20.0 * s).max(4.0),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.72,
                 &mut scratch,
             );
@@ -537,7 +537,7 @@ impl Renderer {
                 hint,
                 x + (14.0 * s).round(),
                 Self::tree_row_text_y(grid_y, (36.0 * s).round(), s),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.80,
             );
             return;
@@ -726,7 +726,7 @@ impl Renderer {
                         "…",
                         x + padding,
                         line_y,
-                        self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                        self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                         0.80,
                     );
                 }
@@ -739,7 +739,7 @@ impl Renderer {
                 "История запросов для этой базы пуста",
                 x + (14.0 * s).round(),
                 Self::tree_row_text_y(y, (36.0 * s).round(), s),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.80,
             );
         }
@@ -773,7 +773,7 @@ impl Renderer {
                 },
                 x + (14.0 * s).round(),
                 Self::tree_row_text_y(y, (30.0 * s).round(), s),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.82,
             );
             return;
@@ -801,7 +801,7 @@ impl Renderer {
             result.rows.len(),
         );
         let body_y = layout.body_rect.y.round();
-        let guide = self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15]);
+        let guide = self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.15]);
         let mut scratch = String::new();
 
         self.push_rect(x, y, w, header_h, self.ui.pick(UiRole::BgPanelAlt, [0.12, 0.125, 0.155, 1.0]));
@@ -832,7 +832,7 @@ impl Renderer {
                 cx + (8.0 * s).round(),
                 header_baseline,
                 (draw_w - 16.0 * s).max(4.0),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.78,
                 &mut scratch,
             );
@@ -883,7 +883,7 @@ impl Renderer {
                         cx + (7.0 * s).round(),
                         row_baseline,
                         (draw_w - 14.0 * s).max(4.0),
-                        if cell.value.is_some() { self.ui.pick(UiRole::TextPrimary, self.theme.fg) } else { self.ui.pick(UiRole::TextMuted, self.theme.line_num) },
+                        if cell.value.is_some() { self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg) } else { self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num) },
                         0.75,
                         &mut scratch,
                     );
@@ -1007,7 +1007,7 @@ impl Renderer {
                 &title[start..end],
                 x + padding,
                 Self::tree_row_text_y(text_y, title_line_h, s),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 1.0,
             );
             text_y = (text_y + title_line_h).round();
@@ -1039,7 +1039,7 @@ impl Renderer {
                 &summary[start..end],
                 x + padding,
                 Self::tree_row_text_y(text_y, summary_line_h, s),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.76,
             );
             text_y = (text_y + summary_line_h).round();
@@ -1154,7 +1154,7 @@ impl Renderer {
             "Предупреждения и ошибки",
             x + (10.0 * s).round(),
             Self::tree_row_text_y(y, header_h, s),
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             0.78,
         );
         let body_y = y + header_h;

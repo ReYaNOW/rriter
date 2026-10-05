@@ -349,7 +349,7 @@ impl Renderer {
             let label_x = (self.width - 10.0 * s - label_w).round();
             let overlay_x = (label_x - 6.0 * s).round();
             self.push_rect(overlay_x, bar_y, (self.width - overlay_x).max(0.0), bar_h, self.ui.pick(crate::theme::UiRole::BgPanelAlt, [0.118, 0.125, 0.165, 1.0]));
-            self.draw_string_scaled_stable(&label, label_x, (bar_y + bar_h * 0.5 + (5.0 * s).round()).round(), self.ui.pick(crate::theme::UiRole::TextPrimary, self.theme.fg), 0.95);
+            self.draw_string_scaled_stable(&label, label_x, (bar_y + bar_h * 0.5 + (5.0 * s).round()).round(), self.ui.pick(crate::theme::UiRole::TextPrimary, self.ui_theme.fg), 0.95);
             self.scratch_buffer = label;
         }
         if let Some((path, tx, ty)) = tab_tooltip {

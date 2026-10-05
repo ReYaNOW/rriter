@@ -322,7 +322,7 @@ impl Renderer {
             let frame_h = (cy - mock_frame_y - 8.0 * s).round().max(line_w * 2.0);
             let frame_color = self.ui.pick(
                 UiRole::Selection,
-                [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.55],
+                [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.55],
             );
             self.push_rect(frame_x, frame_y, frame_w, line_w, frame_color);
             self.push_rect(frame_x, frame_y, line_w, frame_h, frame_color);

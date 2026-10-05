@@ -689,7 +689,7 @@ impl Renderer {
                 current_h + border_width * 2.0,
                 6.0 * scale,
                 border_width,
-                self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]),
+                self.ui.pick(UiRole::Selection, [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 1.0]),
                 self.ui.pick(UiRole::BgPanel, [0.15, 0.16, 0.20, 1.0]),
             );
             self.draw_string_scaled(
@@ -765,7 +765,7 @@ impl Renderer {
         }
 
         let bg_color = self.ui.pick(UiRole::BgPanel, [0.15, 0.16, 0.20, 1.0]);
-        let border_color = self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]);
+        let border_color = self.ui.pick(UiRole::Selection, [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 1.0]);
         self.push_rounded_rect_border(
             x - border_width,
             y - border_width,
@@ -893,7 +893,7 @@ impl Renderer {
                     let color = if matches.contains(&j) {
                         self.ui.pick(UiRole::AccentHover, [1.0, 0.474, 0.776, 1.0])
                     } else {
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                     };
 
                     self.push_quad(
@@ -1013,7 +1013,7 @@ impl Renderer {
         );
 
         let text_x = icon_x + icon_sz + gap;
-        let fg = self.ui.pick(UiRole::TextPrimary, self.theme.fg);
+        let fg = self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg);
         let text_scale = 1.05;
         let line_h = 28.0 * s;
         let text_block_h = line_h * 2.0;
@@ -1400,7 +1400,7 @@ impl Renderer {
                     continue;
                 };
                 let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-                self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Warning, self.theme.diag_warn));
+                self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn));
             }
         }
 
@@ -1410,7 +1410,7 @@ impl Renderer {
                 continue;
             };
             let y = (track_y + (vis_line as f32 / ruler_lines * track_h)).round();
-            self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Error, self.theme.diag_error));
+            self.push_rect(bar_x, y, bar_w, indicator_h, self.ui.pick(UiRole::Error, self.ui_theme.diag_error));
         }
     }
     /// Рисует весёлый cowsay-экран когда в IDE-режиме нет открытых вкладок.

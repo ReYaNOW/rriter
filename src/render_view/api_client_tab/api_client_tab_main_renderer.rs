@@ -13,7 +13,7 @@ impl Renderer {
         if let Some(num_str) = editor_line_number_text(line_no, &mut buf) {
             let num_w = self.measure_mono_width(num_str, scale);
             let draw_x = right_x - right_pad - num_w;
-            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.theme.line_num, scale);
+            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.ui_theme.line_num, scale);
         }
     }
 
@@ -29,7 +29,7 @@ impl Renderer {
         if let Some(num_str) = editor_line_number_text(line_no, &mut buf) {
             let num_w = self.measure_mono_width(num_str, scale);
             let draw_x = x + ((w - num_w) * 0.5).round();
-            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.theme.line_num, scale);
+            self.draw_string_mono_scaled(num_str, draw_x, baseline_y, self.ui_theme.line_num, scale);
         }
     }
 
@@ -102,7 +102,7 @@ impl Renderer {
                     line_top.round(),
                     advance.max(1.0),
                     line_h.round(),
-                    self.theme.sel,
+                    self.ui_theme.sel,
                 );
             }
             let q_x = (draw_x + glyph.offset_x * scale).round();
@@ -258,7 +258,7 @@ impl Renderer {
                     width + 4.0,
                     (line_h.round() - 4.0).max(1.0),
                     3.0,
-                    [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.34],
+                    [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 0.34],
                 );
             }
             let advanced = self.draw_api_route_text_run(
@@ -425,7 +425,7 @@ impl Renderer {
         for source_line in text.split('\n') {
             let line = source_line.trim_end_matches('\r');
             let (kind, content_start, content) = api_description_line_parts(line);
-            let color = api_description_line_color(kind, self.ui.pick(UiRole::TextPrimary, self.theme.fg));
+            let color = api_description_line_color(kind, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg));
             let (text_scale, line_h, baseline_offset, content_x, available_w) = match kind {
                 ApiDescriptionLineKind::Heading => (1.02, 25.0 * s, 19.0 * s, x, w),
                 ApiDescriptionLineKind::ListItem => (
@@ -513,7 +513,7 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.theme.bg));
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, x, y, w, h, mx, my);
         let manual_route = match &tab_meta.route_identity {
             Some(crate::app::api_client::ApiClientRouteIdentity::Manual { stable_id }) => ide_panel
@@ -690,7 +690,7 @@ impl Renderer {
             "Авторизация",
             x + pad,
             cy + 24.0 * s,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             1.18,
         );
         cy += 38.0 * s;
@@ -769,7 +769,7 @@ impl Renderer {
                         &display_path,
                         x + pad + method_w + 20.0 * s,
                         row_y + 22.0 * s,
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                         0.86,
                     );
                     if !route.summary.is_empty() {

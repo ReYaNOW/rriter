@@ -126,14 +126,14 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.theme.bg));
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         ui_registry.register_blocker(UiId::DatabaseTableBody, x, y, w, h, mx, my);
         if state.loading {
             self.draw_string_scaled_pixel_snapped(
                 "Загрузка структуры таблицы…",
                 x + 24.0 * s,
                 y + 42.0 * s,
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.9,
             );
             return;
@@ -157,7 +157,7 @@ impl Renderer {
                 "Таблица недоступна",
                 card_x + (18.0 * s).round(),
                 card_y + (34.0 * s).round(),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.92,
             );
             let text_x = card_x + (18.0 * s).round();
@@ -203,7 +203,7 @@ impl Renderer {
                 if state.error.is_some() {
                     self.ui.pick(UiRole::Error, [0.98, 0.67, 0.69, 1.0])
                 } else {
-                    self.ui.pick(UiRole::TextMuted, self.theme.line_num)
+                    self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num)
                 },
                 0.0,
                 0.0,
@@ -335,7 +335,7 @@ impl Renderer {
                 &page_text,
                 (x + w - page_w - 12.0 * s).round(),
                 Self::tree_row_text_y(y, (34.0 * s).round(), s),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.82,
             );
         }
@@ -485,7 +485,7 @@ impl Renderer {
             where_label,
             x + pad,
             Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
-            self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.86,
         );
         let where_x = x + pad + label_w;
@@ -512,7 +512,7 @@ impl Renderer {
             order_label,
             order_label_x,
             Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
-            self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.86,
         );
         let order_x = order_label_x + label_w;
@@ -646,7 +646,7 @@ impl Renderer {
                 draw_x + (8.0 * s).round(),
                 header_baseline,
                 (draw_w - 16.0 * s).max(4.0),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 TABLE_HEADER_TEXT_SCALE,
                 &mut scratch,
             );
@@ -742,7 +742,7 @@ impl Renderer {
                     if matches!(cell.value, crate::app::database::DatabaseCellValue::Null | crate::app::database::DatabaseCellValue::Default) {
                         self.ui.pick(UiRole::TextMuted, [0.52, 0.55, 0.62, 1.0])
                     } else {
-                        self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                        self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                     },
                     TABLE_CELL_TEXT_SCALE,
                     &mut scratch,
@@ -914,7 +914,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                             0.84,
                             &mut scratch,
                         );
@@ -948,7 +948,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             0.84,
                             &mut scratch,
                         );
@@ -987,7 +987,7 @@ impl Renderer {
                             text_x,
                             text_y,
                             text_w,
-                            self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                             0.84,
                             &mut scratch,
                         );
@@ -1002,7 +1002,7 @@ impl Renderer {
             "#",
             x + (18.0 * s).round(),
             header_baseline,
-            self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+            self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             0.82,
         );
         self.flush();
@@ -1041,7 +1041,7 @@ impl Renderer {
                 &display_number.to_string(),
                 x + (8.0 * s).round(),
                 Self::tree_row_text_y(row_y, row_h, s).round(),
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
                 0.78,
             );
         }

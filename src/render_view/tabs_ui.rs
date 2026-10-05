@@ -249,12 +249,12 @@ impl Renderer {
         draw_separator: bool,
     ) {
         let bg_color = if is_active {
-            self.ui.pick(UiRole::BgPanel, [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0])
+            self.ui.pick(UiRole::BgPanel, [self.ui_theme.bg[0], self.ui_theme.bg[1], self.ui_theme.bg[2], 1.0])
         } else if is_hovered {
             self.ui.pick(UiRole::BgPanelAlt, [
-                self.theme.bg[0] + 0.02,
-                self.theme.bg[1] + 0.02,
-                self.theme.bg[2] + 0.02,
+                self.ui_theme.bg[0] + 0.02,
+                self.ui_theme.bg[1] + 0.02,
+                self.ui_theme.bg[2] + 0.02,
                 1.0,
             ])
         } else {
@@ -276,7 +276,7 @@ impl Renderer {
         if draw_separator {
             let sep_h = h * 0.4;
             let sep_y = y + (h - sep_h) * 0.5;
-            let sep_color = self.ui.pick(UiRole::TextPrimary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15]);
+            let sep_color = self.ui.pick(UiRole::TextPrimary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.15]);
             self.push_rect(x + w - 1.0, sep_y, 1.0, sep_h, sep_color);
         }
     }
@@ -340,7 +340,7 @@ impl Renderer {
         api: &crate::app::api_client::ApiClientState,
         ide_workspaces: &[std::path::PathBuf],
     ) -> Option<(String, f32, f32)> {
-        let tab_bar_bg = self.ui.pick(UiRole::BgPanelAlt, self.theme.minimap_bg);
+        let tab_bar_bg = self.ui.pick(UiRole::BgPanelAlt, self.ui_theme.minimap_bg);
         self.push_rect(x, y, w, h, tab_bar_bg);
 
         self.begin_tab_strip_scissor(x, y, w, h);
@@ -498,7 +498,7 @@ impl Renderer {
                     slot_x.round(),
                     icon_y,
                     icon_size_tab.round(),
-                    self.ui.pick(UiRole::Icon, self.theme.fg),
+                    self.ui.pick(UiRole::Icon, self.ui_theme.fg),
                 );
             } else if tab.kind.is_api_client() {
                 self.draw_atlas_icon(
@@ -563,9 +563,9 @@ impl Renderer {
                 if path_for_tab(i).is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
                     self.ui.pick(UiRole::Warning, EXTERNAL_TAB_TITLE_COLOR)
                 } else if is_active {
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                 } else {
-                    self.ui.pick(UiRole::TextMuted, self.theme.line_num)
+                    self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num)
             };
             if tab.deleted {
                 // Dimmed title next to the `DELETED_TAB_TITLE_SUFFIX` suffix.
@@ -611,9 +611,9 @@ impl Renderer {
                     let title_w =
                         (tab_w - (tab_pad * 2.0 + icon_size_tab + 8.0 * s + 30.0 * s)).max(0.0);
                     let color = match severity {
-                        crate::lsp::DiagSeverity::Error => self.ui.pick(UiRole::Error, self.theme.diag_error),
-                        crate::lsp::DiagSeverity::Warning => self.ui.pick(UiRole::Warning, self.theme.diag_warn),
-                        _ => self.ui.pick(UiRole::Warning, self.theme.diag_warn),
+                        crate::lsp::DiagSeverity::Error => self.ui.pick(UiRole::Error, self.ui_theme.diag_error),
+                        crate::lsp::DiagSeverity::Warning => self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn),
+                        _ => self.ui.pick(UiRole::Warning, self.ui_theme.diag_warn),
                     };
                     self.push_squiggle(
                         text_x,
@@ -757,11 +757,11 @@ impl Renderer {
 
         let tooltip_y = hovered_tab_y + 8.0 * s;
 
-        let border_col = self.ui.pick(UiRole::Selection, self.theme.sel);
+        let border_col = self.ui.pick(UiRole::Selection, self.ui_theme.sel);
         let bg_col = self.ui.pick(UiRole::BgTooltip, [
-            self.theme.minimap_bg[0],
-            self.theme.minimap_bg[1],
-            self.theme.minimap_bg[2],
+            self.ui_theme.minimap_bg[0],
+            self.ui_theme.minimap_bg[1],
+            self.ui_theme.minimap_bg[2],
             0.98,
         ]);
 
@@ -793,7 +793,7 @@ impl Renderer {
             &path_str,
             text_layout,
             0,
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
             tooltip_scale,
         );
     }

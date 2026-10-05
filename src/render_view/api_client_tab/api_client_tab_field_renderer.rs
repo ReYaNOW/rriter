@@ -363,7 +363,7 @@ impl Renderer {
                 draft,
                 cx,
                 api_centered_text_y(draft_y, line_h.min(y + h - draft_y), s),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 API_FIELD_VALUE_SCALE,
             );
         }
@@ -652,7 +652,7 @@ impl Renderer {
                 let x2 = (x + prefix + raw_w).min(x + w);
                 if x2 > x1 {
                     let sel_y = y - line_offset + visible_idx as f32 * line_h;
-                    self.push_rect(x1, sel_y, x2 - x1, line_h, self.theme.sel);
+                    self.push_rect(x1, sel_y, x2 - x1, line_h, self.ui_theme.sel);
                 }
             }
             if end <= line_end {
@@ -703,14 +703,14 @@ impl Renderer {
                     y - line_offset + visible_idx as f32 * line_h,
                     1.5 * s,
                     line_h,
-                    self.theme.fg,
+                    self.ui_theme.fg,
                 );
                 return;
             }
             line_start = line_end + 1;
         }
         if max_lines > 0 {
-            self.push_rect(x, y, 1.5 * s, line_h, self.theme.fg);
+            self.push_rect(x, y, 1.5 * s, line_h, self.ui_theme.fg);
         }
     }
 
@@ -762,7 +762,7 @@ impl Renderer {
                 let x2 = (x + prefix + raw_w).min(x + w);
                 if x2 > x1 {
                     let sel_y = y - line_offset + visible_idx as f32 * line_h;
-                    self.push_rect(x1, sel_y, x2 - x1, line_h, self.theme.sel);
+                    self.push_rect(x1, sel_y, x2 - x1, line_h, self.ui_theme.sel);
                 }
             }
             if end <= line_end {
@@ -813,14 +813,14 @@ impl Renderer {
                     y - line_offset + visible_idx as f32 * line_h,
                     1.5 * s,
                     line_h,
-                    self.theme.fg,
+                    self.ui_theme.fg,
                 );
                 return;
             }
             line_start = line_end + 1;
         }
         if max_lines > 0 {
-            self.push_rect(x, y, 1.5 * s, line_h, self.theme.fg);
+            self.push_rect(x, y, 1.5 * s, line_h, self.ui_theme.fg);
         }
     }
 
@@ -1175,7 +1175,7 @@ impl Renderer {
             }
             let ch = main[idx..].chars().next().unwrap_or(' ');
             let end = idx + ch.len_utf8();
-            self.draw_json_colored_segment(&main[idx..end], self.ui.pick(UiRole::TextPrimary, self.theme.fg), x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(&main[idx..end], self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), x, y, w, &mut draw_x);
             idx = end;
         }
         if let Some(meta) = meta {

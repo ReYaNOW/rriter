@@ -8,7 +8,7 @@ impl Renderer {
         &mut self, image: &ImageTabState, x: f32, y: f32, w: f32, h: f32,
         scale: f32, mx: f32, my: f32, ui: &mut UiRegistry,
     ) {
-        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.theme.bg));
+        self.push_rect(x, y, w, h, self.ui.pick(UiRole::BgPanel, self.ui_theme.bg));
         self.flush();
         let restore_scissor = unsafe {
             use glow::HasContext;
@@ -35,7 +35,7 @@ impl Renderer {
         ui.push_clip(UiClipRect { x, y, w, h });
         ui.register_blocker(UiId::PdfBody, x, y, w, h, mx, my);
         match &image.phase {
-            ImagePhase::Loading => self.draw_string_scaled_stable("Загрузка изображения…", x.round() + 24.0 * scale, (y + h * 0.5).round(), self.ui.pick(UiRole::TextPrimary, self.theme.fg), scale),
+            ImagePhase::Loading => self.draw_string_scaled_stable("Загрузка изображения…", x.round() + 24.0 * scale, (y + h * 0.5).round(), self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), scale),
             ImagePhase::Failed(message) => self.draw_string_scaled_stable(message, x.round() + 24.0 * scale, (y + h * 0.5).round(), self.ui.pick(UiRole::Error, [1.0, 0.35, 0.35, 1.0]), scale),
             ImagePhase::Ready => {
                 let zoom = if image.zoom <= 0.0 { image.fit_scale(w, h) } else { image.zoom };

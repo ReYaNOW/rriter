@@ -240,9 +240,9 @@ impl Renderer {
         let dot_x = (options_btn.x + (options_btn.w - dot_size) / 2.0).round();
         let dot_center_y = (options_btn.y + options_btn.h / 2.0).round();
         let dot_color = if commit_controls_enabled {
-            self.ui.pick(UiRole::TextSecondary, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82])
+            self.ui.pick(UiRole::TextSecondary, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.82])
         } else {
-            self.ui.pick(UiRole::TextMuted, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.34])
+            self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.34])
         };
         for offset in [-5.0 * s, 0.0, 5.0 * s] {
             self.push_rounded_rect(
@@ -380,7 +380,7 @@ impl Renderer {
                 notice_x,
                 graph_btn_y + 16.0 * s,
                 (panel_x + pad + inner_w - notice_x).max(0.0),
-                self.ui.pick(UiRole::TextMuted, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.68]),
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.68]),
                 0.78,
                 &mut label_scratch,
             );
@@ -417,7 +417,7 @@ impl Renderer {
             let row_visible = y + workspace_h >= list_y && y <= list_y + list_paint_h;
             if row_visible {
                 let workspace_name_color = git_disabled_color(
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     workspace_disabled,
                     0.38,
                 );
@@ -484,9 +484,9 @@ impl Renderer {
                     panel_w,
                     workspace_h,
                     self.ui.pick(UiRole::BgPanelAlt, [
-                        self.theme.bg[0] + 0.035,
-                        self.theme.bg[1] + 0.035,
-                        self.theme.bg[2] + 0.045,
+                        self.ui_theme.bg[0] + 0.035,
+                        self.ui_theme.bg[1] + 0.035,
+                        self.ui_theme.bg[2] + 0.045,
                         1.0,
                     ]),
                 );
@@ -1129,9 +1129,9 @@ impl Renderer {
                                 panel_w,
                                 row_h,
                                 self.ui.pick(UiRole::Selection, [
-                                    self.theme.sel[0],
-                                    self.theme.sel[1],
-                                    self.theme.sel[2],
+                                    self.ui_theme.sel[0],
+                                    self.ui_theme.sel[1],
+                                    self.ui_theme.sel[2],
                                     0.16,
                                 ]),
                             );
@@ -1197,7 +1197,7 @@ impl Renderer {
                             status_x,
                             y + row_h / 2.0 + 5.0 * s,
                             if workspace_disabled {
-                                self.ui.pick(UiRole::TextMuted, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.28])
+                                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.28])
                             } else {
                                 self.ui.pick(file.status.role(), file.status.color())
                             },
@@ -1324,7 +1324,7 @@ impl Renderer {
                             text_y,
                             (panel_x + panel_w - pad - text_x).max(0.0),
                             git_disabled_color(
-                                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                                 workspace_disabled,
                                 0.38,
                             ),
@@ -1351,7 +1351,7 @@ impl Renderer {
                 hint,
                 panel_x + (panel_w - tw) / 2.0,
                 list_y + 30.0 * s,
-                self.ui.pick(UiRole::TextMuted, [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.45]),
+                self.ui.pick(UiRole::TextMuted, [self.ui_theme.fg[0], self.ui_theme.fg[1], self.ui_theme.fg[2], 0.45]),
                 text_scale,
             );
         }

@@ -385,7 +385,7 @@ impl Renderer {
             anim_h + 4.0 * s,
             6.0 * s,
             (2.0 * s).max(1.0),
-            self.ui.pick(UiRole::Selection, [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0]),
+            self.ui.pick(UiRole::Selection, [self.ui_theme.sel[0], self.ui_theme.sel[1], self.ui_theme.sel[2], 1.0]),
             self.ui.pick(UiRole::BgPanelAlt, [0.15, 0.16, 0.20, 1.0]),
         );
         ui_registry.register_blocker(
@@ -458,7 +458,7 @@ impl Renderer {
                     &label,
                     row_x + 10.0 * s,
                     api_centered_text_y(item_y, 28.0 * s, s),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.80,
                 );
             }

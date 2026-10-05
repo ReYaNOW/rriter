@@ -690,7 +690,7 @@ impl Renderer {
                     (content_x + 10.0 * s).round(),
                     (content_y + item_h * 0.70).round(),
                     (item_w - 54.0 * s).max(1.0),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.85,
                     &mut path_scratch,
                 );

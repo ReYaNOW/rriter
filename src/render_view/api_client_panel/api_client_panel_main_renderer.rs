@@ -152,7 +152,7 @@ impl Renderer {
                 "Файл openapi.json",
                 x + pad + 10.0 * s,
                 cy + 19.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.82,
             );
             ui_registry.register_rect(
@@ -168,7 +168,7 @@ impl Renderer {
                 "URL openapi.json",
                 x + pad + 10.0 * s,
                 cy + item_h + 19.0 * s,
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.82,
             );
             cy += item_h * 2.0 + 12.0 * s;
@@ -194,7 +194,7 @@ impl Renderer {
             let color = if text.is_empty() {
                 self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
             } else {
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
             };
             let focused = matches!(
                 api.focused,
@@ -281,7 +281,7 @@ impl Renderer {
         }
 
         cy += 10.0 * s;
-        self.draw_string_scaled_stable("Мок-сервер", x + pad, cy + 18.0 * s, self.ui.pick(UiRole::TextPrimary, self.theme.fg), 0.96);
+        self.draw_string_scaled_stable("Мок-сервер", x + pad, cy + 18.0 * s, self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg), 0.96);
         let help = ButtonView {
             x: x + w - pad - 30.0 * s,
             y: cy - 2.0 * s,
@@ -387,7 +387,7 @@ impl Renderer {
                 } else if copy_hovered {
                     self.ui.pick(UiRole::Icon, [1.0, 1.0, 1.0, 1.0])
                 } else {
-                    self.ui.pick(UiRole::Selection, self.theme.sel)
+                    self.ui.pick(UiRole::Selection, self.ui_theme.sel)
                 },
             );
         }
@@ -488,7 +488,7 @@ impl Renderer {
         let color = if proxy_text.is_empty() {
             self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
         } else {
-            self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
         };
         self.draw_api_one_line_input(
             proxy_x,
@@ -636,7 +636,7 @@ impl Renderer {
             let color = if path_text.is_empty() {
                 self.ui.pick(UiRole::TextMuted, [0.55, 0.57, 0.64, 1.0])
             } else {
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
             };
             self.draw_api_one_line_input(
                 path_x,
@@ -754,7 +754,7 @@ impl Renderer {
                 title_x,
                 (card_y + 22.0 * s).round(),
                 api_panel_label_width(title_right, title_x),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.90,
                 &mut error_scratch,
             );
@@ -805,28 +805,28 @@ impl Renderer {
                     "Запрос ",
                     card_x + 10.0 * s,
                     (card_y + 96.0 * s).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.78,
                 );
                 self.draw_string_scaled_stable(
                     &fetch,
                     card_x + 68.0 * s,
                     (card_y + 96.0 * s).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.78,
                 );
                 self.draw_string_scaled_stable(
                     "Парсинг ",
                     card_x + 132.0 * s,
                     (card_y + 96.0 * s).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.78,
                 );
                 self.draw_string_scaled_stable(
                     &parse,
                     card_x + 202.0 * s,
                     (card_y + 96.0 * s).round(),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     0.78,
                 );
             }
@@ -878,7 +878,7 @@ impl Renderer {
                 "Auth",
                 x + pad + 18.0 * s,
                 tree_text_y(cy),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 TREE_TEXT_SCALE,
             );
             cy += TREE_ROW_H * s;
@@ -899,13 +899,13 @@ impl Renderer {
                 x + pad,
                 cy,
                 TREE_ROW_H * s,
-                self.ui.pick(UiRole::TextMuted, self.theme.line_num),
+                self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num),
             );
             self.draw_string_scaled_stable(
                 "Routes",
                 x + pad + 18.0 * s,
                 tree_text_y(cy),
-                self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 TREE_TEXT_SCALE,
             );
             cy += TREE_ROW_H * s;
@@ -947,9 +947,9 @@ impl Renderer {
                 },
                 false,
                 if filter_empty {
-                    self.ui.pick(UiRole::TextMuted, self.theme.line_num)
+                    self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num)
                 } else {
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg)
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg)
                 },
                 filter_focused,
                 api.input_scroll_x.current,
@@ -1023,14 +1023,14 @@ impl Renderer {
                     self.push_rect(x, cy, w, tag_h, self.ui.ink(0.055));
                 }
                 let tag_x = x + pad + indent_w;
-                self.draw_tree_disclosure_icon(!collapsed, tag_x, cy, tag_h, self.ui.pick(UiRole::TextMuted, self.theme.line_num));
+                self.draw_tree_disclosure_icon(!collapsed, tag_x, cy, tag_h, self.ui.pick(UiRole::TextMuted, self.ui_theme.line_num));
                 let tag_text_x = tag_x + 18.0 * s;
                 self.draw_tree_label_clipped(
                     tag,
                     tag_text_x,
                     tree_text_y(cy),
                     api_panel_label_width(x + w - pad, tag_text_x),
-                    self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                    self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                     TREE_TEXT_SCALE,
                     &mut error_scratch,
                 );
@@ -1088,7 +1088,7 @@ impl Renderer {
                             route_text_x,
                             tree_text_y(cy),
                             api_panel_label_width(route_text_right, route_text_x),
-                            self.ui.pick(UiRole::TextPrimary, self.theme.fg),
+                            self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                             TREE_TEXT_SCALE,
                             &mut error_scratch,
                         );

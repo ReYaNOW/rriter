@@ -163,7 +163,7 @@ fn draw_query_button(
                     background: renderer.ui.pick(UiRole::Success, [0.16, 0.48, 0.26, 1.0]),
                     hover_background: renderer.ui.pick(UiRole::Success, [0.20, 0.58, 0.31, 1.0]),
                     pressed_background: renderer.ui.pick(UiRole::Success, [0.12, 0.40, 0.22, 1.0]),
-                    content: renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+                    content: renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
                 },
             );
         } else {
@@ -223,7 +223,7 @@ fn draw_query_tab(
         x + (10.0 * s).round(),
         Renderer::tree_row_text_y(y, h, s),
         (w - 20.0 * s).max(4.0),
-        renderer.ui.pick(UiRole::TextPrimary, renderer.theme.fg),
+        renderer.ui.pick(UiRole::TextPrimary, renderer.ui_theme.fg),
         0.68,
         &mut scratch,
     );
