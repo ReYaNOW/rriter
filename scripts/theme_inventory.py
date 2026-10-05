@@ -52,9 +52,16 @@ EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/renderer/renderer_init_methods.rs", "theme.clone"): "Initial renderer UI palette is synchronized with its editor palette before theme selection is applied",
     ("src/render_view/root_frame_layout_renderer.rs", "self.theme.surface_bg"): "Window surface background",
     ("src/render_view/ide_panels/ide_panel_dialog_renderer.rs", "self.theme.terminal_bg"): "Bottom panel under the Terminal tab uses editor theme by design",
+    ("src/render_view/terminal_ui.rs", "self.theme.terminal"): "Terminal ANSI palette",
+    ("src/render_view/terminal_ui.rs", "self.theme.search_match"): "Search matches inside terminal cells",
+    ("src/render_view/terminal_ui.rs", "self.theme.search_match_active"): "Active search match inside terminal cells",
+    ("src/render_view/terminal_ui.rs", "self.theme.sel"): "Terminal cell selection and content border",
+    ("src/render_view/terminal_ui.rs", "self.theme.fg"): "Default terminal cell text",
+    ("src/render_view/terminal_ui.rs", "self.theme.terminal_cursor"): "Terminal cursor",
+    ("src/render_view/terminal_ui.rs", "&ansi_colors"): "Alias of the terminal ANSI palette",
+    ("src/render_view/terminal_ui.rs", "border_color"): "Alias of the terminal content border colour",
 }
 EDITOR_THEME_FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("src/render_view/terminal_ui.rs", "draw_terminal_panel"): "Terminal cell content, ANSI colors, cursor, selection and terminal search surfaces use the editor theme by design",
     ("src/render_view/terminal_ui.rs", "terminal_default_cell_text_uses_theme_ansi_seven"): "Test of terminal text using the editor theme's ANSI palette",
     ("src/render_view/root_helpers.rs", "mod_interval_color"): "Editor git gutter colors",
     ("src/render_view/root_helpers.rs", "git_gutter_uses_existing_theme_tokens_for_each_change_kind"): "Test of the editor git gutter colors",
