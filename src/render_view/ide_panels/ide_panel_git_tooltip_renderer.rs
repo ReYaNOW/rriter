@@ -861,7 +861,7 @@ impl Renderer {
             + date_icon_extra_drop)
             .round();
         let author_x = (content_x + title_icon_size + title_icon_gap).round();
-        let title_count_color = self.ui.pick(UiRole::Selection, self.ui_theme.sel);
+        let title_count_color = self.ui.pick(UiRole::Icon, self.ui_theme.sel);
         let title_count_text_color = self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]);
         let (newest_count, oldest_count) =
             git_graph_tooltip_branch_counts(commits, target.commit_idx);
@@ -880,7 +880,7 @@ impl Renderer {
             content_x.round(),
             author_icon_y,
             title_icon_size,
-            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::Icon, self.ui_theme.sel),
         );
         let row_start = self.push_git_graph_tooltip_text_row(
             &commit.author_name,
@@ -923,7 +923,7 @@ impl Renderer {
             content_x.round(),
             date_icon_y,
             title_icon_size,
-            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::Icon, self.ui_theme.sel),
         );
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(
@@ -1077,8 +1077,8 @@ impl Renderer {
                 pill_w,
                 pill_h,
                 4.0 * s,
-                self.ui.pick(UiRole::GitGraphNode, [0.28, 0.24, 0.40, 1.0]),
-                self.ui.pick(UiRole::GitCommit, [0.86, 0.90, 1.0, 1.0]),
+                self.ui.pick(UiRole::Accent, [0.28, 0.24, 0.40, 1.0]),
+                self.ui.pick(UiRole::TextOnAccent, [0.86, 0.90, 1.0, 1.0]),
                 scale,
                 6.0 * s,
                 true,

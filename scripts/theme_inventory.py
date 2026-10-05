@@ -52,6 +52,7 @@ EDITOR_THEME_EXPRESSION_EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/renderer/renderer_init_methods.rs", "theme.clone"): "Initial renderer UI palette is synchronized with its editor palette before theme selection is applied",
     ("src/render_view/root_frame_layout_renderer.rs", "self.theme.surface_bg"): "Window surface background",
     ("src/render_view/ide_panels/ide_panel_dialog_renderer.rs", "self.theme.terminal_bg"): "Bottom panel under the Terminal tab uses editor theme by design",
+    ("src/render_view/ide_panels/ide_panel_side_renderer.rs", "self.theme.surface_bg"): "Activity rail repaints only when the UI surface differs from the frame clear colour (editor surface)",
     ("src/render_view/terminal_ui.rs", "self.theme.terminal"): "Terminal ANSI palette",
     ("src/render_view/terminal_ui.rs", "self.theme.search_match"): "Search matches inside terminal cells",
     ("src/render_view/terminal_ui.rs", "self.theme.search_match_active"): "Active search match inside terminal cells",
@@ -147,6 +148,7 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/render_view/markdown_read_text_layout.rs", "[0.95, 0.93, 0.98, 1.0]"): "Task 13 D: editor Markdown content",
     ("src/render_view/markdown_read_text_layout.rs", "[0.78, 0.75, 0.87, 1.0]"): "Task 13 D: editor Markdown content",
     ("src/render_view/markdown_read_text_layout.rs", "[0.73, 0.70, 0.86, 1.0]"): "Task 13 D: editor Markdown content",
+    ("src/render_view/ide_panels/ide_panel_side_renderer.rs", "theme.surface_bg"): "Activity rail repaint check against the frame clear colour",
     ("src/render_view/minimap_ui.rs", "theme.sel"): "Task 13 C: editor minimap overlay",
     ("src/render_view/minimap_ui.rs", "theme.minimap_bg"): "Task 13 C: editor minimap background",
     ("src/render_view/minimap_ui.rs", "theme.syntax"): "Task 13 C: editor minimap syntax",
@@ -344,6 +346,28 @@ def editor_theme_reads(path: Path):
         yield rel, line, containing, expression
 
 
+SWALLOWED_CODE = re.compile(r"//[^\n]*[)\];]\s*(?:self|renderer)\.[A-Za-z_][A-Za-z_0-9]*\s*\(")
+SWALLOWED_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("src/render_view/ide_panels/ide_panel_dialog_renderer.rs", "// Ручка ресайза (1px линия вверху панели)self.push_rect("): "Intentionally disabled resize grip, see EXCEPTIONS",
+}
+
+
+def swallowed_code(path: Path):
+    """Yield draw calls glued onto the end of a line comment, so they never run."""
+    rel = path.relative_to(ROOT).as_posix()
+    if is_test_file(path) or not (is_ui_path(rel) or rel.startswith("src/renderer/")):
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (UnicodeDecodeError, OSError):
+        return
+    for number, line in enumerate(lines, 1):
+        if SWALLOWED_CODE.search(line) and "http" not in line:
+            if any(rel == key_rel and key_text in line for key_rel, key_text in SWALLOWED_EXCEPTIONS):
+                continue
+            yield rel, number, line.strip()
+
+
 def numeric_color(value: str) -> tuple[float, ...] | None:
     if not is_color_array(value):
         return None
@@ -439,6 +463,9 @@ def main() -> int:
                     continue
                 number = source.count("\n", 0, match.start()) + 1
                 white.append((rel, number, match.group(0), lines[number - 1].strip()))
+        swallowed = [hit for path in files if path.is_file() for hit in swallowed_code(path)]
+        for rel, line, context in swallowed:
+            print(f"SWALLOWED {rel}:{line}: code glued onto a comment | {context}")
         for rel, line, value, context in remaining:
             print(f"{rel}:{line}: {value} | {context}")
         for rel, line, value, context in white:
@@ -460,9 +487,9 @@ def main() -> int:
             print(f"unused role: {role}")
         for role, expected, most_frequent, count in mismatches:
             print(f"representative: {role} roles={expected} most_frequent={most_frequent} ({count} calls)")
-        print(f"--check summary: remaining={len(remaining) + len(white)} unused_roles={len(unused)} representative_mismatches={len(mismatches)}")
+        print(f"--check summary: remaining={len(remaining) + len(white) + len(swallowed)} unused_roles={len(unused)} representative_mismatches={len(mismatches)}")
         print(f"editor_theme_reads={len(editor_reads)}")
-        return 1 if remaining or white or unused or mismatches or editor_reads else 0
+        return 1 if remaining or white or swallowed or unused or mismatches or editor_reads else 0
     for rel, line, value, context, kind, _offset in records:
         print(f"{rel}:{line}: {value} | {context}")
     return 0

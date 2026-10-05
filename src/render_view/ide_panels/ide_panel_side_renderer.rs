@@ -751,7 +751,19 @@ impl Renderer {
         let hit_mx = if mouse_in_blocking_bottom { -1.0 } else { mx };
         let hit_my = if mouse_in_blocking_bottom { -1.0 } else { my };
 
-        // Сайдбар рисуется на полную высоту окна (real_height)self.push_rect(0.0, 0.0, sb_w, real_height, sidebar_bg);
+        // The rail spans the full window height (real_height). Its fill is UI chrome: the frame is
+        // cleared with the editor theme's surface colour, so a separate UI theme must repaint it.
+        // When both surfaces match the clear colour is already right; skipping the rect keeps
+        // the single-theme frame pixel-identical (a drawn rect is off by one level).
+        if self.ui_theme.surface_bg != self.theme.surface_bg {
+            self.push_rect(
+                0.0,
+                0.0,
+                sb_w,
+                real_height,
+                self.ui.pick(UiRole::BgCode, self.ui_theme.surface_bg),
+            );
+        }
         self.push_rect(sb_w - 1.0, 0.0, 1.0, real_height, self.ui.ink(0.12));
 
         let btn_size = sb_w;
