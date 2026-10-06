@@ -26,6 +26,10 @@ TEST ?=
 # поэтому тесты независимы. Вывод --nocapture перемешивается; для чтения лога по порядку — TEST_THREADS=1.
 TEST_THREADS ?= 8
 BUILD_STD_TEST = $(BUILD_STD)
+# Один прогон тестов на машину: лок в общем .git, поэтому его видят все worktree.
+# Второй запуск не падает, а ждёт, пока закончится первый.
+TEST_LOCK_FILE := $(or $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null),$(CURDIR)/target)/rriter-test.lock
+TEST_LOCK_NOTICE = flock -n $(TEST_LOCK_FILE) true || echo "⏳ Another rriter test run is in progress (lock $(TEST_LOCK_FILE)). Please wait: this run starts as soon as it finishes."
 
 .PHONY: all fast max max-nopgo bloat-max codex_test lint-baseline test check-tests test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
 
@@ -111,12 +115,13 @@ lint-baseline:
 # --test-threads=1 делает вывод последовательным, чтобы было видно, где зависло.
 test: $(if $(PDFIUM_READY),,pdfium)
 	@echo "🧪 Запуск тестов (на базе FAST профиля, подробный режим)..."
+	@$(TEST_LOCK_NOTICE)
 	RRITER_PDFIUM_PATH=$$(cat target/pdfium.path) \
 	$(FAST_PROFILE_OPTS) \
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
-	cargo +nightly test \
+	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
 	--target $(TARGET) \
@@ -159,11 +164,12 @@ test-one:
 		exit 2; \
 	fi
 	@echo "🎯 Запуск одного теста: $(TEST)"
+	@$(TEST_LOCK_NOTICE)
 	$(FAST_PROFILE_OPTS) \
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
-	cargo +nightly test \
+	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
 	--target $(TARGET) \
@@ -193,12 +199,13 @@ test-list:
 # Тесты с таймингами.
 test-time: $(if $(PDFIUM_READY),,pdfium)
 	@echo "⏱️ Запуск тестов с таймингами..."
+	@$(TEST_LOCK_NOTICE)
 	RRITER_PDFIUM_PATH=$$(cat target/pdfium.path) \
 	$(FAST_PROFILE_OPTS) \
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
-	cargo +nightly test \
+	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
 	--target $(TARGET) \
