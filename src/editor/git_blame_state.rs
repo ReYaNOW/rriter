@@ -158,15 +158,8 @@ pub fn head_line_for(hunks: &[LineDiffHunk], line: usize) -> Option<usize> {
         if line < hunk.after_end {
             return None;
         }
-        if hunk.after_end <= line {
-            let before_len = hunk.before_end.checked_sub(hunk.before_start)?;
-            let after_len = hunk.after_end.checked_sub(hunk.after_start)?;
-            return if before_len >= after_len {
-                line.checked_add(before_len - after_len)
-            } else {
-                line.checked_sub(after_len - before_len)
-            };
-        }
+        // Hunk bounds are absolute, so the nearest hunk above carries the offset of all earlier ones.
+        return line.checked_sub(hunk.after_end)?.checked_add(hunk.before_end);
     }
     Some(line)
 }
