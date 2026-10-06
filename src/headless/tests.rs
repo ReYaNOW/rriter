@@ -327,6 +327,22 @@ pub(crate) mod tests_support {
         std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
     }
 
+    pub(crate) fn git_blame_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let dir = scratch_dir(name);
+        let file = dir.join("blame.txt");
+        git_init(&dir);
+        std::fs::write(&file, "first\nsecond\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "commit", "-qm", "first", "--date=2001-01-01T00:00:00Z"]);
+        std::fs::write(&file, "first\nsecond updated\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["-c", "user.name=Grace", "-c", "user.email=grace@example.invalid", "commit", "-qm", "second", "--date=2002-01-01T00:00:00Z"]);
+        std::fs::write(&file, "first updated\nsecond updated\nthird\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["-c", "user.name=Linus", "-c", "user.email=linus@example.invalid", "commit", "-qm", "third", "--date=2003-01-01T00:00:00Z"]);
+        (dir, file)
+    }
+
     pub(crate) fn run_script(session: &mut HeadlessSession, script: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         assert!(session.run_loop(Cursor::new(script.to_vec()), &mut out));

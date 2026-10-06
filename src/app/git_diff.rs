@@ -1387,8 +1387,8 @@ impl App {
         self.show_notice("Файл открыт в режиме только чтение");
     }
 
-    pub(crate) fn show_notice(&mut self, message: &'static str) {
-        self.readonly_notice_text = message;
+    pub(crate) fn show_notice(&mut self, message: impl Into<String>) {
+        self.readonly_notice_text = message.into();
         self.readonly_notice_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
         if let Some(window) = self.window.as_ref() {

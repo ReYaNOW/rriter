@@ -429,6 +429,9 @@ impl App {
                 }
                 self.tabs[idx].load = TabLoad::Loaded;
                 self.notify_lsp_tab_open(idx);
+                if is_active {
+                    self.ensure_blame_for_active();
+                }
             }
             return;
         }
@@ -489,6 +492,9 @@ impl App {
         self.tabs[idx].load = if with_git { TabLoad::Loaded } else { TabLoad::GitBasePending };
         if with_git {
             self.notify_lsp_tab_open(idx);
+            if is_active {
+                self.ensure_blame_for_active();
+            }
         }
     }
 

@@ -1203,6 +1203,8 @@ pub struct App {
     pub modifiers: ModifiersState,
     pub left_shift_down: bool,
     pub ctrl_wheel_multiplier: f32,
+    pub git_blame_inline: bool,
+    pub git_blame_delay_ms: u32,
     pub keymap: crate::keymap::Keymap,
     pub keymap_overrides: crate::keymap::KeymapOverrides,
     pub empty_ide_open_label: String,
@@ -1333,11 +1335,13 @@ pub struct App {
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
     pub external_changes_pending: bool,
     pub git_diff_rx: Vec<crate::app::git_diff::GitDiffReceiver>,
+    pub git_blame_rx: Vec<crate::app::git_blame::GitBlameReceiver>,
+    pub git_blame_message_rx: Vec<crate::app::git_blame::CommitMessageReceiver>,
     pub inline_git_diff_rx:
         Option<crate::ui_waker::OneShot<crate::app::git_diff::InlineGitDiffEvent>>,
     pub inline_git_popup: Option<InlineGitPopup>,
     pub readonly_notice_until: Option<Instant>,
-    pub readonly_notice_text: &'static str,
+    pub readonly_notice_text: String,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме
     pub lsp: Option<crate::lsp::LspManager>,
     /// Меню быстрых действий LSP (Alt+Enter)

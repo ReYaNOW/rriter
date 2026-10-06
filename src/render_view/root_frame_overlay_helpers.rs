@@ -653,7 +653,7 @@ impl Renderer {
         ui_my: f32,
         blink_alpha: f32,
         show_readonly_notice: bool,
-        readonly_notice_text: &'static str,
+        readonly_notice_text: &str,
         tab_bar_h: f32,
         is_ui_disabled: bool,
         modal_overlay_open: bool,

@@ -372,6 +372,9 @@ fn about_to_wait_background_polls(app: &mut App, now: Instant) -> (bool, Option<
     if app.poll_git_diff_tabs() {
         needs_redraw = true;
     }
+    if app.poll_git_blame() || app.poll_git_blame_messages() {
+        needs_redraw = true;
+    }
     if app.poll_api_client() {
         needs_redraw = true;
     }

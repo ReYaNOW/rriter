@@ -415,6 +415,8 @@ impl App {
             pdf_dark_pages: self.pdf_dark_pages,
             theme: self.theme_selection(),
             ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
+            git_blame_inline: self.git_blame_inline,
+            git_blame_delay_ms: self.git_blame_delay_ms,
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),
             rust_settings: self.rust_settings.clone(),
@@ -652,6 +654,7 @@ impl App {
         self.markdown.clear_code_copy_transient();
         self.revalidate_markdown_media(false);
         self.check_git_heads(crate::app::git_baseline::HeadCheckReason::TabActivation);
+        self.ensure_blame_for_active();
         self.prefetch_active_tab_git_graph();
 
         if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() || self.tabs[self.active_tab].kind.is_image() {

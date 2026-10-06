@@ -35,6 +35,7 @@ impl App {
                     }
                     if !tab.editor.text_equals(&disk_text) {
                         let old_version = tab.editor.version;
+                        let git_blame = tab.editor.git_blame.clone();
                         tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
                         tab.editor.version = old_version + 1;
                         let _ = tab.editor.insert_str(&disk_text);
@@ -49,6 +50,7 @@ impl App {
                             .map(|(snapshot, text)| (Some(snapshot), Some(text)))
                             .unwrap_or((None, None));
                         tab.editor.set_git_head_snapshot(git_head, base);
+                        tab.editor.git_blame = git_blame;
                         tab.editor.sync_edits.clear();
                         tab.text_file_format = decoded.format;
                         tab.completions.clear();
@@ -78,6 +80,7 @@ impl App {
             self.reload_git_diff_tab(idx);
         }
         self.sync_active_tab();
+        self.ensure_blame_for_active();
         if active_reloaded {
             while self.highlighter.rx.try_recv().is_ok() {}
             self.reset_highlighter_with_text(self.editor.get_full_text(), false);
@@ -219,6 +222,7 @@ impl App {
                 continue;
             }
             let old_version = tab.editor.version;
+            let git_blame = tab.editor.git_blame.clone();
             tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
             tab.editor.version = old_version + 1;
             let _ = tab.editor.insert_str(&disk_text);
@@ -233,6 +237,7 @@ impl App {
                 .map(|(snapshot, text)| (Some(snapshot), Some(text)))
                 .unwrap_or((None, None));
             tab.editor.set_git_head_snapshot(git_head, base);
+            tab.editor.git_blame = git_blame;
             tab.editor.sync_edits.clear();
             tab.closing_hints.invalidate(tab.editor.version);
             tab.text_file_format = text_file_format;
@@ -261,6 +266,7 @@ impl App {
             self.reload_git_diff_tab(idx);
         }
         self.sync_active_tab();
+        self.ensure_blame_for_active();
         for (path, exists) in presence {
             // A save may have recreated the file after the probe ran.
             let deleted = !exists && !path.is_file();

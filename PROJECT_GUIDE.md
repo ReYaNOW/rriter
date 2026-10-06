@@ -1648,6 +1648,7 @@ Entrypoints/state:
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_baseline.rs` -> HEAD snapshots, baseline loading, and open-tab HEAD refresh.
+* `src/app/git_blame.rs` -> background blame loading, per-tab stale-result checks, and lazy commit-message reads.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
 * `src/editor/git_blame_state.rs` -> shared HEAD snapshot and pure Git blame data, parsing, mapping, and formatting helpers.
 * `src/app/project_search.rs` -> project-wide explicit search state, results list, filter and layout; includes the pieces below.

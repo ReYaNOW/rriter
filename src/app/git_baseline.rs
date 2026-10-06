@@ -89,6 +89,7 @@ impl App {
             None => (None, None),
         };
         self.editor.set_git_head_snapshot(git_head, base_text);
+        self.ensure_blame_for_active();
         self.inline_git_popup = None;
     }
 
@@ -157,6 +158,7 @@ impl App {
             }
         }
         self.sync_active_tab();
+        self.ensure_blame_for_active();
         if changed {
             self.inline_git_popup = None;
             if let Some(window) = self.window.as_ref() {

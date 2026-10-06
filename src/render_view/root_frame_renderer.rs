@@ -163,7 +163,7 @@ impl Renderer {
         closing_hints: &[crate::languages::dart::ClosingHint],
         ide_workspaces: &[std::path::PathBuf],
         show_readonly_notice: bool,
-        readonly_notice_text: &'static str,
+        readonly_notice_text: &str,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,

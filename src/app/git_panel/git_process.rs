@@ -160,6 +160,22 @@ fn git_output_strs(
     git_output(repo_root, &args, label, network)
 }
 
+pub(crate) fn git_blame_porcelain(
+    repo_root: &std::path::Path,
+    oid: &str,
+    rel_path: &std::path::Path,
+) -> Result<String, String> {
+    let args = vec![
+        std::ffi::OsString::from("blame"),
+        std::ffi::OsString::from("--porcelain"),
+        std::ffi::OsString::from(oid),
+        std::ffi::OsString::from("--"),
+        rel_path.as_os_str().to_owned(),
+    ];
+    let output = git_output(repo_root, &args, "blame", false)?;
+    String::from_utf8(output.stdout).map_err(|_| "Git blame вернул некорректный UTF-8".to_string())
+}
+
 fn run_git_checked(
     repo_root: &std::path::Path,
     args: &[&str],
