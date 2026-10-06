@@ -231,9 +231,8 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
     assert!(dump["blame_inline"].is_null());
 
-    std::fs::write(&long, "external head line\n").unwrap();
-    git(&root, &["add", "long.txt"]);
-    git(&root, &["-c", "user.name=Focus Author", "-c", "user.email=focus@example.invalid", "commit", "-qm", "external head"]);
+    // Same content under a new HEAD: the open buffer stays clean, only the blame owner changes.
+    git(&root, &["-c", "user.name=Focus Author", "-c", "user.email=focus@example.invalid", "commit", "--amend", "--reset-author", "-qm", "external head"]);
     let new_head = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
     session.app.on_window_focus_gained();
     wait_until(&mut session, 8000, "external HEAD snapshot", |session| {
