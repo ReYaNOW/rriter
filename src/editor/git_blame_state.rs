@@ -151,6 +151,8 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
     Some(GitBlame { commits, line_commit, age_ranks, column_labels })
 }
 
+/// Maps a buffer line to HEAD; the result may be at or beyond HEAD's line count,
+/// so callers must bound it before indexing blame data.
 pub fn head_line_for(hunks: &[LineDiffHunk], line: usize) -> Option<usize> {
     let partition = hunks.partition_point(|hunk| hunk.after_start <= line);
     if partition > 0 {
@@ -176,16 +178,22 @@ pub fn blame_blocks(line_commits: &[Option<u32>]) -> Vec<bool> {
 }
 
 pub fn age_rank(times: &[i64]) -> Vec<f32> {
-    if times.len() <= 1 {
+    let mut unique_times = times.to_vec();
+    unique_times.sort_unstable();
+    unique_times.dedup();
+    if unique_times.len() <= 1 {
         return vec![1.0; times.len()];
     }
-    let oldest = *times.iter().min().unwrap_or(&0);
-    let newest = *times.iter().max().unwrap_or(&oldest);
-    let span = newest.saturating_sub(oldest);
-    if span == 0 {
-        return vec![1.0; times.len()];
-    }
-    times.iter().map(|time| time.saturating_sub(oldest) as f64 as f32 / span as f32).collect()
+    let newest_rank = unique_times.len() - 1;
+    times
+        .iter()
+        .map(|time| {
+            unique_times
+                .binary_search(time)
+                .map(|rank| rank as f32 / newest_rank as f32)
+                .unwrap_or(1.0)
+        })
+        .collect()
 }
 
 pub fn truncate_to_width(text: &str, width: usize) -> String {
@@ -282,9 +290,17 @@ mod tests {
     }
 
     #[test]
+    fn head_line_mapping_keeps_trailing_empty_line_outside_head_blame() {
+        assert_eq!(head_line_for(&[], 2), Some(2));
+        assert_eq!(head_line_for(&[hunk(0, 0, 0, 1)], 2), Some(1));
+    }
+
+    #[test]
     fn blocks_age_and_text_formatting_are_stable() {
         assert_eq!(blame_blocks(&[Some(1), Some(1), Some(2), None, Some(2)]), vec![true, false, true, true, true]);
         assert_eq!(age_rank(&[10, 20, 20]), vec![0.0, 1.0, 1.0]);
+        assert_eq!(age_rank(&[10, 20, 1000]), vec![0.0, 0.5, 1.0]);
+        assert_eq!(age_rank(&[10, 20, 20, 1000]), vec![0.0, 0.5, 0.5, 1.0]);
         assert_eq!(age_rank(&[5, 5]), vec![1.0, 1.0]);
         assert_eq!(truncate_to_width("абвг", 3), "аб…");
         assert_eq!(truncate_to_width("abcdef", 2), "a…");
@@ -302,8 +318,11 @@ mod tests {
 
     #[test]
     fn line_mapping_handles_thousands_of_hunks() {
-        let hunks: Vec<_> = (0..5000).map(|i| hunk(i * 2, i * 2 + 1, i * 2, i * 2 + 1)).collect();
-        assert_eq!(head_line_for(&hunks, 9998), None);
+        let hunks: Vec<_> = (0..5000)
+            .map(|i| hunk(i, i, i * 2, i * 2 + 1))
+            .collect();
+        assert_eq!(head_line_for(&hunks, 1), Some(0));
+        assert_eq!(head_line_for(&hunks, 10_000), Some(5_000));
     }
 }
 
