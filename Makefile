@@ -24,7 +24,10 @@ TEST_FILTER ?=
 TEST ?=
 # Каждый тест — отдельный процесс (-Z panic-abort-tests), cfg(test)-каталоги состояния — по PID,
 # поэтому тесты независимы. Вывод --nocapture перемешивается; для чтения лога по порядку — TEST_THREADS=1.
-TEST_THREADS ?= 8
+# 4 потока и Mesa (EGL на CPU, не на GPU игры): прогон 158 с вместо 91 с, зато без лагов в игре.
+# На 8 потоках Mesa перегружает CPU. Быстрее, если машина свободна: TEST_THREADS=8 TEST_EGL_VENDOR=nvidia.
+TEST_THREADS ?= 4
+TEST_EGL_VENDOR ?= mesa
 BUILD_STD_TEST = $(BUILD_STD)
 # Один прогон тестов на машину: лок в общем .git, поэтому его видят все worktree.
 # Второй запуск не падает, а ждёт, пока закончится первый.
@@ -121,6 +124,7 @@ test: $(if $(PDFIUM_READY),,pdfium)
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
+	RRITER_EGL_VENDOR=$(TEST_EGL_VENDOR) \
 	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
@@ -169,6 +173,7 @@ test-one:
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
+	RRITER_EGL_VENDOR=$(TEST_EGL_VENDOR) \
 	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
@@ -205,6 +210,7 @@ test-time: $(if $(PDFIUM_READY),,pdfium)
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
 	RUST_BACKTRACE=full \
+	RRITER_EGL_VENDOR=$(TEST_EGL_VENDOR) \
 	flock $(TEST_LOCK_FILE) cargo +nightly test \
 	$(BUILD_STD_TEST) \
 	-Z panic-abort-tests \
