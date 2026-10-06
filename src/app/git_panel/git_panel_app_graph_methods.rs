@@ -177,6 +177,9 @@ impl App {
         } else if self.ide_panel.git.graph_refresh_after_status && !self.ide_panel.git.graph_open() {
             self.ide_panel.git.graph_refresh_after_status = false;
         }
+        if status_event_applied {
+            self.check_git_heads(crate::app::git_baseline::HeadCheckReason::GitAction);
+        }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
         for mut receiver in graph_receivers {

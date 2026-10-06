@@ -651,6 +651,7 @@ impl App {
         self.sync_active_tab();
         self.markdown.clear_code_copy_transient();
         self.revalidate_markdown_media(false);
+        self.check_git_heads(crate::app::git_baseline::HeadCheckReason::TabActivation);
         self.prefetch_active_tab_git_graph();
 
         if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() || self.tabs[self.active_tab].kind.is_image() {

@@ -474,6 +474,7 @@ fn about_to_wait_file_watcher(app: &mut App) -> bool {
             needs_redraw = true;
         }
         if fs_changed {
+            app.check_git_heads(crate::app::git_baseline::HeadCheckReason::GitMetadataChanged);
             app.refresh_file_tree();
             app.start_file_watcher();
             app.revalidate_markdown_media(false);

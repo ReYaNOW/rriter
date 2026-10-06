@@ -72,6 +72,8 @@ mod ui_tests_git_commit;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_diff;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_git_blame_head;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_graph;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_goto_definition;

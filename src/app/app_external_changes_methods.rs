@@ -41,6 +41,14 @@ impl App {
                         tab.editor.cursor = 0;
                         tab.editor.clear_history();
                         tab.editor.set_original_text();
+                        let snapshot = crate::app::git_baseline::load_workspace_head_snapshot(
+                            path,
+                            &self.ide_workspaces,
+                        );
+                        let (git_head, base) = snapshot
+                            .map(|(snapshot, text)| (Some(snapshot), Some(text)))
+                            .unwrap_or((None, None));
+                        tab.editor.set_git_head_snapshot(git_head, base);
                         tab.editor.sync_edits.clear();
                         tab.text_file_format = decoded.format;
                         tab.completions.clear();
@@ -217,6 +225,14 @@ impl App {
             tab.editor.cursor = 0;
             tab.editor.clear_history();
             tab.editor.set_original_text();
+            let snapshot = crate::app::git_baseline::load_workspace_head_snapshot(
+                &change.path,
+                &self.ide_workspaces,
+            );
+            let (git_head, base) = snapshot
+                .map(|(snapshot, text)| (Some(snapshot), Some(text)))
+                .unwrap_or((None, None));
+            tab.editor.set_git_head_snapshot(git_head, base);
             tab.editor.sync_edits.clear();
             tab.closing_hints.invalidate(tab.editor.version);
             tab.text_file_format = text_file_format;

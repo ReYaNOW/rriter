@@ -215,6 +215,7 @@ pub struct Editor {
     pub original_hashes: Vec<u64>,
     pub saved_hashes: Vec<u64>,
     pub git_base_text: Option<String>,
+    pub git_head: Option<crate::editor::GitHeadSnapshot>,
     pub git_hunks: Vec<LineDiffHunk>,
     git_line_changes: Vec<Option<GitChangeKind>>,
     pub line_states: Vec<Option<LineModState>>,
@@ -252,6 +253,7 @@ impl Editor {
             original_hashes: vec![],
             saved_hashes: vec![],
             git_base_text: None,
+            git_head: None,
             git_hunks: Vec::new(),
             git_line_changes: Vec::new(),
             line_states: vec![],
@@ -566,6 +568,7 @@ impl Editor {
         self.original_hashes = self.get_line_hashes();
         self.saved_hashes = self.original_hashes.clone();
         self.git_base_text = None;
+        self.git_head = None;
         self.git_hunks.clear();
         self.update_modifications();
     }
@@ -580,6 +583,15 @@ impl Editor {
         }
         self.git_hunks.clear();
         self.update_modifications();
+    }
+
+    pub fn set_git_head_snapshot(
+        &mut self,
+        snapshot: Option<crate::editor::GitHeadSnapshot>,
+        text: Option<String>,
+    ) {
+        self.git_head = snapshot;
+        self.set_git_base_text(text);
     }
 
     pub fn mark_saved(&mut self) {
@@ -902,6 +914,7 @@ impl Editor {
         let original_hashes = self.original_hashes.clone();
         let saved_hashes = self.saved_hashes.clone();
         let git_base_text = self.git_base_text.clone();
+        let git_head = self.git_head.clone();
         let version = next_editor_version(self.version);
         let cursor = clamp_text_cursor_to_char_boundary(text, self.cursor);
 
@@ -921,6 +934,7 @@ impl Editor {
         self.original_hashes = original_hashes;
         self.saved_hashes = saved_hashes;
         self.git_base_text = git_base_text;
+        self.git_head = git_head;
         self.sync_edits.clear();
         self.foldable_lines.clear();
         self.folded_lines.clear();
@@ -956,6 +970,7 @@ impl Editor {
         self.original_hashes = self.get_line_hashes();
         self.saved_hashes = self.original_hashes.clone();
         self.git_base_text = None;
+        self.git_head = None;
         self.git_hunks.clear();
         self.git_line_changes.clear();
         let line_count = self.original_hashes.len();

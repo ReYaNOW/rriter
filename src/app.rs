@@ -41,6 +41,7 @@ pub mod events;
 pub mod file_icons;
 pub mod file_tree;
 pub mod git_diff;
+pub mod git_baseline;
 pub mod git_panel;
 pub mod keyboard;
 pub mod lsp_actions;

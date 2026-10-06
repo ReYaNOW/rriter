@@ -470,7 +470,24 @@ fn path_has_git_dir_for_platform(
 pub(super) fn notify_paths_need_file_tree_refresh<'a>(
     paths: impl IntoIterator<Item = &'a std::path::Path>,
 ) -> bool {
-    paths.into_iter().any(|path| !path_has_git_dir(path))
+    paths.into_iter().any(|path| {
+        is_git_head_or_ref_path(path) || !path_has_git_dir(path)
+    })
+}
+
+fn is_git_head_or_ref_path(path: &std::path::Path) -> bool {
+    let components = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .split(|byte| matches!(byte, b'/' | b'\\'))
+        .collect::<Vec<_>>();
+    components.windows(2).any(|pair| {
+        (pair[0] == b".git" || pair[0].eq_ignore_ascii_case(b".git"))
+            && (pair[1] == b"HEAD"
+                || pair[1].eq_ignore_ascii_case(b"HEAD")
+                || pair[1] == b"refs"
+                || pair[1].eq_ignore_ascii_case(b"refs"))
+    })
 }
 
 /// Quiet window that coalesces a burst of changes into one file-tree refresh.
@@ -514,6 +531,14 @@ fn build_file_tree_watch_paths_for_platform(
 
     for root in roots {
         push_watch_path(root, platform, &mut seen, &mut out);
+        let git_dir = root.join(".git");
+        if git_dir.is_dir() {
+            push_watch_path(&git_dir, platform, &mut seen, &mut out);
+            let refs_dir = git_dir.join("refs");
+            if refs_dir.is_dir() {
+                push_watch_path(&refs_dir, platform, &mut seen, &mut out);
+            }
+        }
     }
     let mut expanded = expanded_dirs
         .iter()
@@ -574,7 +599,14 @@ pub fn spawn_watcher(
         };
 
         for path in &paths {
-            let _ = watcher.watch(path, RecursiveMode::NonRecursive);
+            let watch_mode = if path.file_name() == Some(std::ffi::OsStr::new("refs"))
+                && path.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new(".git"))
+            {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            let _ = watcher.watch(path, watch_mode);
         }
 
         // Блокируемся в цикле — watcher должен жить, пока работает поток.
@@ -629,6 +661,12 @@ mod tests {
         assert!(!notify_paths_need_file_tree_refresh([
             Path::new("/workspace/.git/index"),
             Path::new("/workspace/.git/objects/aa/bb"),
+        ]));
+        assert!(notify_paths_need_file_tree_refresh([
+            Path::new("/workspace/.git/HEAD"),
+        ]));
+        assert!(notify_paths_need_file_tree_refresh([
+            Path::new("/workspace/.git/refs/heads/main"),
         ]));
         assert!(notify_paths_need_file_tree_refresh([
             Path::new("/workspace/.git/index"),
