@@ -1649,7 +1649,7 @@ Entrypoints/state:
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_baseline.rs` -> HEAD snapshots, baseline loading, and open-tab HEAD refresh.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
-* `src/editor/git_blame_state.rs` -> shared HEAD snapshot contract for Git blame.
+* `src/editor/git_blame_state.rs` -> shared HEAD snapshot and pure Git blame data, parsing, mapping, and formatting helpers.
 * `src/app/project_search.rs` -> project-wide explicit search state, results list, filter and layout; includes the pieces below.
 * `src/app/project_search_engine.rs` -> search worker, traversal, decoding, fallback scanning, match collection.
 * `src/app/project_search_matcher.rs` -> pattern planning, include/exclude ignore matching, UTF-16 helpers.
