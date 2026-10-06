@@ -118,6 +118,8 @@ pub(super) fn markdown_scenario_steps() -> Vec<AutomationStep> {
 
     vec![
         S::OpenFile(PathBuf::from("README.md")),
+        // Markdown opens in Read mode; the edit steps below need the source view.
+        S::Markdown(M::SetMode(MarkdownMode::Edit)),
         S::WaitHighlight,
         S::WaitFrames(6),
         S::ScrollEditorTimed { duration_secs: 6 },
@@ -215,7 +217,11 @@ mod tests {
             steps.first(),
             Some(AutomationStep::OpenFile(path)) if path == Path::new("README.md")
         ));
-        assert!(matches!(steps.get(1), Some(AutomationStep::WaitHighlight)));
+        assert!(matches!(
+            steps.get(1),
+            Some(AutomationStep::Markdown(MarkdownAutomationStep::SetMode(MarkdownMode::Edit)))
+        ));
+        assert!(matches!(steps.get(2), Some(AutomationStep::WaitHighlight)));
         assert!(
             steps
                 .iter()
@@ -322,7 +328,8 @@ mod tests {
                     AutomationStep::Markdown(MarkdownAutomationStep::SetMode(MarkdownMode::Edit))
                 ))
                 .count(),
-            2
+            3,
+            "opening switch to Edit plus two returns from Read"
         );
         assert_eq!(
             steps
