@@ -107,7 +107,7 @@ pub(super) fn draw(
         let command_index = row.command as usize;
         let color = if matches!(row.warning, crate::app::keymap_settings::RowWarning::Conflict | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) { renderer.ui.pick(UiRole::Error, [1.0, 0.46, 0.42, 1.0]) } else { renderer.ui.pick(UiRole::TextSecondary, [0.88, 0.89, 0.92, 1.0]) };
         renderer.draw_string_scaled(row.label, (x + (5.0 * s).round()).round(), metrics.first_baseline, color, 0.83);
-        renderer.draw_string_scaled(row.id, (x + (5.0 * s).round()).round(), metrics.second_baseline, renderer.ui.pick(UiRole::TextMuted, [0.48, 0.49, 0.54, 1.0]), 0.65);
+        renderer.draw_string_scaled(row.id, (x + (5.0 * s).round()).round(), metrics.second_baseline, renderer.ui.pick(UiRole::TextMuted, [0.48, 0.49, 0.54, 1.0]), super::settings_ui::SETTINGS_SECONDARY_TEXT_SCALE);
         let mut chip_x = x + width * 0.49;
         if row.chords.is_empty() {
             renderer.draw_string_scaled("не назначено", chip_x, row_y.round() + (23.0 * s).round(), renderer.ui.pick(UiRole::TextMuted, [0.52, 0.53, 0.58, 1.0]), 0.74);
@@ -127,7 +127,7 @@ pub(super) fn draw(
             register_button(renderer, ui, UiId::SettingsKeymapReset(command_index), (x + width - (30.0 * s).round()).round(), metrics.chip_y, (26.0 * s).round(), metrics.chip_h, "↺", renderer.ui.pick(UiRole::AccentHover, [0.84, 0.75, 0.96, 1.0]));
         }
         if matches!(row.warning, crate::app::keymap_settings::RowWarning::TerminalIntercept | crate::app::keymap_settings::RowWarning::ConflictAndTerminalIntercept) {
-            renderer.draw_string_scaled("терминал перехватывает", x + width * 0.76, (row_y + 34.0 * s).round(), renderer.ui.pick(UiRole::Warning, [1.0, 0.7, 0.42, 1.0]), 0.62);
+            renderer.draw_string_scaled("терминал перехватывает", x + width * 0.76, (row_y + 34.0 * s).round(), renderer.ui.pick(UiRole::Warning, [1.0, 0.7, 0.42, 1.0]), super::settings_ui::SETTINGS_SECONDARY_TEXT_SCALE);
         }
         row_y += row_step;
         row_index += 1;

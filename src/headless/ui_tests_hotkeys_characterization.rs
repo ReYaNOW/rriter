@@ -173,7 +173,7 @@ fn headless_hotkeys_characterize_repeat_and_keyboard_owners() {
     std::fs::write(&file, "# title\n").expect("write Markdown fixture");
     let mut session = crate::headless::tests_support::session_for_test(1280, 720);
     run_ok(&mut session, &format!("workspace {}\nopen {}\nkey --repeat 1 ctrl+shift+v\n", dir.display(), file.display()));
-    assert_eq!(dump(&mut session)["tabs"][0]["markdown"], true, "the repeat is consumed after the initial Markdown toggle");
+    assert_eq!(dump(&mut session)["tabs"][0]["markdown"], false, "the repeat is consumed after toggling the default reader into source mode");
     let _ = std::fs::remove_dir_all(dir);
 
     let (dir, mut session) = keyboard_session("ui-hotkeys-terminal-matrix");

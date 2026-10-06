@@ -1,6 +1,8 @@
 use crate::theme::UiRole;
 
 pub(crate) const KEYMAP_SCROLLBAR_MIN_THUMB: f32 = 36.0;
+pub(crate) const SETTINGS_BUTTON_LABEL_SCALE: f32 = 0.72;
+pub(crate) const SETTINGS_SECONDARY_TEXT_SCALE: f32 = 0.64;
 
 fn clamped_settings_tab(active_tab: usize, tab_count: usize) -> usize {
     active_tab.min(tab_count.saturating_sub(1))

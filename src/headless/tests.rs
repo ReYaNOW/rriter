@@ -354,6 +354,18 @@ pub(crate) mod tests_support {
         panic!("timed out waiting for {what}; last dump: {}", dump(session));
     }
 
+    pub(crate) fn close_settings(session: &mut HeadlessSession) {
+        let lines = run_script(session, b"key escape\n");
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        wait_until(session, 5000, "Settings overlay closed", |session| {
+            !session.app.show_settings && session.app.settings_anim_progress <= 0.0
+        });
+    }
+
+    pub(crate) fn active_tab_index(session: &HeadlessSession) -> usize {
+        session.app.active_tab
+    }
+
     pub(crate) fn sample_file(dir: &Path) -> PathBuf {
         let path = dir.join("sample.txt");
         let mut text = String::new();
@@ -1259,12 +1271,12 @@ mod session_cases {
         let markdown = |dump: &serde_json::Value| {
             dump["tabs"].as_array().unwrap().iter().find(|tab| tab["active"] == true).unwrap()["markdown"].clone()
         };
-        assert_eq!(markdown(&before), false);
+        assert_eq!(markdown(&before), true, "markdown opens in reader mode");
         // The settings overlay has no button, only F1; a click is checked on the markdown toggle.
         let (x, y) = ui_center(&before, "MarkdownModeToggle");
         let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
         assert_eq!(lines, ["ok", "ok"]);
-        assert_eq!(markdown(&dump(&mut session)), true);
+        assert_eq!(markdown(&dump(&mut session)), false);
         run_script(&mut session, b"key f1\n");
         assert_eq!(dump(&mut session)["overlays"]["settings"], true);
         let _ = std::fs::remove_dir_all(dir);

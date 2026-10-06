@@ -40,7 +40,6 @@ fn open_markdown_read(dir: &Path, path: &Path) -> HeadlessSession {
     wait_until(&mut session, 5000, "Markdown mode button", |session| {
         has_ui(&dump(session), "MarkdownModeToggle")
     });
-    run_ok(&mut session, "key ctrl+shift+v\n");
     assert_eq!(dump(&mut session)["tabs"][0]["markdown"], true);
     session
 }

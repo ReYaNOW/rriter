@@ -266,17 +266,16 @@ impl Renderer {
                 value
             };
             const TOKEN_LABEL: &str = "токен";
-            let token_label_w = self.measure_ui_width(TOKEN_LABEL, API_FIELD_META_SCALE);
             self.draw_string_scaled_stable(
                 TOKEN_LABEL,
-                input_x - token_label_w - 10.0 * s,
-                api_centered_text_y(y + 14.0 * s, 30.0 * s, s),
+                input_x,
+                api_centered_text_y(y + (48.0 * s).round(), (16.0 * s).round(), s),
                 self.ui.pick(UiRole::TextSecondary, [0.68, 0.70, 0.78, 1.0]),
                 API_FIELD_META_SCALE,
             );
             self.draw_api_auth_input(
                 input_x,
-                y + 14.0 * s,
+                y + (66.0 * s).round(),
                 input_w,
                 30.0 * s,
                 s,
@@ -882,16 +881,10 @@ impl Renderer {
 #[cfg(test)]
 mod api_auth_renderer_regression_tests {
     #[test]
-    fn token_label_measurement_uses_the_drawn_text() {
+    fn token_label_draws_above_its_input() {
         let source = include_str!("api_client_tab_auth_renderer.rs");
         assert!(source.contains("const TOKEN_LABEL: &str = \"токен\";"));
-        assert!(source.contains("measure_ui_width(TOKEN_LABEL, API_FIELD_META_SCALE)"));
-        let stale_measurement = [
-            "measure_ui_width(",
-            "\"token\"",
-            ", API_FIELD_META_SCALE)",
-        ]
-        .concat();
-        assert!(!source.contains(&stale_measurement));
+        assert!(source.contains("TOKEN_LABEL,\n                input_x,"));
+        assert!(source.contains("y + (66.0 * s).round(),"));
     }
 }

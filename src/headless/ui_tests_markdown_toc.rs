@@ -29,6 +29,7 @@ fn open_markdown(dir: &Path, path: &Path) -> HeadlessSession {
     wait_until(&mut session, 5000, "Markdown mode button", |session| {
         has_ui(&dump(session), "MarkdownModeToggle")
     });
+    click_ui(&mut session, "MarkdownModeToggle");
     session
 }
 

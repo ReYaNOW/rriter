@@ -41,6 +41,9 @@ fn content_y_hits_visual_text_row(
     visual_lines
         .iter()
         .any(|line| content_y >= line.y_offset && content_y < line.y_offset + line_height)
+        || visual_lines
+            .last()
+            .is_some_and(|line| content_y >= line.y_offset + line_height)
 }
 
 fn editor_interaction_view_height(
@@ -610,6 +613,6 @@ mod tests {
         assert!(!content_y_hits_visual_text_row(12.0, 24.0, &lines));
         assert!(content_y_hits_visual_text_row(24.0, 24.0, &lines));
         assert!(content_y_hits_visual_text_row(71.9, 24.0, &lines));
-        assert!(!content_y_hits_visual_text_row(72.0, 24.0, &lines));
+        assert!(content_y_hits_visual_text_row(72.0, 24.0, &lines));
     }
 }

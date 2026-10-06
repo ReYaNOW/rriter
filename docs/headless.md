@@ -287,9 +287,9 @@ Traps found the hard way:
 - `ctrl+tab` is not bound: tabs switch with `mod+pagedown` / `mod+pageup`
   (`src/keymap/defaults.rs:35-36`) or a click on the tab.
 - A reused profile restores panels (see Isolation).
-- Closing settings keeps dimming the editor during the slide-out. Rust tests:
-  `wait_until` on `overlays.settings == false` and
-  `app.settings_anim_progress <= 0.0` (`src/headless/ui_tests_themes.rs:63-66`).
+- Rust UI tests use `tests_support::close_settings` to wait for the settings
+  slide-out to finish, and `tests_support::active_tab_index` to read the active
+  tab from `App` state.
   Driver: `dump` has no animation progress; after `overlays.settings` turns
   false, `settle 2000` until `settled=true`, then `screenshot <png>` in the
   same session.

@@ -1,5 +1,5 @@
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, ui_center, wait_until,
+    active_tab_index, click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, ui_center, wait_until,
 };
 use std::path::{Path, PathBuf};
 use crate::headless::HeadlessSession;
@@ -613,22 +613,18 @@ fn pdf_tab_allow_list_keeps_editing_keys_and_ime_out_of_the_hidden_editor() {
     std::fs::write(&second, "second tab\n").expect("write second file");
     let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    let active_tab = |session: &mut HeadlessSession| {
-        let state = dump(session);
-        state["tabs"].as_array().unwrap().iter().position(|tab| tab["active"] == true)
-    };
-    assert_eq!(active_tab(&mut session), Some(1), "the opened file is active");
+    assert_eq!(active_tab_index(&session), 1, "the opened file is active");
     run_script(&mut session, b"key ctrl+pageup\n");
-    assert_eq!(active_tab(&mut session), Some(0));
+    assert_eq!(active_tab_index(&session), 0);
     assert_eq!(dump(&mut session)["tabs"][0]["kind"], "pdf");
     run_script(&mut session, b"key ctrl+pagedown\n");
-    assert_eq!(active_tab(&mut session), Some(1), "Ctrl+PageDown on the PDF tab switches tabs");
+    assert_eq!(active_tab_index(&session), 1, "Ctrl+PageDown on the PDF tab switches tabs");
     run_script(&mut session, b"key ctrl+pagedown\n");
-    assert_eq!(active_tab(&mut session), Some(0), "Ctrl+PageDown wraps back to the PDF tab");
+    assert_eq!(active_tab_index(&session), 0, "Ctrl+PageDown wraps back to the PDF tab");
     run_script(&mut session, b"key ctrl+pageup\n");
-    assert_eq!(active_tab(&mut session), Some(1), "Ctrl+PageUp on the PDF tab switches tabs");
+    assert_eq!(active_tab_index(&session), 1, "Ctrl+PageUp on the PDF tab switches tabs");
     run_script(&mut session, b"key ctrl+pageup\n");
-    assert_eq!(active_tab(&mut session), Some(0));
+    assert_eq!(active_tab_index(&session), 0);
     run_script(&mut session, b"key f1\n");
     assert_eq!(dump(&mut session)["overlays"]["settings"], true, "F1 opens settings over a PDF tab");
     run_script(&mut session, b"key f1\n");

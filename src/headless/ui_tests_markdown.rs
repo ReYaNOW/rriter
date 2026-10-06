@@ -43,7 +43,6 @@ fn open_markdown_read(dir: &Path, path: &Path) -> HeadlessSession {
         },
     );
 
-    click_ui(&mut session, "MarkdownModeToggle");
     wait_until(
         &mut session,
         5000,
@@ -55,6 +54,21 @@ fn open_markdown_read(dir: &Path, path: &Path) -> HeadlessSession {
         },
     );
     session
+}
+
+#[test]
+fn headless_markdown_opens_in_read_mode_and_toggle_enters_source() {
+    let (dir, path, _) = markdown_fixture("ui-markdown-default-read");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+    let lines = run_script(&mut session, format!("open {}\n", path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 5000, "Markdown Read mode", |session| {
+        session.app.markdown.read_layout.content_height() > 0.0
+    });
+    assert_eq!(dump(&mut session)["tabs"][0]["markdown"], true);
+
+    click_ui(&mut session, "MarkdownModeToggle");
+    assert_eq!(dump(&mut session)["tabs"][0]["markdown"], false);
 }
 
 fn markdown_code_copy_id(state: &Value) -> Option<String> {
