@@ -1342,6 +1342,11 @@ mod tests {
         assert_eq!(normalize_git_blame_delay_ms(u32::MAX), 2000);
         assert_eq!(normalize_git_blame_delay_ms(199), 100);
         assert_eq!(normalize_git_blame_delay_ms(99), 0);
+        let negative = parse_config_content(
+            r#"{"git_blame_delay_ms":-1}"#,
+            Config { git_blame_delay_ms: 700, ..Config::default() },
+        );
+        assert_eq!(negative.git_blame_delay_ms, 700);
         let parsed = parse_config_content(
             r#"{"git_blame_inline":true,"git_blame_delay_ms":987654321}"#,
             Config::default(),

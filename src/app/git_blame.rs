@@ -88,11 +88,8 @@ impl App {
                 let text = crate::platform::decode_text_bytes(blob.content())
                     .map_err(|error| error.to_string())?.text;
                 let baseline_lines = git_style_line_count(&text);
-                if !blame_line_count_matches(&blame, baseline_lines) {
-                    println!("[GIT blame] line count mismatch oid={} git={} baseline={}", worker_key.oid, blame.line_commit.len(), baseline_lines);
-                    return Err("Количество строк Git blame не совпадает со снимком HEAD".to_string());
-                }
-                Ok(blame)
+                consistent_blame(blame, baseline_lines)
+                    .ok_or_else(|| "Количество строк Git blame не совпадает со снимком HEAD".to_string())
             })();
             GitBlameEvent { key: worker_key, generation, result }
         });
@@ -118,11 +115,9 @@ impl App {
                     changed = true;
                 }
                 crate::ui_waker::OneShotState::Ready(event) => {
-                    println!("[GIT blame] result ready tab={} generation={}", receiver.tab_index, event.generation);
                     let Some(tab) = self.tabs.get_mut(receiver.tab_index) else { continue };
                     let state = &mut tab.editor.git_blame;
                     if !blame_state_matches(state, &event.key, event.generation) {
-                        println!("[GIT blame] stale response current={:?} generation={}", state.key, state.generation);
                         continue;
                     }
                     state.pending = false;
@@ -209,8 +204,8 @@ fn git_style_line_count(text: &str) -> usize {
     if text.is_empty() { 0 } else { text.bytes().filter(|byte| *byte == b'\n').count() + usize::from(!text.ends_with('\n')) }
 }
 
-fn blame_line_count_matches(blame: &GitBlame, baseline_lines: usize) -> bool {
-    blame.line_commit.len() == baseline_lines
+fn consistent_blame(blame: GitBlame, baseline_lines: usize) -> Option<GitBlame> {
+    (blame.line_commit.len() == baseline_lines).then_some(blame)
 }
 
 #[cfg(test)]
@@ -244,8 +239,8 @@ mod tests {
             age_ranks: Vec::new(),
             column_labels: Vec::new(),
         };
-        assert!(!blame_line_count_matches(&blame, 1));
-        assert!(blame_line_count_matches(&blame, 2));
+        assert!(consistent_blame(blame.clone(), 1).is_none());
+        assert!(consistent_blame(blame, 2).is_some());
     }
 
     #[test]
