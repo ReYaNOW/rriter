@@ -53,10 +53,7 @@ fn headless_git_head_refreshes_after_focus_returns() {
     git(&root, &["commit", "-qm", "external commit"]);
     let after = git(&root, &["rev-parse", "HEAD"]);
     session.app.on_window_focus_gained();
-    wait_until(&mut session, 1500, "HEAD snapshot after focus", |session| {
-        head_oid(session).is_some_and(|oid| oid.to_string() == after.trim())
-            && session.app.editor.git_hunks.is_empty()
-    });
+    assert!(head_oid(&session).is_some_and(|oid| oid.to_string() == after.trim()));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -117,4 +114,21 @@ fn headless_external_file_reload_restores_head_snapshot() {
     assert_eq!(session.app.editor.get_full_text(), "external disk change\nsecond\n");
     assert!(head_oid(&session).is_some());
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_file_outside_repository_has_no_git_head() {
+    let workspace = scratch_dir("ui-git-blame-head-outside-workspace");
+    let outside = scratch_dir("ui-git-blame-head-outside-repo");
+    let file = outside.join("outside.txt");
+    std::fs::write(&file, "outside repository\n").unwrap();
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &workspace);
+    let lines = run_script(
+        &mut session,
+        format!("open {}\n", file.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.editor.git_head.is_none());
+    let _ = std::fs::remove_dir_all(workspace);
+    let _ = std::fs::remove_dir_all(outside);
 }

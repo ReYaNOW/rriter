@@ -103,6 +103,9 @@ impl App {
             if !matches!(tab.kind, EditorTabKind::Normal) {
                 continue;
             }
+            if tab.load != crate::app::TabLoad::Loaded {
+                continue;
+            }
             let Some(path) = tab.file_path.as_deref() else {
                 continue;
             };
