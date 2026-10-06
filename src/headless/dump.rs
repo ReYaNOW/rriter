@@ -166,6 +166,18 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             json!({"id": format!("{id:?}"), "kind": kind, "rect": rect, "overlay": overlay})
         })
         .collect();
+    let blame_inline = app.editor.git_blame.inline_text.as_str();
+    let blame_rect = ui.iter().find_map(|element| {
+        (element.get("id").and_then(Value::as_str) == Some("EditorBlameInline"))
+            .then(|| element.get("rect").cloned().unwrap_or(Value::Null))
+    });
+    let blame_inline = match (blame_inline.is_empty(), blame_rect) {
+        (false, Some(Value::Array(rect))) if rect.len() == 4 => json!({
+            "text": blame_inline,
+            "x": rect[0], "y": rect[1], "w": rect[2], "h": rect[3],
+        }),
+        _ => Value::Null,
+    };
     let selection = app.editor.selection_anchor.filter(|&anchor| anchor != app.editor.cursor).map_or(
         Value::Null,
         |anchor| {
@@ -210,6 +222,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "highlight_version": app.highlighter.current_version,
             "highlight_spans": app.highlighter.spans.iter().map(|span| [span.start, span.end]).collect::<Vec<_>>(),
         },
+        "blame_inline": blame_inline,
         "ide_panel": {
             "active": active_panel,
             "open": open_panels,

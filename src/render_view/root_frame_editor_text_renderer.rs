@@ -46,6 +46,7 @@ impl Renderer {
         telemetry_frame_start: Option<Instant>,
         telemetry_root_phases: &mut [f32; 5],
         telemetry_editor_time: &mut f32,
+        inline_git_popup_line: Option<usize>,
     ) -> RootFrameEditorText<'a> {
         let RootFramePanelLayout {
             visible_cursor_line,
@@ -236,6 +237,7 @@ impl Renderer {
                 active_git_diff_state.map(|state| state.line_kinds.as_slice()),
                 python_inlay_hints,
                 closing_hints,
+                inline_git_popup_line,
             );
             self.flush();
             unsafe {

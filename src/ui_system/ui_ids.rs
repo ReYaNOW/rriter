@@ -452,6 +452,7 @@ pub enum UiId {
     EditorScrollbarY,
     EditorScrollbarX,
     EditorTextBody,
+    EditorBlameInline,
     MarkdownReadBody,
     MarkdownReadScrollbar,
     MarkdownCodeCopy(usize),

@@ -355,6 +355,7 @@ impl Renderer {
         diff_line_kinds: Option<&[crate::app::git_diff::DiffLineKind]>,
         python_inlay_hints: &[crate::app::PythonInlayHint],
         closing_hints: &[crate::languages::dart::ClosingHint],
+        inline_git_popup_line: Option<usize>,
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -821,6 +822,45 @@ impl Renderer {
                 closing_hint_idx += 1;
             }
 
+            let inline_blame = &editor.git_blame;
+            let snapshot_matches = editor.git_head.as_ref().is_some_and(|snapshot| {
+                inline_blame.key.as_ref().is_some_and(|(repo, path, oid)| {
+                    snapshot.path_in_head
+                        && repo == &snapshot.repo_key
+                        && path == &snapshot.rel_path
+                        && Some(*oid) == snapshot.head_oid
+                })
+            });
+            if is_last_visual_segment
+                && inline_git_popup_line != Some(phys_idx)
+                && !v_line_info.is_folded
+                && inline_blame.inline_line == Some(phys_idx)
+                && !inline_blame.inline_text.is_empty()
+                && snapshot_matches
+            {
+                let annotation_x = (x - render_scroll_x + 10.0 * s).round();
+                let annotation_w = self.measure_ui_width(&inline_blame.inline_text, 1.0);
+                if annotation_x + annotation_w <= interaction_right.round() {
+                    let annotation_y = y.round();
+                    self.draw_string_scaled_stable(
+                        &inline_blame.inline_text,
+                        annotation_x,
+                        annotation_y,
+                        self.theme.syntax.color(crate::theme::SyntaxRole::Comment),
+                        1.0,
+                    );
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::EditorBlameInline,
+                        annotation_x,
+                        annotation_y - self.line_height,
+                        annotation_w,
+                        self.line_height,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                }
+            }
+
             if v_line_info.is_folded {
                 let dots_str = "...";
                 let dots_adv = self.measure_ui_width(dots_str, 1.0);
@@ -1150,6 +1190,7 @@ mod stage5_overlay_boundary_tests {
             diff_line_kinds,
             &[],
             closing_hints,
+            None,
         );
     }
 

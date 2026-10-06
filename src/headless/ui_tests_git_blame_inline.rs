@@ -157,3 +157,99 @@ fn headless_git_blame_failed_key_is_attempted_once() {
     assert!(session.app.git_blame_rx.is_empty(), "failed key must not spawn a retry");
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
+    let (root, file) = git_blame_fixture("ui-git-blame-inline-dwell");
+    let second = root.join("second.txt");
+    std::fs::write(&second, "other file\n").unwrap();
+    git(&root, &["add", "second.txt"]);
+    git(&root, &["-c", "user.name=Tab Author", "-c", "user.email=tab@example.invalid", "commit", "-qm", "other file"]);
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+    session.app.git_blame_delay_ms = 400;
+    open_and_wait(&mut session, &file, 3);
+
+    session.app.editor.git_blame.inline_key = None;
+    session.app.editor.git_blame.inline_since = None;
+    let started = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(started));
+    assert!(session.app.editor.git_blame.inline_text.is_empty());
+    assert!(!session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(399)));
+    assert!(session.app.editor.git_blame.inline_text.is_empty());
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
+    assert!(session.app.editor.git_blame.inline_text.contains("Linus"));
+    assert!(session.app.editor.git_blame.inline_text.contains("third"));
+
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    assert_eq!(dump["blame_inline"]["text"], session.app.editor.git_blame.inline_text);
+    assert!(dump["blame_inline"]["w"].as_f64().unwrap() > 0.0);
+    let idle = run_script(&mut session, b"idle 50\n");
+    assert!(idle.last().unwrap().contains("frames=0") && idle.last().unwrap().contains("wakes=1"), "{idle:?}");
+
+    session.app.editor.cursor = session.app.editor.line_offsets[1];
+    session.app.editor.git_blame.inline_key = None;
+    session.app.editor.git_blame.inline_since = None;
+    let moved = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(moved));
+    assert!(session.app.editor.git_blame.inline_text.is_empty());
+    assert!(session.app.tick_git_blame_inline(moved + std::time::Duration::from_millis(400)));
+    assert!(session.app.editor.git_blame.inline_text.contains("Grace"));
+    assert!(session.app.editor.git_blame.inline_text.contains("second"));
+
+    let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 8000, "second file blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+    });
+    session.app.editor.git_blame.inline_key = None;
+    session.app.editor.git_blame.inline_since = None;
+    let switched = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(switched));
+    assert!(session.app.editor.git_blame.inline_text.is_empty());
+    assert!(session.app.tick_git_blame_inline(switched + std::time::Duration::from_millis(400)));
+    assert!(session.app.editor.git_blame.inline_text.contains("Tab Author"));
+    assert!(session.app.editor.git_blame.inline_text.contains("other file"));
+    assert_eq!(session.app.git_blame_inline_wake_at(), None);
+
+    let long = root.join("long.txt");
+    std::fs::write(&long, "x".repeat(4000)).unwrap();
+    git(&root, &["add", "long.txt"]);
+    git(&root, &["-c", "user.name=Long Author", "-c", "user.email=long@example.invalid", "commit", "-qm", "long line"]);
+    let lines = run_script(&mut session, format!("open {}\n", long.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 8000, "long file blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+    });
+    session.app.editor.git_blame.inline_key = None;
+    session.app.editor.git_blame.inline_since = None;
+    let long_dwell = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(long_dwell));
+    assert!(session.app.tick_git_blame_inline(long_dwell + std::time::Duration::from_millis(400)));
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    assert!(dump["blame_inline"].is_null());
+
+    std::fs::write(&long, "external head line\n").unwrap();
+    git(&root, &["add", "long.txt"]);
+    git(&root, &["-c", "user.name=Focus Author", "-c", "user.email=focus@example.invalid", "commit", "-qm", "external head"]);
+    let new_head = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    session.app.on_window_focus_gained();
+    wait_until(&mut session, 8000, "external HEAD snapshot", |session| {
+        session.app.editor.git_head.as_ref().and_then(|head| head.head_oid).is_some_and(|oid| oid.to_string() == new_head)
+    });
+    wait_until(&mut session, 8000, "external HEAD blame", |session| {
+        session.app.editor.git_blame.blame.as_ref().is_some_and(|blame| {
+            blame.commits.iter().any(|commit| commit.author == "Focus Author")
+        })
+    });
+    session.app.editor.git_blame.inline_key = None;
+    session.app.editor.git_blame.inline_since = None;
+    let focused = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(focused));
+    assert!(session.app.tick_git_blame_inline(focused + std::time::Duration::from_millis(400)));
+    assert!(session.app.editor.git_blame.inline_text.contains("Focus Author"));
+
+    let _ = std::fs::remove_dir_all(root);
+}

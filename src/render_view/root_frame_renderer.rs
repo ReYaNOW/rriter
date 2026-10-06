@@ -499,6 +499,7 @@ impl Renderer {
             telemetry_frame_start,
             &mut telemetry_root_phases,
             &mut telemetry_editor_time,
+            inline_git_popup.map(|popup| popup.anchor_line),
         );
 
         let overlays = self.draw_root_editor_overlays(

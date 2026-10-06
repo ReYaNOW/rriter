@@ -31,6 +31,68 @@ pub(crate) struct CommitMessageReceiver {
 }
 
 impl App {
+    pub(crate) fn tick_git_blame_inline(&mut self, now: std::time::Instant) -> bool {
+        if !self.is_ide_mode || !self.git_blame_inline {
+            return clear_inline_blame(&mut self.editor.git_blame);
+        }
+        let (line, _) = crate::render_view::cursor_line_and_character(&self.editor);
+        let line = line.saturating_sub(1);
+        let generation = self.editor.git_blame.generation;
+        let key = (self.active_tab, line, self.editor.version, generation);
+        if self.editor.git_blame.inline_key != Some(key) {
+            let state = &mut self.editor.git_blame;
+            state.inline_key = Some(key);
+            state.inline_since = Some(now);
+            state.inline_text.clear();
+            state.inline_line = None;
+            return true;
+        }
+        if !self.editor.git_blame.inline_text.is_empty() {
+            return false;
+        }
+        let Some(since) = self.editor.git_blame.inline_since else { return false };
+        let delay = std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms));
+        if now.saturating_duration_since(since) < delay {
+            return false;
+        }
+        let Some(snapshot) = self.editor.git_head.as_ref() else { return false };
+        let Some((repo, path, oid)) = self.editor.git_blame.key.as_ref() else { return false };
+        if *repo != snapshot.repo_key || *path != snapshot.rel_path || Some(*oid) != snapshot.head_oid || !snapshot.path_in_head {
+            return false;
+        }
+        let Some(blame) = self.editor.git_blame.blame.as_ref() else { return false };
+        let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, line) else { return false };
+        let Some(commit_index) = blame.line_commit.get(head_line).copied() else { return false };
+        let Some(commit) = blame.commits.get(commit_index as usize) else { return false };
+        if commit.uncommitted {
+            return false;
+        }
+        let author = commit.author.clone();
+        let summary = commit.summary.clone();
+        let author_time = commit.author_time;
+        let now_secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
+        let relative = crate::app::git_panel::format_git_relative_time(author_time, now_secs);
+        let state = &mut self.editor.git_blame;
+        state.inline_text.clear();
+        state.inline_text.push_str(&author);
+        state.inline_text.push_str(", ");
+        state.inline_text.push_str(&relative);
+        state.inline_text.push_str(" • ");
+        state.inline_text.push_str(&summary);
+        state.inline_line = Some(line);
+        true
+    }
+
+    pub(crate) fn git_blame_inline_wake_at(&self) -> Option<std::time::Instant> {
+        if !self.git_blame_inline || !self.editor.git_blame.inline_text.is_empty() {
+            return None;
+        }
+        self.editor.git_blame.inline_since.map(|since| {
+            since + std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms))
+        }).filter(|deadline| *deadline > std::time::Instant::now())
+    }
+
     pub(crate) fn blame_needed(&self) -> bool {
         self.git_blame_inline || self.editor.git_blame.column_open
     }
@@ -117,7 +179,10 @@ impl App {
                     let Some(state) = self.matching_blame_state_mut(&event.key, event.generation) else { continue };
                     state.pending = false;
                     match event.result {
-                        Ok(blame) => state.blame = Some(blame),
+                        Ok(blame) => {
+                            state.blame = Some(blame);
+                            state.generation = state.generation.wrapping_add(1);
+                        },
                         Err(error) => {
                             state.blame = None;
                             state.failed_key = state.key.clone();
@@ -215,6 +280,15 @@ impl App {
         blame_state_matches(&self.editor.git_blame, key, generation)
             || self.tabs.iter().any(|tab| blame_state_matches(&tab.editor.git_blame, key, generation))
     }
+}
+
+fn clear_inline_blame(state: &mut GitBlameState) -> bool {
+    let changed = !state.inline_text.is_empty() || state.inline_line.is_some() || state.inline_key.is_some();
+    state.inline_text.clear();
+    state.inline_line = None;
+    state.inline_key = None;
+    state.inline_since = None;
+    changed
 }
 
 fn blame_state_matches(state: &GitBlameState, key: &BlameKey, generation: u64) -> bool {

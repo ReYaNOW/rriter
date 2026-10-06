@@ -204,6 +204,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     app.last_frame = now;
 
     let mut needs_redraw = automation_running;
+    needs_redraw |= app.tick_git_blame_inline(now);
 
     // Reset the coalesced wake BEFORE the sections below walk the background channels:
     // a result sent during the walk then posts a fresh event instead of being stranded.
@@ -276,7 +277,10 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
                 app.ide_panel.database.cancel_deadline(),
                 earliest_optional_wake(
                     database_refresh_wake_at,
-                    earliest_optional_wake(app.startup_editor_pending, app.startup_editor_reveal_at),
+                    earliest_optional_wake(
+                        app.git_blame_inline_wake_at(),
+                        earliest_optional_wake(app.startup_editor_pending, app.startup_editor_reveal_at),
+                    ),
                 ),
             ),
         ),
