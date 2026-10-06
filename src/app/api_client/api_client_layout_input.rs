@@ -397,7 +397,7 @@ pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32
     ) {
         92.0 * scale
     } else if scheme.token_capable() {
-        72.0 * scale
+        116.0 * scale
     } else {
         58.0 * scale
     }

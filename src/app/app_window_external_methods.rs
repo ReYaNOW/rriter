@@ -1153,7 +1153,7 @@ impl App {
                     .extension()
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
-                self.markdown = Default::default();
+                self.markdown = crate::app::MarkdownTabState::for_file_extension(&self.file_extension);
                 self.is_highlighted_once = false;
                 self.is_highlight_complete = false;
                 if start_highlighter {

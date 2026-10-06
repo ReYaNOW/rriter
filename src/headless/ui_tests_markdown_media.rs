@@ -56,6 +56,7 @@ fn open_markdown(dir: &Path, path: &Path) -> HeadlessSession {
     wait_until(&mut session, 5000, "Markdown mode toggle", |session| {
         has_ui(&dump(session), "MarkdownModeToggle")
     });
+    click_ui(&mut session, "MarkdownModeToggle");
     session
 }
 
@@ -412,11 +413,10 @@ fn edit_mode_and_text_tabs_have_no_media() {
     open_file(&mut session, &dir.join("other.txt"));
     let _ = run_script(&mut session, b"wait 300\n");
     let state = dump(&mut session);
+    assert_eq!(state["tabs"][tab_index(&state, "preview.md")]["markdown"], false);
     for file_name in ["preview.md", "other.txt"] {
         assert_eq!(state["tabs"][tab_index(&state, file_name)]["markdown_media"], serde_json::json!([]), "{file_name}: {state}");
     }
-    assert_eq!(state["markdown_media_stats"]["loads_started"], 0, "{state}");
-    assert_eq!(state["markdown_media_stats"]["texture_bytes"], 0, "{state}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

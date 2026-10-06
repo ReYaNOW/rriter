@@ -397,6 +397,16 @@ impl Default for MarkdownTabState {
 }
 
 impl MarkdownTabState {
+    pub(crate) fn for_file_extension(extension: &str) -> Self {
+        let mut state = Self::default();
+        if is_markdown_extension(extension) {
+            state.mode = MarkdownMode::Read;
+        }
+        state
+    }
+}
+
+impl MarkdownTabState {
     pub(crate) fn refresh_read_model(&mut self, version: u64, source: String) -> bool {
         #[cfg(test)]
         {

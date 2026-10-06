@@ -39,8 +39,9 @@ fn headless_editor_selection_and_cursor_at_multiple_scales() {
     std::fs::write(&file, "alpha bravo charlie\nsecond line\n").unwrap();
     for scale in [1.0, 1.5] {
         let mut session = open_file_session(900, 600, scale, &file);
-        let (x, y) = ui_center(&dump(&mut session), "EditorTextBody");
-        let script = format!("mouse_move {} {}\ndblclick\nkey shift+right\n", x + 15.0, y + 15.0);
+        // Top of the body is the first line; the centre lies below the text.
+        let [x, y, _, _] = ui_rect(&dump(&mut session), "EditorTextBody");
+        let script = format!("mouse_move {} {}\ndblclick\nkey shift+right\n", x + 20.0, y + 8.0);
         run_script(&mut session, script.as_bytes());
         let selected = dump(&mut session);
         assert!(selected["editor"]["selection"].is_array() || selected["editor"]["selection"].is_object(), "{selected}");
@@ -193,6 +194,36 @@ fn headless_editor_drag_selection_does_not_require_double_click() {
         !selected["editor"]["selection"].is_null(),
         "drag should select a range: {selected}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_drag_selection_from_below_last_line() {
+    let dir = scratch_dir("ui-editor-drag-selection-below-last-line");
+    let file = dir.join("drag.txt");
+    std::fs::write(&file, "first line\nlast line").unwrap();
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    let body = dump(&mut session);
+    let [x, y, _, height] = ui_rect(&body, "EditorTextBody");
+    let press_x = x + 20.0;
+    let press_y = y + height - 20.0;
+    let drag_y = y + 12.0;
+    run_script(
+        &mut session,
+        format!(
+            "mouse_move {press_x} {press_y}\nclick left down\nmouse_move {press_x} {drag_y}\nclick left up\n"
+        )
+        .as_bytes(),
+    );
+    let selected = dump(&mut session);
+    assert!(!selected["editor"]["selection"].is_null(), "{selected}");
+    assert_ne!(
+        selected["editor"]["selection"]["start"],
+        selected["editor"]["selection"]["end"],
+        "{selected}"
+    );
+    assert_eq!(selected["editor"]["selection"]["start"][0], 1, "{selected}");
+    assert_eq!(selected["editor"]["selection"]["end"][0], 2, "{selected}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

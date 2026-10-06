@@ -233,7 +233,7 @@ impl Renderer {
             h: 29.0 * s,
             text: "Обновить",
             icon: Some(crate::widgets::IconType::Reload),
-            text_scale: 0.72,
+            text_scale: super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE,
             icon_size: 14.0 * s,
         }
         .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
@@ -645,7 +645,7 @@ impl Renderer {
         } else {
             let pad = 12.0 * scale;
             let install_w = if managed {
-                self.measure_ui_width(install_text, 0.68) + pad * 2.0
+                self.measure_ui_width(install_text, super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE) + pad * 2.0
             } else {
                 0.0
             };
@@ -654,7 +654,7 @@ impl Renderer {
             } else {
                 0.0
             };
-            [install_w, self.measure_ui_width("Выбрать", 0.72) + pad * 2.0, clear_w]
+            [install_w, self.measure_ui_width("Выбрать", super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE) + pad * 2.0, clear_w]
         };
         let (action_left, action_gap, [install_w, choose_w, clear_w]) = tool_row_action_layout(
             content_x,
@@ -712,7 +712,7 @@ impl Renderer {
                 .round(),
                 row_text_w,
                 self.ui.pick(UiRole::TextMuted, [0.50, 0.52, 0.60, 1.0]),
-                0.64,
+                super::settings_ui::SETTINGS_SECONDARY_TEXT_SCALE,
                 &mut clip_scratch,
             );
         }
@@ -760,7 +760,7 @@ impl Renderer {
                 h: 29.0 * scale,
                 text: install_text,
                 icon: None,
-                text_scale: 0.68,
+                text_scale: super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE,
                 icon_size: 0.0,
             }
             .render(
@@ -793,7 +793,7 @@ impl Renderer {
             h: 29.0 * scale,
             text: "Выбрать",
             icon: None,
-            text_scale: 0.72,
+            text_scale: super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE,
             icon_size: 0.0,
         }
         .render(
@@ -909,7 +909,7 @@ impl Renderer {
                 h: 29.0 * scale,
                 text: &text,
                 icon: None,
-                text_scale: 0.62,
+                text_scale: super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE,
                 icon_size: 0.0,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, scale, false);
@@ -961,7 +961,7 @@ impl Renderer {
                 h: 29.0 * scale,
                 text: &text,
                 icon: None,
-                text_scale: 0.58,
+                text_scale: super::settings_ui::SETTINGS_BUTTON_LABEL_SCALE,
                 icon_size: 0.0,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, scale, false);

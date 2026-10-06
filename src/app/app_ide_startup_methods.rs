@@ -62,7 +62,7 @@ impl App {
                 text_file_format: self.text_file_format,
                 base_title: self.base_title.clone(),
                 file_extension: self.file_extension.clone(),
-                markdown: Default::default(),
+                markdown: crate::app::MarkdownTabState::for_file_extension(&self.file_extension),
                 pdf: None,
                 image: None,
                 scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -349,6 +349,11 @@ impl App {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
+        let file_extension = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let markdown = crate::app::MarkdownTabState::for_file_extension(&file_extension);
         let mut editor = crate::editor::Editor::new(8192);
         editor.version = self.next_tab_highlight_version();
         self.tabs.push(EditorTab {
@@ -357,12 +362,9 @@ impl App {
             file_path: Some(path.clone()),
             text_file_format: crate::platform::TextFileFormat::default(),
             icon_key: crate::app::file_icons::file_icon_key_for_name(&name),
-            file_extension: path
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default(),
+            file_extension,
             base_title: name,
-            markdown: Default::default(),
+            markdown,
             pdf: None,
             image: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),

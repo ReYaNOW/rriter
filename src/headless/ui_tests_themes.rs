@@ -1,7 +1,7 @@
 //! Theme selection, persistence, and render generation regressions.
 
 use crate::headless::tests_support::{
-    api_client_session, click_ui, dump, open_settings_tab, run_script, scratch_dir,
+    api_client_session, click_ui, close_settings, dump, open_settings_tab, run_script, scratch_dir,
     serve_api_spec, serve_http_responses, session_for_test, send_request, wait_until,
     wheel_until_visible,
 };
@@ -61,12 +61,7 @@ fn appearance_theme_pick_updates_dump_pdf_and_persists_between_sessions() {
         session.app.renderer.as_ref().expect("renderer").theme_gen,
         initial_theme_gen + 1,
     );
-    let closed_settings = run_script(&mut session, b"key escape\n");
-    assert!(closed_settings.iter().all(|line| line == "ok"), "{closed_settings:?}");
-    // The slide-out keeps dimming the editor until the animation reaches 0.
-    wait_until(&mut session, 5000, "Settings overlay closed", |session| {
-        dump(session)["overlays"]["settings"] == false && session.app.settings_anim_progress <= 0.0
-    });
+    close_settings(&mut session);
     // No default binding for ctrl+tab (tabs switch on mod+pagedown), so click the tab itself.
     switch_to_tab(&mut session, 0);
     assert!(session.app.highlighter.spans
@@ -237,11 +232,7 @@ fn set_split_themes(
     assert_eq!(themes["editor"], editor.key());
     assert_eq!(themes["ui"], ui.key());
     assert_eq!(themes["linked"], false);
-    let lines = run_script(session, b"key escape\n");
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    wait_until(session, 5000, "Settings overlay closed", |session| {
-        dump(session)["overlays"]["settings"] == false && session.app.settings_anim_progress <= 0.0
-    });
+    close_settings(session);
 }
 
 fn assert_response_surface_colors(
