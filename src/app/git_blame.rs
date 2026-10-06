@@ -12,7 +12,6 @@ struct BlameKey {
 
 pub(crate) struct GitBlameReceiver {
     key: BlameKey,
-    tab_index: usize,
     generation: u64,
     rx: crate::ui_waker::OneShot<GitBlameEvent>,
 }
@@ -25,10 +24,10 @@ struct GitBlameEvent {
 
 pub(crate) struct CommitMessageReceiver {
     key: BlameKey,
-    tab_index: usize,
     generation: u64,
     oid: git2::Oid,
     rx: crate::ui_waker::OneShot<Result<String, String>>,
+    pub(crate) failed: bool,
 }
 
 impl App {
@@ -94,7 +93,7 @@ impl App {
             GitBlameEvent { key: worker_key, generation, result }
         });
         match worker {
-            Ok(rx) => self.git_blame_rx.push(GitBlameReceiver { key, tab_index: self.active_tab, generation, rx }),
+            Ok(rx) => self.git_blame_rx.push(GitBlameReceiver { key, generation, rx }),
             Err(error) => {
                 self.editor.git_blame.pending = false;
                 self.editor.git_blame.failed_key = self.editor.git_blame.key.clone();
@@ -111,15 +110,11 @@ impl App {
             match receiver.rx.poll() {
                 crate::ui_waker::OneShotState::Pending => pending.push(receiver),
                 crate::ui_waker::OneShotState::Closed => {
-                    self.fail_blame_request(&receiver.key, receiver.tab_index, receiver.generation);
+                    self.fail_blame_request(&receiver.key, receiver.generation);
                     changed = true;
                 }
                 crate::ui_waker::OneShotState::Ready(event) => {
-                    let Some(tab) = self.tabs.get_mut(receiver.tab_index) else { continue };
-                    let state = &mut tab.editor.git_blame;
-                    if !blame_state_matches(state, &event.key, event.generation) {
-                        continue;
-                    }
+                    let Some(state) = self.matching_blame_state_mut(&event.key, event.generation) else { continue };
                     state.pending = false;
                     match event.result {
                         Ok(blame) => state.blame = Some(blame),
@@ -139,14 +134,19 @@ impl App {
         changed
     }
 
-    fn fail_blame_request(&mut self, key: &BlameKey, tab_index: usize, generation: u64) {
-        if let Some(tab) = self.tabs.get_mut(tab_index) {
-            let state = &mut tab.editor.git_blame;
-            if blame_state_matches(state, key, generation) {
-                state.pending = false;
-                state.failed_key = state.key.clone();
-            }
+    fn fail_blame_request(&mut self, key: &BlameKey, generation: u64) {
+        if let Some(state) = self.matching_blame_state_mut(key, generation) {
+            state.pending = false;
+            state.failed_key = state.key.clone();
         }
+    }
+
+    fn matching_blame_state_mut(&mut self, key: &BlameKey, generation: u64) -> Option<&mut GitBlameState> {
+        if blame_state_matches(&self.editor.git_blame, key, generation) {
+            return Some(&mut self.editor.git_blame);
+        }
+        let index = matching_blame_state_index(self.tabs.iter().map(|tab| &tab.editor.git_blame), key, generation)?;
+        Some(&mut self.tabs[index].editor.git_blame)
     }
 
     pub(crate) fn request_commit_message(&mut self, oid: git2::Oid) {
@@ -155,6 +155,10 @@ impl App {
         let key = BlameKey { repo_root, repo_key, rel_path, oid: head_oid };
         if self.editor.git_blame.messages.iter().any(|(cached, _)| *cached == oid) { return; }
         let generation = self.editor.git_blame.generation;
+        if self.git_blame_message_rx.iter().any(|receiver| {
+            receiver.generation == generation && receiver.oid == oid
+                && blame_keys_match(&receiver.key, &key)
+        }) { return; }
         let worker_key = key.clone();
         if let Ok(rx) = self.ui_waker.spawn_one_shot("rriter-git-blame-message", move || {
             (|| {
@@ -165,7 +169,7 @@ impl App {
                     .map_err(|error| error.message().to_string())
             })()
         }) {
-            self.git_blame_message_rx.push(CommitMessageReceiver { key, tab_index: self.active_tab, generation, oid, rx });
+            self.git_blame_message_rx.push(CommitMessageReceiver { key, generation, oid, rx, failed: false });
         }
     }
 
@@ -174,23 +178,42 @@ impl App {
         let mut changed = false;
         let mut pending = Vec::with_capacity(self.git_blame_message_rx.len());
         for mut receiver in std::mem::take(&mut self.git_blame_message_rx) {
+            if receiver.failed {
+                if self.has_matching_blame_state(&receiver.key, receiver.generation) {
+                    pending.push(receiver);
+                }
+                continue;
+            }
             match receiver.rx.poll() {
                 crate::ui_waker::OneShotState::Pending => pending.push(receiver),
                 crate::ui_waker::OneShotState::Ready(result) => {
-                    if let Some(tab) = self.tabs.get_mut(receiver.tab_index) {
-                        let state = &mut tab.editor.git_blame;
-                        if blame_state_matches(state, &receiver.key, receiver.generation) {
-                            if let Ok(message) = result { state.messages.push((receiver.oid, message)); }
-                            changed = true;
+                    if let Some(state) = self.matching_blame_state_mut(&receiver.key, receiver.generation) {
+                        match result {
+                            Ok(message) => state.messages.push((receiver.oid, message)),
+                            Err(_) => {
+                                receiver.failed = true;
+                                pending.push(receiver);
+                            }
                         }
+                        changed = true;
                     }
                 }
-                crate::ui_waker::OneShotState::Closed => {}
+                crate::ui_waker::OneShotState::Closed => {
+                    if self.has_matching_blame_state(&receiver.key, receiver.generation) {
+                        receiver.failed = true;
+                        pending.push(receiver);
+                    }
+                }
             }
         }
         self.git_blame_message_rx = pending;
         self.sync_active_tab();
         changed
+    }
+
+    fn has_matching_blame_state(&self, key: &BlameKey, generation: u64) -> bool {
+        blame_state_matches(&self.editor.git_blame, key, generation)
+            || self.tabs.iter().any(|tab| blame_state_matches(&tab.editor.git_blame, key, generation))
     }
 }
 
@@ -198,6 +221,18 @@ fn blame_state_matches(state: &GitBlameState, key: &BlameKey, generation: u64) -
     state.generation == generation && state.key.as_ref().is_some_and(|(repo, path, oid)| {
         repo == &key.repo_key && path == &key.rel_path && oid == &key.oid
     })
+}
+
+fn blame_keys_match(left: &BlameKey, right: &BlameKey) -> bool {
+    left.repo_key == right.repo_key && left.rel_path == right.rel_path && left.oid == right.oid
+}
+
+fn matching_blame_state_index<'a>(
+    mut states: impl Iterator<Item = &'a GitBlameState>,
+    key: &BlameKey,
+    generation: u64,
+) -> Option<usize> {
+    states.position(|state| blame_state_matches(state, key, generation))
 }
 
 fn git_style_line_count(text: &str) -> usize {
@@ -229,6 +264,24 @@ mod tests {
         state.generation = 7;
         assert!(blame_state_matches(&state, &key, 7));
         assert!(!blame_state_matches(&state, &key, 6));
+    }
+
+    #[test]
+    fn blame_result_routes_by_state_after_tab_reorder() {
+        let key = key();
+        let mut original = GitBlameState::default();
+        original.key = Some((key.repo_key.clone(), key.rel_path.clone(), key.oid));
+        original.generation = 7;
+        let mut other = GitBlameState::default();
+        other.key = Some((
+            crate::platform::PathKey::new(std::path::Path::new("/other")),
+            PathBuf::from("other.txt"),
+            key.oid,
+        ));
+        other.generation = 7;
+        let reordered = [other, original];
+
+        assert_eq!(matching_blame_state_index(reordered.iter(), &key, 7), Some(1));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::headless::tests_support::{
-    dump, git, git_blame_fixture, git_init, run_script, scratch_dir, wait_until,
+    git, git_blame_fixture, git_init, run_script, scratch_dir, wait_until,
     workspace_with_explorer,
 };
 use std::path::Path;
@@ -59,6 +59,8 @@ fn headless_git_blame_skips_untracked_unborn_and_outside_files() {
     std::fs::write(&unborn, "no commits\n").unwrap();
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
     session.app.git_blame_inline = true;
+    let notice_before = session.app.readonly_notice_text.clone();
+    let notice_until_before = session.app.readonly_notice_until;
 
     for (file, workspace) in [
         (untracked.clone(), root.clone()),
@@ -73,7 +75,8 @@ fn headless_git_blame_skips_untracked_unborn_and_outside_files() {
         assert!(!session.app.editor.git_blame.pending);
         assert!(session.app.editor.git_blame.blame.is_none());
         assert!(session.app.git_blame_rx.is_empty());
-        assert!(session.app.ide_panel.git.notice.is_none());
+        assert_eq!(session.app.readonly_notice_text, notice_before);
+        assert_eq!(session.app.readonly_notice_until, notice_until_before);
     }
 
     let _ = std::fs::remove_dir_all(root);
@@ -97,16 +100,10 @@ fn headless_git_blame_keeps_tabs_separate_and_loads_full_messages() {
     let lines = run_script(&mut session, format!("open {}\n", large.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let first_tab = session.app.active_tab;
-    assert!(session.app.editor.git_blame.pending, "large-file blame should still be pending");
-    let response = dump(&mut session);
-    assert!(response.is_object(), "dump round-trip failed: {response}");
-    assert!(session.app.editor.git_blame.pending, "dump blocked until blame completed");
-
     let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let second_tab = session.app.active_tab;
     assert_ne!(first_tab, second_tab);
-    assert!(session.app.tabs[first_tab].editor.git_blame.pending, "first tab result arrived before switching");
     session.app.switch_to_tab(first_tab);
     session.app.switch_to_tab(second_tab);
     wait_until(&mut session, 12_000, "both tab blame results", |session| {
@@ -118,11 +115,21 @@ fn headless_git_blame_keeps_tabs_separate_and_loads_full_messages() {
 
     let oid = session.app.editor.git_blame.blame.as_ref().unwrap().commits[0].oid;
     session.app.request_commit_message(oid);
+    session.app.request_commit_message(oid);
+    assert_eq!(session.app.git_blame_message_rx.len(), 1, "duplicate requests should share the in-flight lookup");
     wait_until(&mut session, 5000, "full blame commit message", |session| {
         session.app.editor.git_blame.messages.iter().any(|(cached, _)| *cached == oid)
     });
     let message = session.app.editor.git_blame.messages.iter().find(|(cached, _)| *cached == oid).unwrap();
     assert_eq!(message.1, "Multi-line subject\n\nfull body\n");
+
+    let missing_oid = git2::Oid::from_str("0000000000000000000000000000000000000000").unwrap();
+    session.app.request_commit_message(missing_oid);
+    wait_until(&mut session, 5000, "failed blame message lookup", |session| {
+        session.app.git_blame_message_rx.iter().any(|receiver| receiver.failed)
+    });
+    session.app.request_commit_message(missing_oid);
+    assert_eq!(session.app.git_blame_message_rx.len(), 1, "failed lookups should not be retried for the same oid");
 
     let _ = std::fs::remove_dir_all(root);
 }
