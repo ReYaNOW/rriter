@@ -63,7 +63,7 @@ fn headless_git_blame_popup_reveals_commit_beyond_first_graph_page() {
         renderer.git_blame_popup_hover.is_none()
     }));
     wait_until(&mut session, 30000, "commit beyond first graph page", |session| {
-        session.app.ide_panel.git.graph_highlight_oid.as_deref() == Some(expected_oid.as_str())
+        session.app.ide_panel.git.graph_reveal.highlight_oid() == Some(expected_oid.as_str())
     });
     let target_index = session
         .app
@@ -76,9 +76,16 @@ fn headless_git_blame_popup_reveals_commit_beyond_first_graph_page() {
     assert!(target_index >= 200, "expected commit beyond first page, got row {target_index}");
     wait_until(&mut session, 10000, "revealed graph row visible", |session| {
         let scale = session.app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-        let expected_scroll = target_index as f32
-            * crate::app::git_panel::GIT_GRAPH_ROW_H
-            * scale;
+        let view_h = crate::app::mouse::git_graph_rows_bounds(&session.app, scale)
+            .map_or(0.0, |(_, rows_h)| rows_h);
+        let max_scroll = crate::app::git_panel::git_graph_max_scroll(
+            session.app.ide_panel.git.graph_snapshot.len(),
+            view_h,
+            scale,
+        );
+        let row_h = crate::app::git_panel::GIT_GRAPH_ROW_H * scale;
+        let expected_scroll = ((target_index as f32 + 0.5) * row_h - view_h * 0.5)
+            .clamp(0.0, max_scroll);
         session.app.ide_panel.git.graph_scroll.is_settled()
             && (session.app.ide_panel.git.graph_scroll.current - expected_scroll).abs() < 1.0
     });
@@ -95,15 +102,15 @@ fn headless_git_blame_popup_reveals_commit_beyond_first_graph_page() {
         &mut session,
         &graph_row_id,
     );
-    assert!(session.app.ide_panel.git.graph_highlight_oid.is_none());
+    assert!(session.app.ide_panel.git.graph_reveal.highlight_oid().is_none());
     session.app.reveal_commit_in_graph(&root, "missing-commit-oid");
-    assert!(session.app.ide_panel.git.graph_reveal.is_none());
+    assert!(!session.app.ide_panel.git.graph_reveal.is_searching());
     assert!(session.app.ide_panel.git.graph_snapshot.len() < 250);
     session.app.reveal_commit_in_graph(&root, &expected_oid);
     assert_eq!(
-        session.app.ide_panel.git.graph_highlight_oid.as_deref(),
+        session.app.ide_panel.git.graph_reveal.highlight_oid(),
         Some(expected_oid.as_str())
     );
     session.app.toggle_git_graph();
-    assert!(session.app.ide_panel.git.graph_highlight_oid.is_none());
+    assert!(session.app.ide_panel.git.graph_reveal.highlight_oid().is_none());
 }

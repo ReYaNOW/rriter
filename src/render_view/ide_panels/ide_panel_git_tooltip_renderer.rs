@@ -117,7 +117,13 @@ impl Renderer {
         let pad_x = 10.0 * s;
         let pad_y = 7.0 * s;
         let margin = 6.0 * s;
-        let popup_w = (440.0 * s).min((self.width - margin * 2.0).max(260.0 * s));
+        let copy_button_w = self
+            .measure_ui_width("Копировать хэш", 0.86)
+            .max(self.measure_ui_width("Хэш скопирован", 0.86))
+            + 24.0 * s;
+        let reveal_button_w = self.measure_ui_width("Показать в графе", 0.86) + 24.0 * s;
+        let buttons_w = pad_x * 2.0 + copy_button_w + 8.0 * s + reveal_button_w;
+        let popup_w = (440.0 * s).min((self.width - margin * 2.0).max(buttons_w));
         let inner_w = (popup_w - pad_x * 2.0).max(1.0);
         let mut message_lines = 0usize;
         for line in message.split('\n') {
@@ -180,14 +186,14 @@ impl Renderer {
         top += 5.0 * s;
         let copied = self.git_blame_popup_copied == Some(oid);
         let label = if copied { "Хэш скопирован" } else { "Копировать хэш" };
-        let button_w = self.measure_ui_width(label, 0.86) + 24.0 * s;
+        let button_w = copy_button_w;
         let button_y = top.round();
         let hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameCopyHash, content_x, button_y, button_w, 22.0 * s, mx, my);
         self.push_rounded_rect(content_x.round(), button_y, button_w, 22.0 * s, 4.0 * s, if hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
         self.draw_string_scaled(label, (content_x + 12.0 * s).round(), (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
         let reveal_label = "Показать в графе";
         let reveal_x = (content_x + button_w + 8.0 * s).round();
-        let reveal_w = self.measure_ui_width(reveal_label, 0.86) + 24.0 * s;
+        let reveal_w = reveal_button_w;
         let reveal_hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameShowInGraph, reveal_x, button_y, reveal_w, 22.0 * s, mx, my);
         self.push_rounded_rect(reveal_x, button_y, reveal_w, 22.0 * s, 4.0 * s, if reveal_hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
         self.draw_string_scaled(reveal_label, (reveal_x + 12.0 * s).round(), (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);

@@ -175,7 +175,7 @@ impl Renderer {
         for idx in first..last {
             let commit = &commits[idx];
             let row_y = rows_y + idx as f32 * row_h - scroll;
-            if ide_panel.git.graph_highlight_oid.as_deref() == Some(commit.oid.as_ref()) {
+            if ide_panel.git.graph_reveal.highlight_oid() == Some(commit.oid.as_ref()) {
                 self.push_rect(
                     panel_x,
                     row_y,

@@ -107,6 +107,308 @@
         })
     }
 
+    fn graph_reveal_test_app(repo_root: &Path, commit_count: usize) -> App {
+        let mut app = crate::app::app_behavior_tests::test_app().expect("test app initializes");
+        app.ide_workspaces = vec![repo_root.to_path_buf()];
+        app.ide_panel.open(crate::app::PanelId::Git);
+        app.ide_panel.git.bottom_pane = GitBottomPane::Graph;
+        app.ide_panel.git.graph_workspace_idx = Some(0);
+        app.ide_panel.git.graph_repo_root = Some(repo_root.to_path_buf());
+        app.ide_panel.git.graph_snapshot = (0..commit_count)
+            .map(|index| graph_commit(&format!("{index:040x}"), &[]))
+            .collect();
+        app.ide_panel.git.graph_has_more = true;
+        app
+    }
+
+    fn deliver_graph_event(app: &mut App, event: GitGraphEvent) {
+        let (tx, rx) = app.ui_waker.one_shot_channel();
+        let request_id = event.request_id;
+        let repo_root = event.repo_root.clone();
+        tx.send(event).expect("deliver graph event");
+        app.ide_panel.git.graph_rx.push(GitGraphReceiver {
+            rx,
+            request_id,
+            repo_root,
+        });
+    }
+
+    fn graph_event(
+        request_id: u64,
+        repo_root: &Path,
+        offset: usize,
+        commits: Vec<GitGraphCommit>,
+        notice: Option<&str>,
+        has_more: bool,
+    ) -> GitGraphEvent {
+        let limit = offset + commits.len();
+        GitGraphEvent {
+            request_id,
+            workspace_idx: 0,
+            repo_root: repo_root.to_path_buf(),
+            commits,
+            lane_count: 1,
+            notice: notice.map(str::to_string),
+            limit,
+            offset,
+            has_more,
+            reset_scroll: false,
+        }
+    }
+
+    #[test]
+    fn prefetch_offset_zero_does_not_end_graph_reveal_between_pages() {
+        let repo_root = PathBuf::from("/repo/current");
+        let mut app = graph_reveal_test_app(&repo_root, 200);
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root.clone(), "target-commit".to_string());
+        app.ide_panel.git.graph_reveal.mark_page_requested(200);
+        app.ide_panel.git.graph_notice = Some("Ищу коммит…".to_string());
+        app.ide_panel
+            .git
+            .seed_graph_request_for_test(repo_root.clone(), 10, true);
+        deliver_graph_event(
+            &mut app,
+            graph_event(
+                10,
+                &repo_root,
+                0,
+                (0..200)
+                    .map(|index| graph_commit(&format!("{index:040x}"), &[]))
+                    .collect(),
+                None,
+                true,
+            ),
+        );
+
+        app.poll_git_panel();
+
+        assert!(app.ide_panel.git.graph_reveal.is_searching());
+        assert!(app.ide_panel.git.graph_reveal.highlight_oid().is_none());
+        assert!(app.ide_panel.git.graph_pending);
+        assert_eq!(app.ide_panel.git.graph_snapshot.len(), 200);
+        assert_eq!(
+            app.ide_panel
+                .git
+                .graph_latest_request_by_root
+                .get(&crate::platform::PathKey::new(&repo_root)),
+            Some(&1)
+        );
+    }
+
+    fn graph_reveal_in_flight(
+        repo_root: &Path,
+        oid: &str,
+    ) -> (App, crate::ui_waker::WakeSender<GitGraphEvent>) {
+        let mut app = graph_reveal_test_app(repo_root, 200);
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root.to_path_buf(), oid.to_string());
+        app.ide_panel.git.graph_reveal.mark_page_requested(200);
+        app.ide_panel
+            .git
+            .seed_graph_request_for_test(repo_root.to_path_buf(), 10, true);
+        let (tx, rx) = app.ui_waker.one_shot_channel();
+        app.ide_panel.git.graph_rx.push(GitGraphReceiver {
+            rx,
+            request_id: 10,
+            repo_root: repo_root.to_path_buf(),
+        });
+        (app, tx)
+    }
+
+    fn late_reveal_page(repo_root: &Path, oid: &str) -> GitGraphEvent {
+        graph_event(
+            10,
+            repo_root,
+            200,
+            vec![graph_commit(oid, &[])],
+            None,
+            true,
+        )
+    }
+
+    fn assert_late_page_after_cancel(
+        mut app: App,
+        tx: crate::ui_waker::WakeSender<GitGraphEvent>,
+        repo_root: &Path,
+        cancel: impl FnOnce(&mut App),
+    ) {
+        cancel(&mut app);
+        let next_request_id = app.ide_panel.git.graph_next_request_id;
+        tx.send(late_reveal_page(repo_root, "cancelled-target"))
+            .expect("deliver late graph page");
+
+        app.poll_git_panel();
+
+        assert!(app.ide_panel.git.graph_reveal.highlight_oid().is_none());
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert!(app.ide_panel.git.graph_notice.is_none());
+        assert_eq!(app.ide_panel.git.graph_next_request_id, next_request_id);
+    }
+
+    #[test]
+    fn graph_reveal_limit_caps_last_page_and_reports_not_found() {
+        let repo_root = PathBuf::from("/repo/limit");
+        let limit = App::GIT_GRAPH_REVEAL_LIMIT;
+        let loaded = limit.saturating_sub(10);
+        let history: Vec<_> = (0..limit + 10)
+            .map(|index| graph_commit(&format!("{index:040x}"), &[]))
+            .collect();
+        let mut app = graph_reveal_test_app(&repo_root, loaded);
+        app.ide_panel.git.graph_snapshot = history[..loaded].to_vec();
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root.clone(), "missing-target".to_string());
+
+        app.advance_git_graph_reveal();
+
+        assert_eq!(app.ide_panel.git.graph_commit_limit, limit);
+        assert_eq!(app.ide_panel.git.graph_snapshot.len(), loaded);
+        assert!(app.ide_panel.git.graph_pending);
+        let request_id = app
+            .ide_panel
+            .git
+            .graph_latest_request_by_root
+            .get(&crate::platform::PathKey::new(&repo_root))
+            .copied()
+            .expect("reveal requested a capped final page");
+        app.ide_panel.git.graph_rx.clear();
+        deliver_graph_event(
+            &mut app,
+            graph_event(
+                request_id,
+                &repo_root,
+                loaded,
+                history[loaded..limit].to_vec(),
+                None,
+                true,
+            ),
+        );
+
+        app.poll_git_panel();
+
+        assert!(history.len() >= limit + 10);
+        assert_eq!(app.ide_panel.git.graph_snapshot.len(), limit);
+        assert!(app.ide_panel.git.graph_snapshot.len() <= limit);
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert_eq!(app.readonly_notice_text, "Коммит не найден в загруженной истории");
+        assert_eq!(app.ide_panel.git.graph_next_request_id, request_id + 1);
+    }
+
+    #[test]
+    fn graph_reveal_reports_not_found_when_history_has_no_more_pages() {
+        let repo_root = PathBuf::from("/repo/not-found");
+        let mut app = graph_reveal_test_app(&repo_root, 3);
+        app.ide_panel.git.graph_has_more = false;
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root, "missing-target".to_string());
+
+        app.advance_git_graph_reveal();
+
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert_eq!(app.readonly_notice_text, "Коммит не найден в загруженной истории");
+    }
+
+    #[test]
+    fn graph_reveal_reports_next_page_error_instead_of_not_found() {
+        let repo_root = PathBuf::from("/repo/page-error");
+        let (mut app, tx) = graph_reveal_in_flight(&repo_root, "missing-target");
+        tx.send(graph_event(
+            10,
+            &repo_root,
+            200,
+            Vec::new(),
+            Some("Git graph page failed"),
+            false,
+        ))
+        .expect("deliver graph page error");
+
+        app.poll_git_panel();
+
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert_eq!(app.readonly_notice_text, "Git graph page failed");
+    }
+
+    #[test]
+    fn graph_close_cancels_in_flight_reveal_before_late_page() {
+        let repo_root = PathBuf::from("/repo/close");
+        let (app, tx) = graph_reveal_in_flight(&repo_root, "cancelled-target");
+        assert_late_page_after_cancel(app, tx, &repo_root, App::toggle_git_graph);
+    }
+
+    #[test]
+    fn workspace_change_cancels_in_flight_reveal_before_late_page() {
+        let repo_root = PathBuf::from("/repo/workspace-a");
+        let repo_b = PathBuf::from("/repo/workspace-b");
+        let (mut app, tx) = graph_reveal_in_flight(&repo_root, "cancelled-target");
+        app.ide_panel.git.snapshot.workspaces = vec![
+            GitWorkspaceStatus {
+                workspace_idx: 0,
+                root: repo_root.clone(),
+                repo_root: Some(repo_root.clone()),
+                branch_name: None,
+                files: Vec::new(),
+                tree: Vec::new(),
+                ahead: 0,
+                error: None,
+            },
+            GitWorkspaceStatus {
+                workspace_idx: 1,
+                root: repo_b,
+                repo_root: Some(PathBuf::from("/repo/workspace-b")),
+                branch_name: None,
+                files: Vec::new(),
+                tree: Vec::new(),
+                ahead: 0,
+                error: None,
+            },
+        ];
+
+        assert_late_page_after_cancel(app, tx, &repo_root, |app| {
+            app.select_git_graph_workspace(1);
+        });
+    }
+
+    #[test]
+    fn refresh_cancels_in_flight_reveal_before_late_page() {
+        let repo_root = PathBuf::from("/repo/refresh");
+        let (app, tx) = graph_reveal_in_flight(&repo_root, "cancelled-target");
+        assert_late_page_after_cancel(app, tx, &repo_root, App::refresh_git_panel);
+    }
+
+    #[test]
+    fn new_reveal_does_not_finish_from_old_in_flight_page() {
+        let repo_root = PathBuf::from("/repo/new-reveal");
+        let (mut app, tx) = graph_reveal_in_flight(&repo_root, "old-target");
+        app.ide_panel.git.snapshot.workspaces = vec![GitWorkspaceStatus {
+            workspace_idx: 0,
+            root: repo_root.clone(),
+            repo_root: Some(repo_root.clone()),
+            branch_name: None,
+            files: Vec::new(),
+            tree: Vec::new(),
+            ahead: 0,
+            error: None,
+        }];
+
+        app.reveal_commit_in_graph(&repo_root, "new-target");
+        tx.send(late_reveal_page(&repo_root, "old-target"))
+            .expect("deliver old graph page");
+        app.poll_git_panel();
+
+        assert!(app.ide_panel.git.graph_reveal.is_searching());
+        assert!(app.ide_panel.git.graph_reveal.highlight_oid().is_none());
+        assert_eq!(app.ide_panel.git.graph_snapshot.len(), 201);
+        assert_eq!(app.readonly_notice_text, "Ищу коммит…");
+    }
+
     #[test]
     fn git_graph_remote_url_parse_and_ref_normalize() {
         assert_eq!(

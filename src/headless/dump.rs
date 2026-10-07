@@ -227,7 +227,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         },
         "blame_inline": blame_inline,
         "blame_status_visible": blame_status_visible,
-        "graph_highlight_oid": app.ide_panel.git.graph_highlight_oid,
+        "graph_highlight_oid": app.ide_panel.git.graph_reveal.highlight_oid(),
         "ide_panel": {
             "active": active_panel,
             "open": open_panels,
