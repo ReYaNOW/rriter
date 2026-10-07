@@ -235,6 +235,11 @@ impl App {
     }
 
     pub(crate) fn poll_git_blame(&mut self) -> bool {
+        // Runs on every `about_to_wait`; `sync_active_tab` is costly (milliseconds with a
+        // database tab), so an idle poll must not pay for it and delay the armed wake-ups.
+        if self.git_blame_rx.is_empty() {
+            return false;
+        }
         self.sync_active_tab();
         let mut changed = false;
         let mut pending = Vec::with_capacity(self.git_blame_rx.len());
@@ -309,6 +314,10 @@ impl App {
     }
 
     pub(crate) fn poll_git_blame_messages(&mut self) -> bool {
+        // Same per-pass cost guard as `poll_git_blame`.
+        if self.git_blame_message_rx.is_empty() {
+            return false;
+        }
         self.sync_active_tab();
         let mut changed = false;
         let mut pending = Vec::with_capacity(self.git_blame_message_rx.len());

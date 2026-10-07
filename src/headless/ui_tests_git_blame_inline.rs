@@ -166,7 +166,8 @@ fn headless_git_blame_inline_modified_line_sleeps_after_dwell() {
     session.app.git_blame_delay_ms = 100;
     open_and_wait(&mut session, &file, 3);
     session.app.editor.cursor = session.app.editor.line_offsets[0];
-    let lines = run_script(&mut session, b"type modified\n");
+    // `settle` drains the typing's async results (highlight, hunk recompute) so `idle` sees only blame.
+    let lines = run_script(&mut session, b"type modified\nsettle 1000\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 
     let idle = run_script(&mut session, b"idle 250\n");
@@ -181,7 +182,7 @@ fn inline_dwell_session(
 ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, crate::headless::HeadlessSession) {
     let (root, file) = git_blame_fixture(name);
     let second = root.join("second.txt");
-    std::fs::write(&second, "other file\n").unwrap();
+    std::fs::write(&second, "other file\n").unwrap_or_else(|error| panic!("write second fixture: {error}"));
     git(&root, &["add", "second.txt"]);
     git(&root, &["-c", "user.name=Tab Author", "-c", "user.email=tab@example.invalid", "commit", "-qm", "other file"]);
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
@@ -312,7 +313,7 @@ fn headless_git_blame_inline_tab_switch_tracks_the_active_file() {
     assert!(!session.app.tick_git_blame_inline(returned + std::time::Duration::from_millis(399)));
     assert!(session.app.inline_blame_dwell.text.is_empty());
     assert!(session.app.tick_git_blame_inline(returned + std::time::Duration::from_millis(400)));
-    assert!(session.app.inline_blame_dwell.text.contains("Grace"));
+    assert!(session.app.inline_blame_dwell.text.contains("Linus"), "tab A keeps its cursor on the opening line");
     let _ = std::fs::remove_dir_all(root);
 }
 
