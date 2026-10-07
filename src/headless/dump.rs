@@ -186,9 +186,28 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         let line = id.strip_prefix("EditorBlameColumnRow(")?.strip_suffix(')')?.parse::<usize>().ok()?;
         let head_line = crate::editor::head_line_for(&app.editor.git_hunks, line)?;
         let blame = app.editor.git_blame.blame.as_ref()?;
-        let commit_idx = *blame.line_commit.get(head_line)? as usize;
-        Some(json!({"line": line, "label": blame.column_labels.get(commit_idx)?}))
+        let commit_idx = *blame.line_commit.get(head_line)?;
+        let previous_commit = if line == 0 {
+            None
+        } else {
+            crate::editor::head_line_for(&app.editor.git_hunks, line - 1)
+                .and_then(|previous_head| blame.line_commit.get(previous_head).copied())
+        };
+        if previous_commit == Some(commit_idx)
+            || blame.commits.get(commit_idx as usize)?.uncommitted
+        {
+            return None;
+        }
+        Some(json!({"line": line, "label": blame.column_labels.get(commit_idx as usize)?}))
     }).collect();
+    let blame_column_rect = ui.iter().find_map(|element| {
+        element.get("id")?.as_str()?.starts_with("EditorBlameColumnRow(")
+            .then(|| element.get("rect").cloned().unwrap_or(Value::Null))
+    });
+    let blame_column_digits_left = app.renderer.as_ref().map(|renderer| {
+        let digits = app.editor.line_offsets.len().to_string().len().max(3) as f32;
+        renderer.left_padding - 24.0 * renderer.scale_factor - digits * 10.0 * renderer.scale_factor
+    });
     let selection = app.editor.selection_anchor.filter(|&anchor| anchor != app.editor.cursor).map_or(
         Value::Null,
         |anchor| {
@@ -237,6 +256,8 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         "blame_status_visible": blame_status_visible,
         "blame_column": {
             "open": app.editor.git_blame.column_open,
+            "rect": blame_column_rect.unwrap_or(Value::Null),
+            "line_number_digits_left": blame_column_digits_left,
             "visible_labels": blame_column_labels,
         },
         "graph_highlight_oid": app.ide_panel.git.graph_reveal.highlight_oid(),

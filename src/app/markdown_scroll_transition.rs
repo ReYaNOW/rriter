@@ -678,13 +678,9 @@ impl App {
             active_tab_is_git_diff,
             self.is_ide_mode,
             panel_left_w,
-            if self.editor.git_blame.column_open {
-                self.editor.git_blame.blame.as_ref().map_or(0.0, |blame| {
-                    (blame.column_width as f32 * 10.0 + 12.0) * scale
-                })
-            } else {
-                0.0
-            },
+            crate::render_view::blame_column_width(
+                &self.editor, self.is_ide_mode, self.show_welcome, active_tab_is_git_diff, scale,
+            ),
             scale,
         );
         let content_x =

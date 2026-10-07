@@ -381,13 +381,9 @@ impl Renderer {
             active_tab_is_git_diff_for_layout,
             is_ide_mode,
             panel_left_w,
-            if editor.git_blame.column_open {
-                editor.git_blame.blame.as_ref().map_or(0.0, |blame| {
-                    (blame.column_width as f32 * 10.0 + 12.0) * s
-                })
-            } else {
-                0.0
-            },
+            crate::render_view::blame_column_width(
+                editor, is_ide_mode, show_welcome, active_tab_is_git_diff_for_layout, s,
+            ),
             s,
         );
         if (self.left_padding - target_padding).abs() > 0.5 {

@@ -163,7 +163,7 @@ impl Renderer {
                 ui_registry.hovered(),
                 Some(crate::ui_system::UiId::EditorBlameColumnRow(_))
             ) || self.git_blame_popup_hover.is_some_and(|hover| {
-                hover.annotation.0 < self.left_padding
+                matches!(hover.source, crate::renderer::GitBlamePopupSource::Column)
                     && ui_mx >= hover.popup.0 && ui_mx <= hover.popup.0 + hover.popup.2
                     && ui_my >= hover.popup.1 && ui_my <= hover.popup.1 + hover.popup.3
             });

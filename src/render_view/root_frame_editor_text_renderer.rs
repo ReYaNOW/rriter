@@ -496,12 +496,13 @@ impl Renderer {
             );
         }
 
-        if editor.git_blame.column_open
-            && active_git_diff_state.is_none()
-            && is_ide_mode
-            && !show_welcome
-        {
-            self.draw_git_blame_column(editor, ui_registry, layout, editor_text);
+        let blame_column_w = crate::render_view::blame_column_width(
+            editor, is_ide_mode, show_welcome, active_git_diff_state.is_some(), s,
+        );
+        if blame_column_w > 0.0 {
+            self.draw_git_blame_column(
+                editor, ui_registry, layout, editor_text, gutter_x, blame_column_w,
+            );
         }
 
         for i in 0..self.merged_intervals_cache.len() {
@@ -557,11 +558,12 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         layout: RootFramePanelLayout<'_>,
         editor_text: RootFrameEditorText<'_>,
+        gutter_x: f32,
+        column_width: f32,
     ) {
         let Some(blame) = editor.git_blame.blame.as_ref() else { return };
         let s = layout.s;
-        let column_width = (blame.column_width as f32 * 10.0 + 12.0) * s;
-        let column_x = (self.left_padding - 24.0 * s - column_width).round();
+        let column_x = gutter_x.round() + 1.0;
         let strip_color = self.ui.pick(crate::theme::UiRole::GitCommit, [0.42, 0.66, 1.0, 1.0]);
         let gutter_hit_clip = crate::ui_system::UiClipRect::new(
             0.0,
@@ -570,6 +572,8 @@ impl Renderer {
             editor_text.editor_clip_h,
         );
         let gutter_bottom = editor_text.editor_clip_y + editor_text.editor_clip_h;
+        let mut previous_phys_idx = None;
+        let mut previous_buffer_commit = None;
         for i in editor_text.skip_visual_lines..editor_text.end_visual_line {
             let v_line = self.visual_lines[i];
             let phys_idx = v_line.physical_line.saturating_sub(1);
@@ -577,25 +581,55 @@ impl Renderer {
             if line_top + self.line_height <= editor_text.editor_clip_y || line_top >= gutter_bottom {
                 continue;
             }
-            let Some(head_line) = crate::editor::head_line_for(&editor.git_hunks, phys_idx) else { continue };
-            let Some(&commit_idx) = blame.line_commit.get(head_line) else { continue };
-            if blame.commits.get(commit_idx as usize).is_none_or(|commit| commit.uncommitted) {
+            let first_visual_segment = i == 0
+                || self.visual_lines[i - 1].physical_line != v_line.physical_line;
+            let Some(head_line) = crate::editor::head_line_for(&editor.git_hunks, phys_idx) else {
+                if first_visual_segment {
+                    previous_phys_idx = Some(phys_idx);
+                    previous_buffer_commit = None;
+                }
                 continue;
+            };
+            let Some(&commit_idx) = blame.line_commit.get(head_line) else {
+                if first_visual_segment {
+                    previous_phys_idx = Some(phys_idx);
+                    previous_buffer_commit = None;
+                }
+                continue;
+            };
+            if blame.commits.get(commit_idx as usize).is_none_or(|commit| commit.uncommitted) {
+                if first_visual_segment {
+                    previous_phys_idx = Some(phys_idx);
+                    previous_buffer_commit = Some(Some(commit_idx));
+                }
+                continue;
+            }
+            if first_visual_segment {
+                if previous_phys_idx != Some(phys_idx.saturating_sub(1)) {
+                    previous_buffer_commit = if phys_idx == 0 {
+                        Some(None)
+                    } else {
+                        crate::editor::head_line_for(&editor.git_hunks, phys_idx - 1)
+                            .and_then(|previous_head| blame.line_commit.get(previous_head).copied())
+                            .map(Some)
+                    };
+                }
+                previous_phys_idx = Some(phys_idx);
             }
             let rank = blame.age_ranks.get(commit_idx as usize).copied().unwrap_or(0.0);
             let mut color = strip_color;
             color[3] = 0.18 + rank.clamp(0.0, 1.0) * 0.72;
             self.push_rect(column_x, line_top.round(), (3.0 * s).round().max(1.0), self.line_height.round(), color);
 
-            let first_visual_segment = i == 0
-                || self.visual_lines[i - 1].physical_line != v_line.physical_line;
             if first_visual_segment
-                && blame.column_block_starts.get(head_line).copied().unwrap_or(false)
+                && previous_buffer_commit != Some(Some(commit_idx))
                 && let Some(label) = blame.column_labels.get(commit_idx as usize)
             {
                 let label_x = (column_x + 6.0 * s).round();
                 let baseline = (self.baseline_offset + v_line.y_offset - editor_text.render_scroll_y).round();
                 self.draw_string_scaled_stable(label, label_x, baseline, self.theme.line_num, 0.82);
+            }
+            if first_visual_segment {
                 ui_registry.register_rect_clipped(
                     crate::ui_system::UiId::EditorBlameColumnRow(phys_idx),
                     column_x,
@@ -606,7 +640,24 @@ impl Renderer {
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
+                previous_buffer_commit = Some(Some(commit_idx));
             }
         }
+    }
+
+    fn prepare_git_blame_column_width(&mut self, editor: &mut Editor) {
+        let generation = editor.git_blame.generation;
+        if !editor.git_blame.column_open
+            || editor.git_blame.column_width_generation == Some(generation)
+        {
+            return;
+        }
+        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let mut text_width = 0.0f32;
+        for label in &blame.column_labels {
+            text_width = text_width.max(self.measure_ui_width_at_pixel_size(label, 18.0 * 0.82));
+        }
+        editor.git_blame.column_width = if text_width > 0.0 { text_width + 12.0 } else { 0.0 };
+        editor.git_blame.column_width_generation = Some(generation);
     }
 }

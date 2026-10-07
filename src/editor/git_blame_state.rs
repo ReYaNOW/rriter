@@ -19,8 +19,6 @@ pub struct GitBlame {
     pub line_commit: Vec<u32>,
     pub age_ranks: Vec<f32>,
     pub column_labels: Vec<String>,
-    pub column_width: usize,
-    pub column_block_starts: Vec<bool>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -32,6 +30,8 @@ pub struct GitBlameState {
     pub failed_key: Option<(crate::platform::PathKey, PathBuf, git2::Oid)>,
     pub messages: Vec<(git2::Oid, String)>,
     pub column_open: bool,
+    pub column_width: f32,
+    pub column_width_generation: Option<u64>,
 }
 
 pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
@@ -148,9 +148,7 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
     let line_commit: Vec<u32> = line_commit.into_iter().collect::<Option<_>>()?;
     let age_ranks = age_rank(&commits.iter().map(|commit| commit.author_time).collect::<Vec<_>>());
     let column_labels: Vec<String> = commits.iter().map(column_label).collect();
-    let column_width = column_labels.iter().map(|label| label.chars().count()).max().unwrap_or(0).min(24);
-    let column_block_starts = blame_blocks(&line_commit.iter().copied().map(Some).collect::<Vec<_>>());
-    Some(GitBlame { commits, line_commit, age_ranks, column_labels, column_width, column_block_starts })
+    Some(GitBlame { commits, line_commit, age_ranks, column_labels })
 }
 
 /// Maps a buffer line to HEAD; the result may be at or beyond HEAD's line count,
@@ -316,17 +314,6 @@ mod tests {
         assert_eq!(blame.column_labels.len(), 1);
         assert!(blame.column_labels[0].chars().count() <= 24);
         assert!(blame.column_labels[0].starts_with("14.11.23 "));
-    }
-
-    #[test]
-    fn blame_column_block_starts_are_cached_for_head_lines() {
-        let output = porcelain(&[
-            (&oid('a'), 1, 1, "Author", "subject", 1_700_000_000, "one"),
-            (&oid('a'), 2, 2, "Author", "subject", 1_700_000_000, "two"),
-            (&oid('b'), 3, 3, "Other", "subject", 1_700_000_001, "three"),
-        ]);
-        let blame = parse_porcelain(&output).expect("valid porcelain");
-        assert_eq!(blame.column_block_starts, [true, false, true]);
     }
 
     #[test]

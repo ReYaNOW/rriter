@@ -81,7 +81,10 @@ impl Renderer {
             self.git_blame_popup_details = None;
             return;
         };
-        self.draw_git_blame_commit_popup_at(editor, commit, annotation, current_key, ui_registry, mx, my, s);
+        self.draw_git_blame_commit_popup_at(
+            editor, commit, annotation, current_key,
+            crate::renderer::GitBlamePopupSource::Inline, ui_registry, mx, my, s,
+        );
     }
 
     pub(crate) fn draw_git_blame_column_popup(
@@ -132,7 +135,10 @@ impl Renderer {
             version: editor.version,
             generation: editor.git_blame.generation,
         };
-        self.draw_git_blame_commit_popup_at(editor, commit, anchor, key, ui_registry, mx, my, s);
+        self.draw_git_blame_commit_popup_at(
+            editor, commit, anchor, key,
+            crate::renderer::GitBlamePopupSource::Column, ui_registry, mx, my, s,
+        );
     }
 
     fn draw_git_blame_commit_popup_at(
@@ -141,6 +147,7 @@ impl Renderer {
         commit: &crate::editor::BlameCommit,
         annotation: (f32, f32, f32, f32),
         current_key: crate::app::git_blame::InlineDwellKey,
+        source: crate::renderer::GitBlamePopupSource,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
@@ -206,6 +213,7 @@ impl Renderer {
         self.git_blame_popup_hover = Some(crate::renderer::GitBlamePopupHover {
             oid,
             key: current_key,
+            source,
             annotation,
             popup: (x, y, popup_w, popup_h),
         });

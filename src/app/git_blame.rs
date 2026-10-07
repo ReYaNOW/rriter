@@ -206,9 +206,16 @@ impl App {
                 return;
             }
         } else {
+            let same_file = state.key.as_ref().is_some_and(|(repo, path, _)| {
+                repo == &key.repo_key && path == &key.rel_path
+            });
             state.generation = state.generation.wrapping_add(1);
             state.key = Some((key.repo_key.clone(), key.rel_path.clone(), key.oid));
             state.blame = None;
+            if !same_file {
+                state.column_width = 0.0;
+                state.column_width_generation = None;
+            }
             state.messages.clear();
             state.failed_key = None;
             state.pending = false;
@@ -226,8 +233,6 @@ impl App {
                 let blame = crate::editor::parse_porcelain(&out)
                     .or_else(|| out.is_empty().then(|| GitBlame {
                         commits: Vec::new(), line_commit: Vec::new(), age_ranks: Vec::new(), column_labels: Vec::new(),
-                        column_width: 0,
-                        column_block_starts: Vec::new(),
                     }))
                     .ok_or_else(|| "Не удалось разобрать результат Git blame".to_string())?;
                 let repo = git2::Repository::open(&worker_key.repo_root)
@@ -472,8 +477,6 @@ mod tests {
             line_commit: vec![0, 0],
             age_ranks: Vec::new(),
             column_labels: Vec::new(),
-            column_width: 0,
-            column_block_starts: Vec::new(),
         };
         assert!(consistent_blame(blame.clone(), 1).is_none());
         assert!(consistent_blame(blame, 2).is_some());

@@ -64,6 +64,20 @@ pub(crate) fn editor_left_padding_for(
         .round()
 }
 
+pub(crate) fn blame_column_width(
+    editor: &Editor,
+    is_ide_mode: bool,
+    show_welcome: bool,
+    active_tab_is_git_diff: bool,
+    scale: f32,
+) -> f32 {
+    if editor.git_blame.column_open && is_ide_mode && !show_welcome && !active_tab_is_git_diff {
+        editor.git_blame.column_width * scale
+    } else {
+        0.0
+    }
+}
+
 pub(crate) fn ide_tab_bar_height(show_welcome: bool, is_ide_mode: bool, scale: f32) -> f32 {
     if show_welcome || !is_ide_mode {
         0.0
