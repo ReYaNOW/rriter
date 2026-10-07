@@ -61,6 +61,62 @@ pub(crate) struct CommitMessageReceiver {
 }
 
 impl App {
+    pub(crate) fn open_git_blame_column_context_menu(&mut self, x: f32, y: f32) {
+        self.editor.git_blame.context_menu = Some(crate::editor::GitBlameContextMenu {
+            x,
+            y,
+            opened_at: std::time::Instant::now(),
+        });
+    }
+
+    pub(crate) fn open_git_blame_context_menu_for_hit(
+        &mut self,
+        id: crate::ui_system::UiId,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        if id != crate::ui_system::UiId::EditorLineNumbers {
+            return false;
+        }
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let (x, y) = crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
+        self.ide_panel.database.context_menu = None;
+        self.ide_panel.file_tree_context_menu = None;
+        self.open_git_blame_column_context_menu(x, y);
+        true
+    }
+
+    pub(crate) fn handle_git_blame_column_menu_item(&mut self) {
+        self.editor.git_blame.context_menu = None;
+        self.editor.git_blame.column_open = !self.editor.git_blame.column_open;
+        if self.editor.git_blame.column_open {
+            self.ensure_blame_for_active();
+            if let Some(notice) = self.git_blame_unavailable_notice() {
+                self.show_notice(notice);
+            }
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn git_blame_unavailable_notice(&self) -> Option<&'static str> {
+        let Some(snapshot) = self.editor.git_head.as_ref() else {
+            return Some("Git blame недоступен: файл не в репозитории");
+        };
+        if snapshot.head_oid.is_none() || !snapshot.path_in_head {
+            return Some("Git blame недоступен: файла нет в HEAD");
+        }
+        let failed = self.editor.git_blame.key.as_ref().is_some_and(|key| {
+            self.editor.git_blame.failed_key.as_ref() == Some(key)
+        });
+        failed.then_some("Git blame недоступен: ошибка git")
+    }
+
+    pub(crate) fn close_git_blame_column_context_menu(&mut self) {
+        self.editor.git_blame.context_menu = None;
+    }
+
     pub(crate) fn copy_git_blame_commit_hash(&mut self) {
         let Some(oid) = self.renderer.as_ref().and_then(|renderer| {
             renderer.git_blame_popup_hover.map(|hover| hover.oid)
@@ -256,7 +312,11 @@ impl App {
             Err(error) => {
                 self.editor.git_blame.pending = false;
                 self.editor.git_blame.failed_key = self.editor.git_blame.key.clone();
-                self.show_notice(format!("Не удалось запустить Git blame: {error}"));
+                if self.editor.git_blame.column_open {
+                    self.show_notice("Git blame недоступен: ошибка git");
+                } else {
+                    self.show_notice(format!("Не удалось запустить Git blame: {error}"));
+                }
             }
         }
     }
@@ -280,6 +340,7 @@ impl App {
                 crate::ui_waker::OneShotState::Ready(event) => {
                     let Some(state) = self.matching_blame_state_mut(&event.key, event.generation) else { continue };
                     state.pending = false;
+                    let failed = event.result.is_err();
                     match event.result {
                         Ok(blame) => {
                             state.blame = Some(blame);
@@ -290,6 +351,14 @@ impl App {
                             state.failed_key = state.key.clone();
                             println!("[GIT blame] {error}");
                         }
+                    }
+                    let show_error_notice = failed
+                        && self.editor.git_blame.column_open
+                        && self.editor.git_blame.key.as_ref().is_some_and(|key| {
+                            self.editor.git_blame.failed_key.as_ref() == Some(key)
+                        });
+                    if show_error_notice {
+                        self.show_notice("Git blame недоступен: ошибка git");
                     }
                     changed = true;
                 }

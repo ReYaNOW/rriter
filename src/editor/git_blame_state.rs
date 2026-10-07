@@ -32,6 +32,24 @@ pub struct GitBlameState {
     pub column_open: bool,
     pub column_width: f32,
     pub column_width_generation: Option<u64>,
+    pub context_menu: Option<GitBlameContextMenu>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GitBlameContextMenu {
+    pub x: f32,
+    pub y: f32,
+    pub opened_at: std::time::Instant,
+}
+
+impl GitBlameState {
+    pub fn column_context_menu_label(&self) -> &'static str {
+        if self.column_open {
+            "Скрыть Git blame"
+        } else {
+            "Показать Git blame"
+        }
+    }
 }
 
 pub fn parse_porcelain(out: &str) -> Option<GitBlame> {

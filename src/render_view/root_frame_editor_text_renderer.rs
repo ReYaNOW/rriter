@@ -424,6 +424,26 @@ impl Renderer {
         let gutter_hit_clip =
             crate::ui_system::UiClipRect::new(0.0, editor_clip_y, self.width, editor_clip_h);
         let gutter_bottom = editor_clip_y + editor_clip_h;
+        if !show_welcome && active_git_diff_state.is_none() {
+            let line_numbers_x = gutter_x
+                + crate::render_view::blame_column_width(
+                    editor,
+                    is_ide_mode,
+                    show_welcome,
+                    active_git_diff_state.is_some(),
+                    s,
+                );
+            ui_registry.register_rect_clipped(
+                crate::ui_system::UiId::EditorLineNumbers,
+                line_numbers_x.round(),
+                editor_clip_y,
+                (self.left_padding - line_numbers_x).max(0.0),
+                editor_clip_h,
+                gutter_hit_clip,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+        }
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;

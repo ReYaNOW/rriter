@@ -152,6 +152,22 @@ impl Renderer {
             s,
         );
 
+        if let Some(menu) = editor.git_blame.context_menu {
+            ui_registry.mark_overlay_start();
+            wants_pointer |= self.draw_animated_context_menu(
+                menu.x,
+                menu.y,
+                menu.opened_at,
+                1,
+                |_| editor.git_blame.column_context_menu_label(),
+                |_| crate::ui_system::UiId::GitBlameColumnMenuItem,
+                |_| false,
+                ui_registry,
+                overlay_mx,
+                overlay_my,
+            );
+        }
+
         if modal_overlay_open {
             self.reset_git_file_tooltip_overlay();
             self.git_blame_popup_hover = None;

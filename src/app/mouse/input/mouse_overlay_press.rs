@@ -221,6 +221,25 @@ impl App {
             return true;
         }
 
+        if state == ElementState::Pressed && self.editor.git_blame.context_menu.is_some() {
+            let clicked_id = self.ui_registry.find_overlay_at(mx, my);
+            if button == winit::event::MouseButton::Left
+                && clicked_id == Some(crate::ui_system::UiId::GitBlameColumnMenuItem)
+            {
+                self.handle_git_blame_column_menu_item();
+                return true;
+            }
+            if clicked_id != Some(crate::ui_system::UiId::GitBlameColumnMenuItem) {
+                self.close_git_blame_column_context_menu();
+                if button != winit::event::MouseButton::Left {
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return true;
+                }
+            }
+        }
+
         if state == ElementState::Pressed && self.ide_panel.database.context_menu.is_some() {
             let clicked_id = self.ui_registry.find_overlay_at(mx, my);
             let keep = matches!(
@@ -334,6 +353,17 @@ impl App {
             && self.autocomplete_window_contains(mx, my)
         {
             self.window.as_ref().unwrap().request_redraw();
+            return true;
+        }
+
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Right
+            && let Some(id) = self.ui_registry.find_at(mx, my)
+            && self.open_git_blame_context_menu_for_hit(id, mx, my)
+        {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return true;
         }
 

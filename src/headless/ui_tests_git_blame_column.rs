@@ -161,3 +161,70 @@ fn headless_git_blame_column_state_is_per_tab_and_survives_file_reload() {
     drop(session);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn headless_git_blame_gutter_menu_toggles_column_and_ignores_editor_text() {
+    let (root, file) = block_fixture(&format!("ui-git-blame-gutter-menu-{}", std::process::id()));
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = false;
+    let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let _ = run_script(&mut session, b"mouse_move 0 0\n");
+    let closed_padding = session.app.renderer.as_ref().map_or(0.0, |renderer| renderer.left_padding);
+
+    let state = dump(&mut session);
+    let (x, y) = crate::headless::tests_support::ui_center(&state, "EditorLineNumbers");
+    let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick right\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert!(session.app.editor.git_blame.context_menu.is_some());
+    assert_eq!(session.app.editor.git_blame.column_context_menu_label(), "Показать Git blame");
+    crate::headless::tests_support::click_ui(&mut session, "GitBlameColumnMenuItem");
+    assert!(session.app.editor.git_blame.column_open);
+    wait_until(&mut session, 8000, "gutter-menu blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+            || session.app.editor.git_blame.failed_key.is_some()
+    });
+    assert!(session.app.editor.git_blame.blame.is_some());
+    let _ = run_script(&mut session, b"mouse_move 0 0\n");
+    let open_padding = session.app.renderer.as_ref().map_or(0.0, |renderer| renderer.left_padding);
+    assert!(open_padding > closed_padding);
+
+    let state = dump(&mut session);
+    let (x, y) = crate::headless::tests_support::ui_center(&state, "EditorLineNumbers");
+    let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick right\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert_eq!(session.app.editor.git_blame.column_context_menu_label(), "Скрыть Git blame");
+    crate::headless::tests_support::click_ui(&mut session, "GitBlameColumnMenuItem");
+    assert!(!session.app.editor.git_blame.column_open);
+    let _ = run_script(&mut session, b"mouse_move 0 0\n");
+    assert_eq!(session.app.renderer.as_ref().map_or(0.0, |renderer| renderer.left_padding), closed_padding);
+
+    let state = dump(&mut session);
+    let (x, y) = crate::headless::tests_support::ui_center(&state, "EditorTextBody");
+    let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick right\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert!(session.app.editor.git_blame.context_menu.is_none());
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_gutter_menu_notifies_for_untracked_file() {
+    let (root, _) = git_blame_fixture(&format!("ui-git-blame-gutter-untracked-{}", std::process::id()));
+    let file = root.join("untracked.txt");
+    std::fs::write(&file, "untracked line\n")
+        .unwrap_or_else(|error| panic!("write untracked blame fixture: {error}"));
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = false;
+    let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let state = dump(&mut session);
+    let (x, y) = crate::headless::tests_support::ui_center(&state, "EditorLineNumbers");
+    let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick right\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    crate::headless::tests_support::click_ui(&mut session, "GitBlameColumnMenuItem");
+    assert!(session.app.editor.git_blame.column_open);
+    assert_eq!(session.app.readonly_notice_text, "Git blame недоступен: файла нет в HEAD");
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
