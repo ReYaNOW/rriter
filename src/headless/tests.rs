@@ -1215,7 +1215,7 @@ mod session_cases {
         assert_eq!(
             keys,
             [
-                "atlas", "blame_inline", "blame_status_visible", "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "hover",
+                "atlas", "blame_inline", "blame_status_visible", "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "graph_highlight_oid", "hover",
                 "ide_panel", "markdown_media_stats", "markdown_toc", "mode",
                 "overlays", "scale", "size", "tabs", "themes", "ui", "writes_allowed"
             ]
