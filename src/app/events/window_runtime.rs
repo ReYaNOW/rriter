@@ -381,8 +381,10 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         pdf_dark_pages: app.pdf_dark_pages,
         theme: app.theme_selection(),
         ctrl_wheel_multiplier: app.ctrl_wheel_multiplier,
-        git_blame_inline: app.git_blame_inline,
-        git_blame_delay_ms: app.git_blame_delay_ms,
+        git_blame: crate::state_persistence::GitBlameSettings {
+            inline: app.git_blame_inline,
+            delay_ms: app.git_blame_delay_ms,
+        },
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),
         rust_settings: app.rust_settings.clone(),

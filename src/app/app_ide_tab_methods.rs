@@ -415,8 +415,10 @@ impl App {
             pdf_dark_pages: self.pdf_dark_pages,
             theme: self.theme_selection(),
             ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
-            git_blame_inline: self.git_blame_inline,
-            git_blame_delay_ms: self.git_blame_delay_ms,
+            git_blame: crate::state_persistence::GitBlameSettings {
+                inline: self.git_blame_inline,
+                delay_ms: self.git_blame_delay_ms,
+            },
             tool_paths: self.tool_paths.clone(),
             dart_settings: self.dart_settings.clone(),
             rust_settings: self.rust_settings.clone(),

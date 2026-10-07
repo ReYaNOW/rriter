@@ -176,9 +176,10 @@ fn headless_git_blame_inline_modified_line_sleeps_after_dwell() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-#[test]
-fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
-    let (root, file) = git_blame_fixture("ui-git-blame-inline-dwell");
+fn inline_dwell_session(
+    name: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, crate::headless::HeadlessSession) {
+    let (root, file) = git_blame_fixture(name);
     let second = root.join("second.txt");
     std::fs::write(&second, "other file\n").unwrap();
     git(&root, &["add", "second.txt"]);
@@ -187,7 +188,12 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     session.app.git_blame_inline = true;
     session.app.git_blame_delay_ms = 400;
     open_and_wait(&mut session, &file, 3);
+    (root, file, second, session)
+}
 
+#[test]
+fn headless_git_blame_inline_dwell_formats_once_and_idles() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-dwell");
     let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
     if session.app.inline_blame_dwell.key.is_none() {
         session.app.tick_git_blame_inline(started);
@@ -212,7 +218,22 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     let row_h = dump["blame_inline"]["h"].as_f64().unwrap();
     let idle = run_script(&mut session, b"idle 50\n");
     assert!(idle.last().unwrap().contains("frames=0") && idle.last().unwrap().contains("wakes=1"), "{idle:?}");
+    let _ = std::fs::remove_dir_all(root);
+}
 
+#[test]
+fn headless_git_blame_inline_annotation_tracks_the_next_row_geometry() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-row-geometry");
+    let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    if session.app.inline_blame_dwell.key.is_none() {
+        session.app.tick_git_blame_inline(started);
+    }
+    let started = session.app.inline_blame_dwell.since.unwrap_or(started);
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    let first_row_y = dump["blame_inline"]["y"].as_f64().unwrap();
+    let row_h = dump["blame_inline"]["h"].as_f64().unwrap();
     session.app.editor.cursor = session.app.editor.line_offsets[1];
     assert!(!crate::app::git_blame::inline_blame_matches_current(
         &session.app.editor,
@@ -240,6 +261,18 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     let next_row_top = f64::from(next_row.y_offset - render_scroll_y);
     assert!(second_row_y + row_h <= next_row_top + 1.0, "inline rect must end before the next row: rect_bottom={}, next_row_top={next_row_top}", second_row_y + row_h);
     assert!(cursor_row.y_offset > 0.0, "the checked annotation belongs to the second physical cursor row");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_render_gate_rejects_a_stale_version() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-version-gate");
+    let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    if session.app.inline_blame_dwell.key.is_none() {
+        session.app.tick_git_blame_inline(started);
+    }
+    let started = session.app.inline_blame_dwell.since.unwrap_or(started);
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
     let current_version = session.app.editor.version;
     session.app.editor.version = current_version.wrapping_add(1);
     assert!(!crate::app::git_blame::inline_blame_matches_current(
@@ -248,7 +281,12 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
         &session.app.inline_blame_dwell,
     ), "render gate must reject stale text after an edit version change");
     session.app.editor.version = current_version;
+    let _ = std::fs::remove_dir_all(root);
+}
 
+#[test]
+fn headless_git_blame_inline_tab_switch_tracks_the_active_file() {
+    let (root, _, second, mut session) = inline_dwell_session("ui-git-blame-inline-tab-switch");
     let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     wait_until(&mut session, 8000, "second file blame result", |session| {
@@ -275,7 +313,12 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     assert!(session.app.inline_blame_dwell.text.is_empty());
     assert!(session.app.tick_git_blame_inline(returned + std::time::Duration::from_millis(400)));
     assert!(session.app.inline_blame_dwell.text.contains("Grace"));
+    let _ = std::fs::remove_dir_all(root);
+}
 
+#[test]
+fn headless_git_blame_inline_hides_long_lines_and_tracks_head_changes() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-long-line");
     let long = root.join("long.txt");
     std::fs::write(&long, "x".repeat(4000)).unwrap();
     git(&root, &["add", "long.txt"]);

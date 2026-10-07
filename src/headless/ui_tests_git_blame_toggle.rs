@@ -51,12 +51,12 @@ fn headless_git_blame_toolbar_and_status_toggle_persist() {
     let enabled = dump(&mut session);
     assert!(session.app.git_blame_inline);
     assert!(enabled["blame_status_visible"].as_bool().unwrap());
-    assert!(crate::load_config().git_blame_inline);
+    assert!(crate::load_config().git_blame.inline);
 
     click_ui(&mut session, "StatusGitBlame");
     assert!(!session.app.git_blame_inline);
     assert!(!dump(&mut session)["blame_status_visible"].as_bool().unwrap());
-    assert!(!crate::load_config().git_blame_inline);
+    assert!(!crate::load_config().git_blame.inline);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -66,10 +66,10 @@ fn headless_git_blame_delay_setting_steps_clamps_and_persists() {
     assert!(has_ui(&dump(&mut session), "SettingsEditorBlameDelayAdjust(-1)"));
     click_ui(&mut session, "SettingsEditorBlameDelayAdjust(-1)");
     assert_eq!(session.app.git_blame_delay_ms, 300);
-    assert_eq!(crate::load_config().git_blame_delay_ms, 300);
+    assert_eq!(crate::load_config().git_blame.delay_ms, 300);
     click_ui(&mut session, "SettingsEditorBlameDelayAdjust(1)");
     assert_eq!(session.app.git_blame_delay_ms, 400);
-    assert_eq!(crate::load_config().git_blame_delay_ms, 400);
+    assert_eq!(crate::load_config().git_blame.delay_ms, 400);
 
     session.app.git_blame_delay_ms = 0;
     click_ui(&mut session, "SettingsEditorBlameDelayAdjust(-1)");
