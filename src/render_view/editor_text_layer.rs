@@ -356,6 +356,8 @@ impl Renderer {
         python_inlay_hints: &[crate::app::PythonInlayHint],
         closing_hints: &[crate::languages::dart::ClosingHint],
         inline_git_popup_line: Option<usize>,
+        active_tab: usize,
+        inline_blame_dwell: &crate::app::git_blame::InlineBlameDwell,
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
@@ -801,6 +803,7 @@ impl Renderer {
             {
                 closing_hint_idx += 1;
             }
+            let mut closing_hint_width = 0.0;
             if let Some(hint) = closing_hints.get(closing_hint_idx)
                 && closing_hint_matches_visual_line(
                     hint,
@@ -812,6 +815,7 @@ impl Renderer {
                 )
                 && let Some(hint_x) = closing_hint_screen_x(x, render_scroll_x, interaction_right, s)
             {
+                closing_hint_width = self.measure_mono_width(&hint.label, 0.88);
                 self.draw_string_mono_scaled(
                     &hint.label,
                     hint_x,
@@ -822,28 +826,30 @@ impl Renderer {
                 closing_hint_idx += 1;
             }
 
-            let inline_blame = &editor.git_blame;
-            let snapshot_matches = editor.git_head.as_ref().is_some_and(|snapshot| {
-                inline_blame.key.as_ref().is_some_and(|(repo, path, oid)| {
-                    snapshot.path_in_head
-                        && repo == &snapshot.repo_key
-                        && path == &snapshot.rel_path
-                        && Some(*oid) == snapshot.head_oid
-                })
-            });
+            let inline_blame = inline_blame_dwell;
             if is_last_visual_segment
                 && inline_git_popup_line != Some(phys_idx)
                 && !v_line_info.is_folded
-                && inline_blame.inline_line == Some(phys_idx)
-                && !inline_blame.inline_text.is_empty()
-                && snapshot_matches
+                && inline_blame.line == Some(phys_idx)
+                && !inline_blame.text.is_empty()
+                && inline_blame_dwell.key.is_some_and(|key| key.generation == editor.git_blame.generation)
+                && editor.git_head.as_ref().is_some_and(|snapshot| {
+                    editor.git_blame.key.as_ref().is_some_and(|(repo, path, oid)| {
+                        snapshot.path_in_head
+                            && repo == &snapshot.repo_key
+                            && path == &snapshot.rel_path
+                            && Some(*oid) == snapshot.head_oid
+                    })
+                })
+                && crate::app::git_blame::inline_blame_matches_current(editor, active_tab, inline_blame_dwell)
             {
-                let annotation_x = (x - render_scroll_x + 10.0 * s).round();
-                let annotation_w = self.measure_ui_width(&inline_blame.inline_text, 1.0);
-                if annotation_x + annotation_w <= interaction_right.round() {
+                let closing_hint_gap = if closing_hint_width > 0.0 { 4.0 * s } else { 0.0 };
+                let annotation_x = (x - render_scroll_x + 10.0 * s + closing_hint_width + closing_hint_gap).round();
+                let annotation_w = self.measure_ui_width(&inline_blame.text, 1.0);
+                if annotation_x >= self.left_padding.round() && annotation_x + annotation_w <= interaction_right.round() {
                     let annotation_y = y.round();
                     self.draw_string_scaled_stable(
-                        &inline_blame.inline_text,
+                        &inline_blame.text,
                         annotation_x,
                         annotation_y,
                         self.theme.syntax.color(crate::theme::SyntaxRole::Comment),
@@ -852,7 +858,7 @@ impl Renderer {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::EditorBlameInline,
                         annotation_x,
-                        annotation_y - self.line_height,
+                        annotation_y - self.baseline_offset,
                         annotation_w,
                         self.line_height,
                         self.last_mouse_x,
@@ -1191,6 +1197,8 @@ mod stage5_overlay_boundary_tests {
             &[],
             closing_hints,
             None,
+            0,
+            &crate::app::git_blame::InlineBlameDwell::default(),
         );
     }
 

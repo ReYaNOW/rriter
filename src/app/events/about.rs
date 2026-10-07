@@ -278,7 +278,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
                 earliest_optional_wake(
                     database_refresh_wake_at,
                     earliest_optional_wake(
-                        app.git_blame_inline_wake_at(),
+                        app.git_blame_inline_wake_at(now),
                         earliest_optional_wake(app.startup_editor_pending, app.startup_editor_reveal_at),
                     ),
                 ),

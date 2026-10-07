@@ -1,6 +1,36 @@
 use crate::app::App;
-use crate::editor::{GitBlame, GitBlameState};
+use crate::editor::{Editor, GitBlame, GitBlameState};
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InlineDwellKey {
+    pub(crate) tab: usize,
+    pub(crate) line: usize,
+    pub(crate) version: u64,
+    pub(crate) generation: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct InlineBlameDwell {
+    pub(crate) key: Option<InlineDwellKey>,
+    pub(crate) since: Option<std::time::Instant>,
+    pub(crate) text: String,
+    pub(crate) line: Option<usize>,
+}
+
+pub(crate) fn inline_blame_matches_current(
+    editor: &Editor,
+    active_tab: usize,
+    dwell: &InlineBlameDwell,
+) -> bool {
+    let line = editor.line_offsets.partition_point(|&offset| offset <= editor.cursor).saturating_sub(1);
+    dwell.key.is_some_and(|key| {
+        key.tab == active_tab
+            && key.line == line
+            && key.version == editor.version
+            && key.generation == editor.git_blame.generation
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct BlameKey {
@@ -33,24 +63,22 @@ pub(crate) struct CommitMessageReceiver {
 impl App {
     pub(crate) fn tick_git_blame_inline(&mut self, now: std::time::Instant) -> bool {
         if !self.is_ide_mode || !self.git_blame_inline {
-            return clear_inline_blame(&mut self.editor.git_blame);
+            return clear_inline_blame(&mut self.inline_blame_dwell);
         }
-        let (line, _) = crate::render_view::cursor_line_and_character(&self.editor);
-        let line = line.saturating_sub(1);
+        let line = self.editor.line_offsets.partition_point(|&offset| offset <= self.editor.cursor).saturating_sub(1);
         let generation = self.editor.git_blame.generation;
-        let key = (self.active_tab, line, self.editor.version, generation);
-        if self.editor.git_blame.inline_key != Some(key) {
-            let state = &mut self.editor.git_blame;
-            state.inline_key = Some(key);
-            state.inline_since = Some(now);
-            state.inline_text.clear();
-            state.inline_line = None;
+        let key = InlineDwellKey { tab: self.active_tab, line, version: self.editor.version, generation };
+        if self.inline_blame_dwell.key != Some(key) {
+            self.inline_blame_dwell.key = Some(key);
+            self.inline_blame_dwell.since = Some(now);
+            self.inline_blame_dwell.text.clear();
+            self.inline_blame_dwell.line = None;
             return true;
         }
-        if !self.editor.git_blame.inline_text.is_empty() {
+        if !self.inline_blame_dwell.text.is_empty() {
             return false;
         }
-        let Some(since) = self.editor.git_blame.inline_since else { return false };
+        let Some(since) = self.inline_blame_dwell.since else { return false };
         let delay = std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms));
         if now.saturating_duration_since(since) < delay {
             return false;
@@ -73,24 +101,24 @@ impl App {
         let now_secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
         let relative = crate::app::git_panel::format_git_relative_time(author_time, now_secs);
-        let state = &mut self.editor.git_blame;
-        state.inline_text.clear();
-        state.inline_text.push_str(&author);
-        state.inline_text.push_str(", ");
-        state.inline_text.push_str(&relative);
-        state.inline_text.push_str(" • ");
-        state.inline_text.push_str(&summary);
-        state.inline_line = Some(line);
+        let dwell = &mut self.inline_blame_dwell;
+        dwell.text.clear();
+        dwell.text.push_str(&author);
+        dwell.text.push_str(", ");
+        dwell.text.push_str(&relative);
+        dwell.text.push_str(" • ");
+        dwell.text.push_str(&summary);
+        dwell.line = Some(line);
         true
     }
 
-    pub(crate) fn git_blame_inline_wake_at(&self) -> Option<std::time::Instant> {
-        if !self.git_blame_inline || !self.editor.git_blame.inline_text.is_empty() {
+    pub(crate) fn git_blame_inline_wake_at(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        if !self.git_blame_inline || !self.inline_blame_dwell.text.is_empty() {
             return None;
         }
-        self.editor.git_blame.inline_since.map(|since| {
-            since + std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms))
-        }).filter(|deadline| *deadline > std::time::Instant::now())
+        self.inline_blame_dwell.since
+            .map(|since| since + std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms)))
+            .filter(|deadline| *deadline > now)
     }
 
     pub(crate) fn blame_needed(&self) -> bool {
@@ -282,12 +310,12 @@ impl App {
     }
 }
 
-fn clear_inline_blame(state: &mut GitBlameState) -> bool {
-    let changed = !state.inline_text.is_empty() || state.inline_line.is_some() || state.inline_key.is_some();
-    state.inline_text.clear();
-    state.inline_line = None;
-    state.inline_key = None;
-    state.inline_since = None;
+fn clear_inline_blame(state: &mut InlineBlameDwell) -> bool {
+    let changed = !state.text.is_empty() || state.line.is_some() || state.key.is_some();
+    state.text.clear();
+    state.line = None;
+    state.key = None;
+    state.since = None;
     changed
 }
 

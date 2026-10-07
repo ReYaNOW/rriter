@@ -586,6 +586,7 @@ pub(crate) mod reviewer_stage2_integration {
             false,
             "Файл открыт в режиме только чтение",
             None,
+            &crate::app::git_blame::InlineBlameDwell::default(),
             &app.pdf_engine,
             app.pdf_dark_pages,
             &app.markdown_media,
