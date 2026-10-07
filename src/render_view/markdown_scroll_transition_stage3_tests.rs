@@ -728,6 +728,7 @@ fn stage4_status_toggle_rect(app: &mut App) -> (f32, f32, f32, f32) {
         None,
         None,
         None,
+        false,
     );
     renderer.flush();
     app.ui_registry

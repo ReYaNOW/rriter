@@ -1464,6 +1464,7 @@ Root:
 * `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
 * `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
+* `src/headless/ui_tests_git_blame_toggle.rs` -> headless UI tests for Git blame toggle/status persistence, delay adjustment, and zero-delay annotations.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
@@ -1472,7 +1473,7 @@ Root:
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
 * `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
-* `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
+* `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier, Git blame delay), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
 * `src/headless/ui_tests_hotkeys.rs` -> headless UI tests for keymap overrides from `config.json`, configurable commands, and terminal shortcut ownership.
 * `src/headless/ui_tests_hotkeys_characterization.rs` / `src/headless/ui_tests_hotkeys_characterization_editor.rs` / `src/headless/ui_tests_hotkeys_characterization_file_tree.rs` / `src/headless/ui_tests_hotkeys_characterization_database.rs` / `src/headless/ui_tests_hotkeys_characterization_api_markdown.rs` / `src/headless/ui_tests_hotkeys_characterization_pdf_image.rs` / `src/headless/ui_tests_hotkeys_characterization_git_settings.rs` -> headless UI characterization for existing keyboard routing across editor, file tree, Database, API/Markdown, PDF/Image, and Git/Settings.

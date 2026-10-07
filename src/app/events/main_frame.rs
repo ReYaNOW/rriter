@@ -186,6 +186,7 @@ impl App {
                     &self.readonly_notice_text,
                     self.inline_git_popup.as_ref(),
                     &self.inline_blame_dwell,
+                    self.git_blame_inline,
                     &self.pdf_engine,
                     self.pdf_dark_pages,
                     &self.markdown_media,
@@ -555,6 +556,7 @@ impl App {
                         rust_row.as_ref(),
                         self.ide_panel.database.settings(),
                         self.ctrl_wheel_multiplier,
+                        self.git_blame_delay_ms,
                         &mut self.keymap_settings,
                         &mut self.ui_registry,
                     );

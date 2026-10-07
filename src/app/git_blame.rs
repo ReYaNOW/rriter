@@ -61,6 +61,18 @@ pub(crate) struct CommitMessageReceiver {
 }
 
 impl App {
+    pub(crate) fn toggle_git_blame_inline(&mut self) {
+        self.git_blame_inline = !self.git_blame_inline;
+        self.save_current_config();
+        self.ensure_blame_for_active();
+        if !self.git_blame_inline {
+            clear_inline_blame(&mut self.inline_blame_dwell);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     pub(crate) fn tick_git_blame_inline(&mut self, now: std::time::Instant) -> bool {
         if !self.is_ide_mode || !self.git_blame_inline {
             return clear_inline_blame(&mut self.inline_blame_dwell);

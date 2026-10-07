@@ -166,6 +166,7 @@ impl Renderer {
         readonly_notice_text: &str,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         inline_blame_dwell: &crate::app::git_blame::InlineBlameDwell,
+        git_blame_inline: bool,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
         markdown_media: &crate::markdown_media::MarkdownMedia,
@@ -219,6 +220,7 @@ impl Renderer {
             show_settings,
             dialog_window_open,
             is_ide_mode,
+            git_blame_inline,
         );
         let RootFramePanelLayout {
             s,
@@ -261,6 +263,7 @@ impl Renderer {
             lsp,
             ui_registry,
             layout,
+            git_blame_inline,
             has_lsp_diagnostics,
             is_ide_mode,
             blink_alpha,
@@ -375,6 +378,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 true,
+                git_blame_inline,
                 empty_ide_open_label,
             );
         }
@@ -394,6 +398,7 @@ impl Renderer {
                 modal_overlay_open,
                 s,
                 false,
+                git_blame_inline,
                 empty_ide_open_label,
             );
         } else {

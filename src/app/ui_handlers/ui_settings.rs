@@ -52,6 +52,22 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::SettingsEditorBlameDelayAdjust(delta) => {
+                let step = u32::from(delta.unsigned_abs()) * 100;
+                let value = if delta < 0 {
+                    self.git_blame_delay_ms.saturating_sub(step)
+                } else {
+                    self.git_blame_delay_ms.saturating_add(step)
+                };
+                let next = crate::normalize_git_blame_delay_ms(value);
+                if next != self.git_blame_delay_ms {
+                    self.git_blame_delay_ms = next;
+                    self.save_current_config();
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::SettingsThemePick(target, theme) => match target {
                 crate::ui_system::ThemeTarget::Both => self.apply_themes(theme, theme),
                 crate::ui_system::ThemeTarget::Editor => {

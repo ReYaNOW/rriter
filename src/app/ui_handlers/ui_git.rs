@@ -211,6 +211,7 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitBlameToggle => self.toggle_git_blame_inline(),
             UiId::GitLogsClear => {
                 self.ide_panel.git.clear_git_logs();
                 if let Some(renderer) = self.renderer.as_mut() {

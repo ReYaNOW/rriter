@@ -178,6 +178,9 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         }),
         _ => Value::Null,
     };
+    let blame_status_visible = ui.iter().any(|element| {
+        element.get("id").and_then(Value::as_str) == Some("StatusGitBlame")
+    });
     let selection = app.editor.selection_anchor.filter(|&anchor| anchor != app.editor.cursor).map_or(
         Value::Null,
         |anchor| {
@@ -223,6 +226,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "highlight_spans": app.highlighter.spans.iter().map(|span| [span.start, span.end]).collect::<Vec<_>>(),
         },
         "blame_inline": blame_inline,
+        "blame_status_visible": blame_status_visible,
         "ide_panel": {
             "active": active_panel,
             "open": open_panels,

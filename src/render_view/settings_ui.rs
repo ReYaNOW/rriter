@@ -462,6 +462,7 @@ impl Renderer {
         rust_row: Option<&crate::lsp::RustRowInfo>,
         database_settings: &crate::app::database::DatabaseSettings,
         ctrl_wheel_multiplier: f32,
+        git_blame_delay_ms: u32,
         keymap_settings: &mut crate::app::keymap_settings::KeymapSettingsState,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
@@ -1041,6 +1042,14 @@ impl Renderer {
                 content_available_w,
                 content_y,
                 ctrl_wheel_multiplier,
+                ui_registry,
+            );
+            content_y += 42.0 * s;
+            self.draw_editor_blame_delay_setting(
+                content_x,
+                content_available_w,
+                content_y,
+                git_blame_delay_ms,
                 ui_registry,
             );
         } else if active_tab == 3 {

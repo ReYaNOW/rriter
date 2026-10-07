@@ -191,6 +191,7 @@ impl Renderer {
         modal_overlay_open: bool,
         s: f32,
         blank_editor_area: bool,
+        git_blame_inline: bool,
         empty_ide_open_label: &str,
     ) -> (bool, Vec<(usize, usize)>) {
         if blank_editor_area {
@@ -237,6 +238,7 @@ impl Renderer {
                 None,
                 None,
                 None,
+                git_blame_inline,
             );
         }
 
@@ -594,6 +596,7 @@ impl Renderer {
         is_ui_disabled: bool,
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        git_blame_inline: bool,
         is_ide_mode: bool,
         status_progress_label: Option<&str>,
         status_progress_elapsed: Option<f32>,
@@ -630,6 +633,7 @@ impl Renderer {
                 status_progress_label,
                 status_progress_elapsed,
                 status_progress_value,
+                git_blame_inline,
             );
         }
         self.draw_dialog_dim_if_open(dialog_window_open);

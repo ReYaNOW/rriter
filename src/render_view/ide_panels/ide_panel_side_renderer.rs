@@ -511,6 +511,7 @@ impl Renderer {
         is_ui_disabled: bool,
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        git_blame_inline: bool,
     ) {
         match panel_id {
             crate::app::PanelId::Explorer => self.draw_explorer_panel(
@@ -547,6 +548,7 @@ impl Renderer {
                 hit_mx,
                 hit_my,
                 blink_alpha,
+                git_blame_inline,
             ),
             crate::app::PanelId::ApiClient => self.draw_api_client_panel(
                 panel_x,
@@ -728,6 +730,7 @@ impl Renderer {
         is_ui_disabled: bool,
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        git_blame_inline: bool,
     ) {
         self.git_file_tooltip = None;
 
@@ -1025,6 +1028,7 @@ impl Renderer {
                     is_ui_disabled,
                     blink_alpha,
                     active_api_route,
+                    git_blame_inline,
                 );
                 self.left_panel_overdraw_h = 0.0;
             }

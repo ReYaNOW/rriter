@@ -31,6 +31,7 @@ fn reviewer_stage2_modal_dismiss_click_on_dimmed_toggle_does_not_get_exception()
         None,
         None,
         None,
+        false,
     );
     let (x, y, w, h) = app
         .ui_registry
@@ -120,6 +121,7 @@ fn reviewer_stage2_v2_ddl_dismiss_real_pressed_route_does_not_preserve_toggle_mo
         None,
         None,
         None,
+        false,
     );
     let (x, y, w, h) = app
         .ui_registry
@@ -204,6 +206,7 @@ fn reviewer_stage2_v3_actual_toggle_pressed_route_preserves_both_directions() {
         None,
         None,
         None,
+        false,
     );
     let (x, y, w, h) = app
         .ui_registry
