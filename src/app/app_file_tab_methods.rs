@@ -266,6 +266,7 @@ impl App {
             }
             self.clear_ctrl_definition();
             self.hover = crate::app::mouse::HoverState::default();
+            self.check_git_heads(crate::app::git_baseline::HeadCheckReason::TabActivation);
         } else {
             self.notify_lsp_tab_close(closing_lsp);
             self.tabs.remove(idx);

@@ -172,7 +172,9 @@ impl App {
             {
                 self.inline_git_popup = None;
                 self.inline_git_diff_rx = None;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return true;
             }
             let in_graph_tooltip_body = self

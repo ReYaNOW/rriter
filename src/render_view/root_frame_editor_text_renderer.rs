@@ -424,7 +424,7 @@ impl Renderer {
         let gutter_hit_clip =
             crate::ui_system::UiClipRect::new(0.0, editor_clip_y, self.width, editor_clip_h);
         let gutter_bottom = editor_clip_y + editor_clip_h;
-        if !show_welcome && active_git_diff_state.is_none() {
+        if is_ide_mode && !show_welcome && active_git_diff_state.is_none() {
             let line_numbers_x = gutter_x
                 + crate::render_view::blame_column_width(
                     editor,
@@ -581,7 +581,7 @@ impl Renderer {
         gutter_x: f32,
         column_width: f32,
     ) {
-        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let Some(blame) = editor.git_blame.current_for(editor.git_head.as_ref()) else { return };
         let s = layout.s;
         let column_x = gutter_x.round() + 1.0;
         let strip_color = self.ui.pick(crate::theme::UiRole::GitCommit, [0.42, 0.66, 1.0, 1.0]);
@@ -642,7 +642,7 @@ impl Renderer {
             self.push_rect(column_x, line_top.round(), (3.0 * s).round().max(1.0), self.line_height.round(), color);
 
             if first_visual_segment
-                && previous_buffer_commit != Some(Some(commit_idx))
+                && crate::editor::blame_block_starts(previous_buffer_commit.flatten(), Some(commit_idx))
                 && let Some(label) = blame.column_labels.get(commit_idx as usize)
             {
                 let label_x = (column_x + 6.0 * s).round();
@@ -672,7 +672,7 @@ impl Renderer {
         {
             return;
         }
-        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let Some(blame) = editor.git_blame.current_for(editor.git_head.as_ref()) else { return };
         let mut text_width = 0.0f32;
         for label in &blame.column_labels {
             text_width = text_width.max(self.measure_ui_width_at_pixel_size(label, 18.0 * 0.82));

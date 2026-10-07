@@ -833,14 +833,7 @@ impl Renderer {
                 && inline_blame.line == Some(phys_idx)
                 && !inline_blame.text.is_empty()
                 && inline_blame_dwell.key.is_some_and(|key| key.generation == editor.git_blame.generation)
-                && editor.git_head.as_ref().is_some_and(|snapshot| {
-                    editor.git_blame.key.as_ref().is_some_and(|(repo, path, oid)| {
-                        snapshot.path_in_head
-                            && repo == &snapshot.repo_key
-                            && path == &snapshot.rel_path
-                            && Some(*oid) == snapshot.head_oid
-                    })
-                })
+                && editor.git_blame.current_for(editor.git_head.as_ref()).is_some()
                 && crate::app::git_blame::inline_blame_matches_current(editor, active_tab, inline_blame_dwell)
             {
                 let closing_hint_gap = if closing_hint_width > 0.0 { 4.0 * s } else { 0.0 };

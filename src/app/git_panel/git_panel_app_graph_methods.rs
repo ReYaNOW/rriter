@@ -1,6 +1,12 @@
 pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 102.0;
 pub(crate) const GIT_GRAPH_ROW_H: f32 = 34.0;
 
+fn active_workspace_for_file(file: &std::path::Path, workspaces: &[std::path::PathBuf]) -> Option<usize> {
+    workspaces.iter().position(|workspace_root| {
+        crate::platform::relative_to(file, workspace_root).is_some()
+    })
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GitGraphReveal {
     search: Option<GitGraphRevealSearch>,
@@ -91,13 +97,10 @@ impl App {
                     .then_some((workspace.workspace_idx, root.clone()))
             })
             .or_else(|| {
-                self.ide_workspaces
-                    .iter()
-                    .enumerate()
-                    .find(|(_, workspace_root)| {
-                        crate::platform::relative_to(repo_root, workspace_root).is_some()
-                    })
-                    .map(|(workspace_idx, _)| (workspace_idx, repo_root.to_path_buf()))
+                let active_file = self.file_path.as_deref().map(|path| self.abs_path_for_workspace(path));
+                active_file.as_deref()
+                    .and_then(|path| active_workspace_for_file(path, &self.ide_workspaces))
+                    .map(|workspace_idx| (workspace_idx, repo_root.to_path_buf()))
             });
         let Some((workspace_idx, repo_root)) = workspace_idx else {
             self.show_notice("Рабочая область Git не найдена");
@@ -925,4 +928,11 @@ impl App {
         self.prefetch_git_graph_for_repo(workspace_idx, repo_root, GIT_GRAPH_LIMIT_STEP, false);
     }
 
+}
+
+#[cfg(test)]
+#[test]
+fn reveal_fallback_finds_workspace_containing_active_file() {
+    let workspaces = [std::path::PathBuf::from("/repo/src"), std::path::PathBuf::from("/other")];
+    assert_eq!(active_workspace_for_file(std::path::Path::new("/repo/src/main.rs"), &workspaces), Some(0));
 }

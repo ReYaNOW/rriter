@@ -173,7 +173,7 @@ pub(crate) fn git_blame_porcelain(
         rel_path.as_os_str().to_owned(),
     ];
     let output = git_output(repo_root, &args, "blame", false)?;
-    String::from_utf8(output.stdout).map_err(|_| "Git blame вернул некорректный UTF-8".to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn run_git_checked(

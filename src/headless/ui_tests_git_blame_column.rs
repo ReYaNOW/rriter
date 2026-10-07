@@ -3,6 +3,78 @@ use crate::headless::tests_support::{
 };
 use super::ui_tests_git_blame_inline::{open_and_wait, TEST_HEIGHT, TEST_SCALE, TEST_WIDTH};
 
+#[test]
+fn headless_git_blame_gutter_menu_closes_on_escape() {
+    let (root, file) = git_blame_fixture(&format!("ui-git-blame-escape-{}", std::process::id()));
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    session.app.open_git_blame_column_context_menu(40.0, 40.0);
+    assert!(session.app.editor.git_blame.context_menu.is_some());
+    let lines = run_script(&mut session, b"key escape\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.editor.git_blame.context_menu.is_none());
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_column_refreshes_after_closing_active_tab() {
+    let (root, first_file) = git_blame_fixture(&format!("ui-git-blame-close-refresh-{}", std::process::id()));
+    let second_file = root.join("second.txt");
+    std::fs::write(&second_file, "old committed line\n").unwrap();
+    git(&root, &["add", "second.txt"]);
+    git(&root, &["commit", "-qm", "second file"]);
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = false;
+    for file in [&second_file, &first_file] {
+        let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    }
+    session.app.switch_to_tab(1);
+    session.app.editor.git_blame.column_open = true;
+    session.app.ensure_blame_for_active();
+    wait_until(&mut session, 8000, "initial second-file blame", |session| {
+        session.app.editor.git_blame.current_for(session.app.editor.git_head.as_ref()).is_some()
+    });
+    session.app.switch_to_tab(2);
+
+    std::fs::write(&second_file, "new committed line\n").unwrap();
+    git(&root, &["add", "second.txt"]);
+    git(&root, &["commit", "-qm", "update second file"]);
+    let expected_head = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    session.app.close_tab_at(2);
+    assert_eq!(session.app.active_tab, 1);
+    assert!(session.app.editor.git_blame.current_for(session.app.editor.git_head.as_ref()).is_none());
+    let interim = dump(&mut session);
+    assert!(interim["blame_column"]["visible_labels"].as_array().is_some_and(Vec::is_empty));
+    wait_until(&mut session, 8000, "second-file blame for new HEAD", |session| {
+        session.app.editor.git_head.as_ref().and_then(|head| head.head_oid).is_some_and(|oid| oid.to_string() == expected_head)
+            && session.app.editor.git_blame.current_for(session.app.editor.git_head.as_ref()).is_some()
+    });
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_snapshot_loss_hides_labels_for_dirty_buffer() {
+    let (root, file) = git_blame_fixture(&format!("ui-git-blame-snapshot-loss-{}", std::process::id()));
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = false;
+    open_column_and_wait(&mut session, &file);
+    let lines = run_script(&mut session, b"key end\ntype dirty\nsettle 1000\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.editor.is_dirty());
+    session.app.editor.set_git_head_snapshot(None, None);
+    session.app.ensure_blame_for_active();
+    assert!(session.app.editor.git_blame.blame.is_none());
+    let _ = run_script(&mut session, b"mouse_move 0 0\n");
+    let state = dump(&mut session);
+    assert!(state["blame_column"]["visible_labels"].as_array().is_some_and(Vec::is_empty));
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn block_fixture(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let (root, file) = git_blame_fixture(name);
     std::fs::write(&file, "block alpha unique\nblock beta unique\nblock gamma unique\nblock delta unique\n")

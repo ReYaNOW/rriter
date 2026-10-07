@@ -79,6 +79,11 @@ fn headless_git_blame_skips_untracked_unborn_and_outside_files() {
         assert_eq!(session.app.readonly_notice_until, notice_until_before);
     }
 
+    let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", root.display(), untracked.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    session.app.handle_git_blame_column_menu_item();
+    assert_eq!(session.app.readonly_notice_text, "Git blame недоступен: файла нет в HEAD");
+
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(outside_root);
     let _ = std::fs::remove_dir_all(unborn_root);
@@ -147,6 +152,7 @@ fn headless_git_blame_failed_key_is_attempted_once() {
     let object_path = root.join(".git/objects").join(&head_oid.to_string()[..2]).join(&head_oid.to_string()[2..]);
     std::fs::remove_file(object_path).unwrap();
     session.app.git_blame_inline = true;
+    session.app.editor.git_blame.column_open = true;
     session.app.ensure_blame_for_active();
     assert_eq!(session.app.git_blame_rx.len(), 1);
     wait_until(&mut session, 5000, "forced blame failure", |session| {
@@ -155,6 +161,7 @@ fn headless_git_blame_failed_key_is_attempted_once() {
     assert!(session.app.editor.git_blame.blame.is_none());
     session.app.ensure_blame_for_active();
     assert!(session.app.git_blame_rx.is_empty(), "failed key must not spawn a retry");
+    assert_eq!(session.app.readonly_notice_text, "Git blame недоступен: ошибка git");
     let _ = std::fs::remove_dir_all(root);
 }
 

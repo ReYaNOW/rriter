@@ -185,7 +185,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         let id = element.get("id")?.as_str()?;
         let line = id.strip_prefix("EditorBlameColumnRow(")?.strip_suffix(')')?.parse::<usize>().ok()?;
         let head_line = crate::editor::head_line_for(&app.editor.git_hunks, line)?;
-        let blame = app.editor.git_blame.blame.as_ref()?;
+        let blame = app.editor.git_blame.current_for(app.editor.git_head.as_ref())?;
         let commit_idx = *blame.line_commit.get(head_line)?;
         let previous_commit = if line == 0 {
             None
@@ -193,7 +193,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             crate::editor::head_line_for(&app.editor.git_hunks, line - 1)
                 .and_then(|previous_head| blame.line_commit.get(previous_head).copied())
         };
-        if previous_commit == Some(commit_idx)
+        if !crate::editor::blame_block_starts(previous_commit, Some(commit_idx))
             || blame.commits.get(commit_idx as usize)?.uncommitted
         {
             return None;

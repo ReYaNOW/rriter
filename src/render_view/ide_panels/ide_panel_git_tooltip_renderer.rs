@@ -71,7 +71,7 @@ impl Renderer {
                 return None;
             }
             let head_line = crate::editor::head_line_for(&editor.git_hunks, line)?;
-            let blame = editor.git_blame.blame.as_ref()?;
+            let blame = editor.git_blame.current_for(editor.git_head.as_ref())?;
             let commit_idx = *blame.line_commit.get(head_line)? as usize;
             blame.commits.get(commit_idx).filter(|commit| !commit.uncommitted)
         });
@@ -126,7 +126,7 @@ impl Renderer {
         };
         let Some(anchor) = anchor else { return };
         let Some(head_line) = crate::editor::head_line_for(&editor.git_hunks, line) else { return };
-        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let Some(blame) = editor.git_blame.current_for(editor.git_head.as_ref()) else { return };
         let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
         let Some(commit) = blame.commits.get(commit_idx as usize).filter(|commit| !commit.uncommitted) else { return };
         let key = crate::app::git_blame::InlineDwellKey {
@@ -175,7 +175,7 @@ impl Renderer {
                 author: commit.author.clone(),
                 author_display,
                 author_mail: Some(commit.author_mail.clone()),
-                time: crate::app::git_panel::format_git_absolute_time(commit.author_time, 0),
+                time: crate::app::git_panel::format_git_absolute_time(commit.author_time, commit.author_tz / 60),
                 summary: commit.summary.clone(),
                 message: cached_message.cloned(),
             });
@@ -201,10 +201,12 @@ impl Renderer {
         for line in message.split('\n') {
             message_lines += self.git_graph_tooltip_wrapped_line_count(line, inner_w, scale);
         }
-        message_lines = message_lines.max(1);
         let title_h = 18.0 * s;
         let line_h = 19.0 * s;
-        let popup_h = pad_y + title_h * 3.0 + 5.0 * s + message_lines as f32 * line_h + 8.0 * s + 24.0 * s + pad_y;
+        let fixed_h = pad_y * 2.0 + title_h * 3.0 + 5.0 * s + 8.0 * s + 24.0 * s;
+        let max_message_lines = ((self.height - margin * 2.0 - fixed_h) / line_h).floor().max(0.0) as usize;
+        message_lines = message_lines.max(1).min(max_message_lines);
+        let popup_h = fixed_h + message_lines as f32 * line_h;
         let mut x = annotation.0 + annotation.2;
         if x + popup_w > self.width - margin { x = annotation.0 - popup_w; }
         x = x.clamp(margin, (self.width - popup_w - margin).max(margin)).round();
@@ -240,9 +242,12 @@ impl Renderer {
             color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]), mono: true,
         }, false);
         top += title_h + 5.0 * s;
-        for message_line in message.split('\n') {
+        let mut rendered_message_lines = 0usize;
+        'message: for message_line in message.split('\n') {
+            if rendered_message_lines >= message_lines { break; }
             let mut remaining = message_line;
             while !remaining.is_empty() {
+                if rendered_message_lines >= message_lines { break 'message; }
                 let end = self.git_graph_tooltip_wrap_end(remaining, inner_w, scale);
                 let end = if end == 0 { remaining.char_indices().nth(1).map_or(remaining.len(), |(idx, _)| idx) } else { end };
                 let text = remaining[..end].trim_end();
@@ -251,10 +256,14 @@ impl Renderer {
                     color: self.ui.pick(UiRole::GitCommit, [0.86, 0.90, 1.0, 1.0]), mono: false,
                 }, false);
                 top += line_h;
+                rendered_message_lines += 1;
                 if end >= remaining.len() { break; }
                 remaining = remaining[end..].trim_start();
             }
-            if message_line.is_empty() { top += line_h; }
+            if message_line.is_empty() {
+                top += line_h;
+                rendered_message_lines += 1;
+            }
         }
         top += 5.0 * s;
         let copied = self.git_blame_popup_copied == Some(oid);
