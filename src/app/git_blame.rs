@@ -112,13 +112,13 @@ impl App {
         true
     }
 
-    pub(crate) fn git_blame_inline_wake_at(&self, _now: std::time::Instant) -> Option<std::time::Instant> {
+    pub(crate) fn git_blame_inline_wake_at(&self, now: std::time::Instant) -> Option<std::time::Instant> {
         if !self.git_blame_inline || !self.inline_blame_dwell.text.is_empty() {
             return None;
         }
-        self.inline_blame_dwell.since.map(|since| {
-            since + std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms))
-        })
+        self.inline_blame_dwell.since
+            .map(|since| since + std::time::Duration::from_millis(u64::from(self.git_blame_delay_ms)))
+            .filter(|deadline| *deadline > now)
     }
 
     pub(crate) fn blame_needed(&self) -> bool {

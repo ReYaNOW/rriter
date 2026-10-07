@@ -1,12 +1,14 @@
 //! Git blame inline: HEAD changes, external reloads and on-disk edits.
 
-use super::ui_tests_git_blame_inline::{open_and_wait, TEST_HEIGHT, TEST_SCALE, TEST_WIDTH};
+use super::ui_tests_git_blame_inline::{open_and_wait, TEST_HEIGHT, TEST_SCALE};
 use crate::headless::tests_support::{
     click_ui, dump, git, git_blame_fixture, run_script, wait_until, workspace_with_explorer,
 };
 
+const SYNC_WIDTH: u32 = 1920;
+
 fn open_blame_file(root: &std::path::Path, file: &std::path::Path) -> crate::headless::HeadlessSession {
-    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, root);
+    let mut session = workspace_with_explorer(SYNC_WIDTH, TEST_HEIGHT, TEST_SCALE, root);
     session.app.git_blame_inline = true;
     session.app.git_blame_delay_ms = 100;
     open_and_wait(&mut session, file, 3);
@@ -29,7 +31,6 @@ fn wait_for_disk_text(session: &mut crate::headless::HeadlessSession, file: &std
 }
 
 #[test]
-#[ignore = "bug: annotation stays null after external HEAD refresh; repro: save a changed line, commit outside RRiter, then regain focus (src/app/git_baseline.rs:151-161)"]
 fn headless_git_blame_inline_tracks_external_head_after_saved_edit_and_focus() {
     let (root, file) = git_blame_fixture("ui-git-blame-inline-head-change");
     let mut session = open_blame_file(&root, &file);
@@ -54,7 +55,6 @@ fn headless_git_blame_inline_tracks_external_head_after_saved_edit_and_focus() {
 }
 
 #[test]
-#[ignore = "bug: annotation stays null after Git panel commit; repro: save a changed line, stage and commit it in the Git panel (src/app/git_panel/git_panel_app_graph_methods.rs:181)"]
 fn headless_git_blame_inline_tracks_git_panel_commit() {
     let (root, file) = git_blame_fixture("ui-git-blame-inline-panel-commit");
     let mut session = open_blame_file(&root, &file);
