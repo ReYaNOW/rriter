@@ -185,6 +185,12 @@ impl Renderer {
         let hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameCopyHash, content_x, button_y, button_w, 22.0 * s, mx, my);
         self.push_rounded_rect(content_x.round(), button_y, button_w, 22.0 * s, 4.0 * s, if hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
         self.draw_string_scaled(label, (content_x + 12.0 * s).round(), (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
+        let reveal_label = "Показать в графе";
+        let reveal_x = (content_x + button_w + 8.0 * s).round();
+        let reveal_w = self.measure_ui_width(reveal_label, 0.86) + 24.0 * s;
+        let reveal_hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameShowInGraph, reveal_x, button_y, reveal_w, 22.0 * s, mx, my);
+        self.push_rounded_rect(reveal_x, button_y, reveal_w, 22.0 * s, 4.0 * s, if reveal_hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
+        self.draw_string_scaled(reveal_label, (reveal_x + 12.0 * s).round(), (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
         self.git_blame_popup_details = Some(details);
     }
 

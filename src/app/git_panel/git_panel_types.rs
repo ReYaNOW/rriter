@@ -644,6 +644,8 @@ pub struct GitPanelState {
     pub graph_commit_limit: usize,
     pub graph_has_more: bool,
     pub graph_copied_commit: Option<(usize, usize)>,
+    pub graph_reveal: Option<GitGraphReveal>,
+    pub graph_highlight_oid: Option<String>,
     graph_rx: Vec<GitGraphReceiver>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,
@@ -761,6 +763,8 @@ impl Default for GitPanelState {
             graph_commit_limit: GIT_GRAPH_LIMIT_STEP,
             graph_has_more: false,
             graph_copied_commit: None,
+            graph_reveal: None,
+            graph_highlight_oid: None,
             graph_rx: Vec::new(),
             graph_next_request_id: 1,
             graph_latest_request_id: 0,
@@ -770,6 +774,14 @@ impl Default for GitPanelState {
             graph_refresh_after_status: false,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitGraphReveal {
+    pub workspace_idx: usize,
+    pub repo_root: PathBuf,
+    pub oid: String,
+    pub last_requested_offset: Option<usize>,
 }
 
 impl GitPanelState {

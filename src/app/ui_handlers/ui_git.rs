@@ -234,9 +234,7 @@ impl App {
             | UiId::GitLogsBody
             | UiId::GitLogsScroll
             | UiId::GitWorkspaceScroll => {
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.handle_git_panel_passive_click(id);
             }
             UiId::GitGraphCopyCommit(workspace_idx, commit_idx) => {
                 self.copy_git_graph_commit(workspace_idx, commit_idx);
@@ -250,8 +248,8 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::GitBlameCopyHash => {
-                self.copy_git_blame_commit_hash();
+            UiId::GitBlameCopyHash | UiId::GitBlameShowInGraph => {
+                self.handle_git_blame_popup_action(id);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

@@ -193,7 +193,10 @@ impl App {
             if in_blame_popup_body
                 && button == winit::event::MouseButton::Left
                 && state == ElementState::Pressed
-                && clicked_id != Some(crate::ui_system::UiId::GitBlameCopyHash)
+                && !matches!(
+                    clicked_id,
+                    Some(crate::ui_system::UiId::GitBlameCopyHash | crate::ui_system::UiId::GitBlameShowInGraph)
+                )
             {
                 self.window.as_ref().unwrap().request_redraw();
                 return true;
