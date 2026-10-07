@@ -1340,6 +1340,7 @@ pub struct App {
     pub inline_git_diff_rx:
         Option<crate::ui_waker::OneShot<crate::app::git_diff::InlineGitDiffEvent>>,
     pub inline_git_popup: Option<InlineGitPopup>,
+    pub(crate) inline_blame_dwell: crate::app::git_blame::InlineBlameDwell,
     pub readonly_notice_until: Option<Instant>,
     pub readonly_notice_text: String,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме

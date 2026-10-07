@@ -333,6 +333,7 @@ impl App {
             git_blame_message_rx: Vec::new(),
             inline_git_diff_rx: None,
             inline_git_popup: None,
+            inline_blame_dwell: crate::app::git_blame::InlineBlameDwell::default(),
             readonly_notice_until: None,
             readonly_notice_text: "Файл открыт в режиме только чтение".to_string(),
             lsp: None,

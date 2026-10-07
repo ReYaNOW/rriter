@@ -185,6 +185,7 @@ impl App {
                         .is_some_and(|until| std::time::Instant::now() < until),
                     &self.readonly_notice_text,
                     self.inline_git_popup.as_ref(),
+                    &self.inline_blame_dwell,
                     &self.pdf_engine,
                     self.pdf_dark_pages,
                     &self.markdown_media,

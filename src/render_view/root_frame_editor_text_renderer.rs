@@ -47,6 +47,7 @@ impl Renderer {
         telemetry_root_phases: &mut [f32; 5],
         telemetry_editor_time: &mut f32,
         inline_git_popup_line: Option<usize>,
+        inline_blame_dwell: &crate::app::git_blame::InlineBlameDwell,
     ) -> RootFrameEditorText<'a> {
         let RootFramePanelLayout {
             visible_cursor_line,
@@ -238,6 +239,8 @@ impl Renderer {
                 python_inlay_hints,
                 closing_hints,
                 inline_git_popup_line,
+                active_tab,
+                inline_blame_dwell,
             );
             self.flush();
             unsafe {
