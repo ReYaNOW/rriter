@@ -4,11 +4,11 @@ use crate::headless::tests_support::{
 };
 use std::path::Path;
 
-const TEST_WIDTH: u32 = 1280;
-const TEST_HEIGHT: u32 = 720;
-const TEST_SCALE: f32 = 4.0 / 3.0;
+pub(super) const TEST_WIDTH: u32 = 1280;
+pub(super) const TEST_HEIGHT: u32 = 720;
+pub(super) const TEST_SCALE: f32 = 4.0 / 3.0;
 
-fn open_and_wait(session: &mut crate::headless::HeadlessSession, file: &Path, expected_lines: usize) {
+pub(super) fn open_and_wait(session: &mut crate::headless::HeadlessSession, file: &Path, expected_lines: usize) {
     let lines = run_script(session, format!("open {}\n", file.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     wait_until(session, 8000, "Git blame result", |session| {
