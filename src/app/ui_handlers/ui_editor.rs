@@ -146,6 +146,9 @@ impl App {
             UiId::EditorGitHunk(hunk_idx, clicked_line) => {
                 self.show_inline_git_hunk_popup(hunk_idx, clicked_line.saturating_add(1));
             }
+            UiId::EditorBlameColumnRow(line) => {
+                self.reveal_git_blame_line_in_graph(line);
+            }
             UiId::InlineGitPrevHunk => {
                 self.jump_inline_git_hunk(-1);
             }

@@ -678,6 +678,9 @@ impl App {
             active_tab_is_git_diff,
             self.is_ide_mode,
             panel_left_w,
+            crate::render_view::blame_column_width(
+                &self.editor, self.is_ide_mode, self.show_welcome, active_tab_is_git_diff, scale,
+            ),
             scale,
         );
         let content_x =

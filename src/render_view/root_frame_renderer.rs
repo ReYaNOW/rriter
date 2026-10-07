@@ -205,6 +205,8 @@ impl Renderer {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
         }
 
+        self.prepare_git_blame_column_width(editor);
+
         let mut wants_pointer = false;
 
         let layout = self.draw_root_panel_layout(
@@ -453,6 +455,7 @@ impl Renderer {
                 tab_tooltip,
                 ide_panel,
                 editor,
+                active_tab,
                 ui_registry,
                 is_ide_mode,
                 panel_left_w,
@@ -604,6 +607,7 @@ impl Renderer {
             tab_tooltip,
             ide_panel,
             editor,
+            active_tab,
             ui_registry,
             is_ide_mode,
             panel_left_w,

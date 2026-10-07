@@ -200,7 +200,7 @@ impl App {
                     renderer.git_blame_popup_hover.map(|popup| (popup.key, popup.oid))
                 });
                 if blame_popup_after.is_some() && blame_popup_after != blame_popup_before {
-                    self.request_inline_blame_commit_message();
+                    self.request_git_blame_popup_message();
                 }
 
                 self.target_sticky_lines = target_sticky;

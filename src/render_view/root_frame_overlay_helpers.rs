@@ -109,6 +109,7 @@ impl Renderer {
         &mut self,
         ide_panel: &crate::app::IdePanelState,
         editor: &crate::editor::Editor,
+        active_tab: usize,
         ui_registry: &mut crate::ui_system::UiRegistry,
         is_ide_mode: bool,
         panel_left_w: f32,
@@ -151,6 +152,22 @@ impl Renderer {
             s,
         );
 
+        if let Some(menu) = editor.git_blame.context_menu {
+            ui_registry.mark_overlay_start();
+            wants_pointer |= self.draw_animated_context_menu(
+                menu.x,
+                menu.y,
+                menu.opened_at,
+                1,
+                |_| editor.git_blame.column_context_menu_label(),
+                |_| crate::ui_system::UiId::GitBlameColumnMenuItem,
+                |_| false,
+                ui_registry,
+                overlay_mx,
+                overlay_my,
+            );
+        }
+
         if modal_overlay_open {
             self.reset_git_file_tooltip_overlay();
             self.git_blame_popup_hover = None;
@@ -158,7 +175,17 @@ impl Renderer {
             self.git_blame_popup_details = None;
         } else {
             self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
-            if let Some(dwell) = inline_blame_dwell {
+            let hovered_blame_column = matches!(
+                ui_registry.hovered(),
+                Some(crate::ui_system::UiId::EditorBlameColumnRow(_))
+            ) || self.git_blame_popup_hover.is_some_and(|hover| {
+                matches!(hover.source, crate::renderer::GitBlamePopupSource::Column)
+                    && ui_mx >= hover.popup.0 && ui_mx <= hover.popup.0 + hover.popup.2
+                    && ui_my >= hover.popup.1 && ui_my <= hover.popup.1 + hover.popup.3
+            });
+            if hovered_blame_column && editor.git_blame.column_open {
+                self.draw_git_blame_column_popup(editor, active_tab, ui_registry, ui_mx, ui_my, s);
+            } else if let Some(dwell) = inline_blame_dwell.filter(|dwell| dwell.key.is_some()) {
                 self.draw_git_blame_commit_popup(editor, dwell, ui_registry, ui_mx, ui_my, s);
             } else {
                 self.git_blame_popup_hover = None;
@@ -255,6 +282,7 @@ impl Renderer {
         let wants_pointer = self.draw_root_ide_final_overlays(
             ide_panel,
             editor,
+            0,
             ui_registry,
             true,
             panel_left_w,
@@ -657,6 +685,7 @@ impl Renderer {
         tab_tooltip: Option<(String, f32, f32)>,
         ide_panel: &crate::app::IdePanelState,
         editor: &crate::editor::Editor,
+        active_tab: usize,
         ui_registry: &mut crate::ui_system::UiRegistry,
         is_ide_mode: bool,
         panel_left_w: f32,
@@ -692,6 +721,7 @@ impl Renderer {
         wants_pointer |= self.draw_root_ide_final_overlays(
             ide_panel,
             editor,
+            active_tab,
             ui_registry,
             is_ide_mode,
             panel_left_w,

@@ -150,6 +150,7 @@ impl Renderer {
         wants_pointer |= self.draw_root_ide_final_overlays(
             ide_panel,
             editor,
+            active_tab,
             ui_registry,
             true,
             panel_left_w,
@@ -366,6 +367,7 @@ impl Renderer {
         wants_pointer |= self.draw_root_ide_final_overlays(
             ide_panel,
             editor,
+            active_tab,
             ui_registry,
             true,
             panel_left_w,

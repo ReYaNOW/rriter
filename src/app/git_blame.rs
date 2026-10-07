@@ -24,7 +24,7 @@ pub(crate) fn inline_blame_matches_current(
     dwell: &InlineBlameDwell,
 ) -> bool {
     let line = editor.line_offsets.partition_point(|&offset| offset <= editor.cursor).saturating_sub(1);
-    dwell.key.is_some_and(|key| {
+    editor.git_blame.current_for(editor.git_head.as_ref()).is_some() && dwell.key.is_some_and(|key| {
         key.tab == active_tab
             && key.line == line
             && key.version == editor.version
@@ -61,6 +61,62 @@ pub(crate) struct CommitMessageReceiver {
 }
 
 impl App {
+    pub(crate) fn open_git_blame_column_context_menu(&mut self, x: f32, y: f32) {
+        self.editor.git_blame.context_menu = Some(crate::editor::GitBlameContextMenu {
+            x,
+            y,
+            opened_at: std::time::Instant::now(),
+        });
+    }
+
+    pub(crate) fn open_git_blame_context_menu_for_hit(
+        &mut self,
+        id: crate::ui_system::UiId,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        if id != crate::ui_system::UiId::EditorLineNumbers {
+            return false;
+        }
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let (x, y) = crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
+        self.ide_panel.database.context_menu = None;
+        self.ide_panel.file_tree_context_menu = None;
+        self.open_git_blame_column_context_menu(x, y);
+        true
+    }
+
+    pub(crate) fn handle_git_blame_column_menu_item(&mut self) {
+        self.editor.git_blame.context_menu = None;
+        self.editor.git_blame.column_open = !self.editor.git_blame.column_open;
+        if self.editor.git_blame.column_open {
+            self.ensure_blame_for_active();
+            if let Some(notice) = self.git_blame_unavailable_notice() {
+                self.show_notice(notice);
+            }
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn git_blame_unavailable_notice(&self) -> Option<&'static str> {
+        let Some(snapshot) = self.editor.git_head.as_ref() else {
+            return Some("Git blame недоступен: файл не в репозитории");
+        };
+        if snapshot.head_oid.is_none() || !snapshot.path_in_head {
+            return Some("Git blame недоступен: файла нет в HEAD");
+        }
+        let failed = self.editor.git_blame.key.as_ref().is_some_and(|key| {
+            self.editor.git_blame.failed_key.as_ref() == Some(key)
+        });
+        failed.then_some("Git blame недоступен: ошибка git")
+    }
+
+    pub(crate) fn close_git_blame_column_context_menu(&mut self) {
+        self.editor.git_blame.context_menu = None;
+    }
+
     pub(crate) fn copy_git_blame_commit_hash(&mut self) {
         let Some(oid) = self.renderer.as_ref().and_then(|renderer| {
             renderer.git_blame_popup_hover.map(|hover| hover.oid)
@@ -73,6 +129,17 @@ impl App {
         }
     }
 
+    pub(crate) fn reveal_git_blame_line_in_graph(&mut self, line: usize) {
+        let Some(snapshot) = self.editor.git_head.as_ref() else { return };
+        let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, line) else { return };
+        let Some(blame) = self.editor.git_blame.current_for(self.editor.git_head.as_ref()) else { return };
+        let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
+        let Some(commit) = blame.commits.get(commit_idx as usize).filter(|commit| !commit.uncommitted) else { return };
+        let repo_root = snapshot.repo_root.clone();
+        let oid = commit.oid.to_string();
+        self.reveal_commit_in_graph(&repo_root, &oid);
+    }
+
     pub(crate) fn request_inline_blame_commit_message(&mut self) {
         let Some(key) = self.inline_blame_dwell.key else { return };
         if key.generation != self.editor.git_blame.generation
@@ -83,12 +150,21 @@ impl App {
             return;
         }
         let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, key.line) else { return };
-        let Some(blame) = self.editor.git_blame.blame.as_ref() else { return };
+        let Some(blame) = self.editor.git_blame.current_for(self.editor.git_head.as_ref()) else { return };
         let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
         let Some(commit) = blame.commits.get(commit_idx as usize) else { return };
         if !commit.uncommitted {
             self.request_commit_message(commit.oid);
         }
+    }
+
+    pub(crate) fn request_git_blame_popup_message(&mut self) {
+        let Some(oid) = self.renderer.as_ref().and_then(|renderer| {
+            renderer.git_blame_popup_hover.map(|hover| hover.oid)
+        }) else {
+            return;
+        };
+        self.request_commit_message(oid);
     }
 
     pub(crate) fn toggle_git_blame_inline(&mut self) {
@@ -130,7 +206,7 @@ impl App {
         if *repo != snapshot.repo_key || *path != snapshot.rel_path || Some(*oid) != snapshot.head_oid || !snapshot.path_in_head {
             return false;
         }
-        let Some(blame) = self.editor.git_blame.blame.as_ref() else { return false };
+        let Some(blame) = self.editor.git_blame.current_for(self.editor.git_head.as_ref()) else { return false };
         let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, line) else { return false };
         let Some(commit_index) = blame.line_commit.get(head_line).copied() else { return false };
         let Some(commit) = blame.commits.get(commit_index as usize) else { return false };
@@ -172,9 +248,11 @@ impl App {
             return;
         }
         let Some(snapshot) = self.editor.git_head.clone() else {
+            self.editor.git_blame.invalidate();
             return;
         };
         let Some(oid) = snapshot.head_oid.filter(|_| snapshot.path_in_head) else {
+            self.editor.git_blame.invalidate();
             return;
         };
         let key = BlameKey { repo_root: snapshot.repo_root, repo_key: snapshot.repo_key, rel_path: snapshot.rel_path, oid };
@@ -186,9 +264,16 @@ impl App {
                 return;
             }
         } else {
+            let same_file = state.key.as_ref().is_some_and(|(repo, path, _)| {
+                repo == &key.repo_key && path == &key.rel_path
+            });
             state.generation = state.generation.wrapping_add(1);
             state.key = Some((key.repo_key.clone(), key.rel_path.clone(), key.oid));
             state.blame = None;
+            if !same_file {
+                state.column_width = 0.0;
+                state.column_width_generation = None;
+            }
             state.messages.clear();
             state.failed_key = None;
             state.pending = false;
@@ -229,7 +314,11 @@ impl App {
             Err(error) => {
                 self.editor.git_blame.pending = false;
                 self.editor.git_blame.failed_key = self.editor.git_blame.key.clone();
-                self.show_notice(format!("Не удалось запустить Git blame: {error}"));
+                if self.editor.git_blame.column_open {
+                    self.show_notice("Git blame недоступен: ошибка git");
+                } else {
+                    self.show_notice(format!("Не удалось запустить Git blame: {error}"));
+                }
             }
         }
     }
@@ -242,6 +331,7 @@ impl App {
         }
         self.sync_active_tab();
         let mut changed = false;
+        let mut show_error_notice = false;
         let mut pending = Vec::with_capacity(self.git_blame_rx.len());
         for mut receiver in std::mem::take(&mut self.git_blame_rx) {
             match receiver.rx.poll() {
@@ -253,6 +343,7 @@ impl App {
                 crate::ui_waker::OneShotState::Ready(event) => {
                     let Some(state) = self.matching_blame_state_mut(&event.key, event.generation) else { continue };
                     state.pending = false;
+                    let failed = event.result.is_err();
                     match event.result {
                         Ok(blame) => {
                             state.blame = Some(blame);
@@ -264,12 +355,18 @@ impl App {
                             println!("[GIT blame] {error}");
                         }
                     }
+                    show_error_notice |= failed && state.column_open && state.key.as_ref().is_some_and(|key| {
+                        state.failed_key.as_ref() == Some(key)
+                    });
                     changed = true;
                 }
             }
         }
         self.git_blame_rx = pending;
         self.sync_active_tab();
+        if show_error_notice {
+            self.show_notice("Git blame недоступен: ошибка git");
+        }
         if changed && let Some(window) = self.window.as_ref() { window.request_redraw(); }
         changed
     }

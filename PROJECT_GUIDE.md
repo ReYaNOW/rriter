@@ -1467,6 +1467,7 @@ Root:
 * `src/headless/ui_tests_git_blame_toggle.rs` -> headless UI tests for Git blame toggle/status persistence, delay adjustment, and zero-delay annotations.
 * `src/headless/ui_tests_git_blame_popup.rs` -> headless UI tests for Git blame commit details popup, clipboard copy, and hover dismissal.
 * `src/headless/ui_tests_git_blame_graph.rs` -> headless UI test for revealing a blame commit beyond the first Git graph page.
+* `src/headless/ui_tests_git_blame_column.rs` -> headless UI tests for blame column labels, modified lines, gutter width, popup, graph reveal, tab state, and external reload.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.

@@ -38,6 +38,49 @@ fn open_popup_fixture() -> (std::path::PathBuf, std::path::PathBuf, HeadlessSess
 }
 
 #[test]
+fn headless_git_blame_long_message_popup_keeps_actions_on_screen() {
+    let (root, file) = git_blame_fixture(&format!("ui-git-blame-long-popup-{}", std::process::id()));
+    let message = (0..60).map(|line| format!("long body line {line}")).collect::<Vec<_>>().join("\n");
+    std::fs::write(&file, "updated line one\nupdated line two\nupdated line three\n")
+        .unwrap_or_else(|error| panic!("write long-message blame fixture: {error}"));
+    git(&root, &["add", "blame.txt"]);
+    git(&root, &["commit", "-qm", &message]);
+    let mut session = workspace_with_explorer(1920, 1080, 1.0, &root);
+    session.app.git_blame_inline = true;
+    session.app.git_blame_delay_ms = 0;
+    let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 8000, "long-message blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+    });
+    session.app.editor.cursor = session.app.editor.line_offsets[0];
+    let now = Instant::now();
+    session.app.tick_git_blame_inline(now);
+    session.app.tick_git_blame_inline(now);
+    let _ = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let inline = dump(&mut session)["blame_inline"].clone();
+    let x = inline["x"].as_f64().unwrap_or_default() + inline["w"].as_f64().unwrap_or_default() * 0.5;
+    let y = inline["y"].as_f64().unwrap_or_default() + inline["h"].as_f64().unwrap_or_default() * 0.5;
+    let _ = run_script(&mut session, format!("mouse_move {x} {y}\n").as_bytes());
+    wait_until(&mut session, 5000, "long popup full message", |session| {
+        session.app.renderer.as_ref().is_some_and(|renderer| {
+            renderer.git_blame_popup_details.as_ref().is_some_and(|details| details.message.is_some())
+        })
+    });
+    let ui = dump(&mut session);
+    let popup = session.app.renderer.as_ref().and_then(|renderer| renderer.git_blame_popup_hover).unwrap().popup;
+    let buttons = ui["ui"].as_array().unwrap();
+    for id in ["GitBlameCopyHash", "GitBlameShowInGraph"] {
+        let rect = buttons.iter().find(|element| element["id"] == id).unwrap()["rect"].as_array().unwrap();
+        let bottom = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap();
+        assert!(bottom <= 1080.0, "{id} off-screen: popup={popup:?}, rect={rect:?}");
+    }
+    assert!(popup.1 + popup.3 <= 1080.0, "popup off-screen: {popup:?}");
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn headless_git_blame_commit_popup_shows_full_details_copies_hash_and_dismisses() {
     let (root, _file, mut session) = open_popup_fixture();
     let _ = run_script(&mut session, b"mouse_move 0 0\ndump\n");

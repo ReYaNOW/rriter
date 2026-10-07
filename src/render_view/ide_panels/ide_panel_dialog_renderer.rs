@@ -1136,7 +1136,7 @@ impl Renderer {
             self.draw_string_scaled_stable(
                 label_at(idx),
                 x + pad_x,
-                row_y + row_h / 2.0 + 5.0 * s,
+                (row_y + (row_h * 0.5).round() + (5.0 * s).round()).round(),
                 self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
                 0.88,
             );

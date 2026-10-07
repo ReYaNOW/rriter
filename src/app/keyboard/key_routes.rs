@@ -26,6 +26,7 @@ pub(super) enum RouteId {
     DatabaseDdlHover,
     ProjectSearchHelp,
     GitInlinePopup,
+    GitBlameMenu,
     HoverClear,
     GitCommitMenus,
     ApiMockConstraintMenu,
@@ -84,6 +85,7 @@ pub(super) const KEY_ROUTES: &[(RouteId, KeyRouteFn)] = &[
     (RouteId::DatabaseDdlHover, route_database_ddl_hover),
     (RouteId::ProjectSearchHelp, route_project_search_help),
     (RouteId::GitInlinePopup, route_git_inline_popup),
+    (RouteId::GitBlameMenu, route_git_blame_menu),
     (RouteId::HoverClear, route_hover_clear),
     (RouteId::GitCommitMenus, route_git_commit_menus),
     (RouteId::ApiMockConstraintMenu, route_api_mock_constraint_menu),
@@ -443,6 +445,19 @@ fn route_git_inline_popup(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
         && ctx.key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
         && (app.inline_git_popup.take().is_some() || app.inline_git_diff_rx.take().is_some())
     {
+        app.request_redraw();
+        true
+    } else {
+        false
+    }
+}
+
+fn route_git_blame_menu(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
+    if ctx.key_event.state == ElementState::Pressed
+        && ctx.key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+        && app.editor.git_blame.context_menu.is_some()
+    {
+        app.close_git_blame_column_context_menu();
         app.request_redraw();
         true
     } else {

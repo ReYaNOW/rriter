@@ -222,9 +222,16 @@ pub struct CommitDetails {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) enum GitBlamePopupSource {
+    Inline,
+    Column,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct GitBlamePopupHover {
     pub oid: git2::Oid,
     pub key: crate::app::git_blame::InlineDwellKey,
+    pub source: GitBlamePopupSource,
     pub annotation: (f32, f32, f32, f32),
     pub popup: (f32, f32, f32, f32),
 }

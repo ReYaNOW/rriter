@@ -381,6 +381,9 @@ impl Renderer {
             active_tab_is_git_diff_for_layout,
             is_ide_mode,
             panel_left_w,
+            crate::render_view::blame_column_width(
+                editor, is_ide_mode, show_welcome, active_tab_is_git_diff_for_layout, s,
+            ),
             s,
         );
         if (self.left_padding - target_padding).abs() > 0.5 {

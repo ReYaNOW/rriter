@@ -45,6 +45,7 @@ pub(crate) fn editor_left_padding_for(
     active_tab_is_git_diff: bool,
     is_ide_mode: bool,
     panel_left_w: f32,
+    blame_column_w: f32,
     scale: f32,
 ) -> f32 {
     let sidebar_w = if is_ide_mode { 48.0 * scale } else { 0.0 };
@@ -57,9 +58,24 @@ pub(crate) fn editor_left_padding_for(
     (30.0 * scale
         + digits as f32 * 10.0 * scale
         + gutter_extra
+        + blame_column_w
         + sidebar_w
         + panel_left_w)
         .round()
+}
+
+pub(crate) fn blame_column_width(
+    editor: &Editor,
+    is_ide_mode: bool,
+    show_welcome: bool,
+    active_tab_is_git_diff: bool,
+    scale: f32,
+) -> f32 {
+    if editor.git_blame.column_open && is_ide_mode && !show_welcome && !active_tab_is_git_diff {
+        editor.git_blame.column_width * scale
+    } else {
+        0.0
+    }
 }
 
 pub(crate) fn ide_tab_bar_height(show_welcome: bool, is_ide_mode: bool, scale: f32) -> f32 {
@@ -1022,19 +1038,21 @@ mod tests {
     #[test]
     fn editor_left_padding_tracks_line_digits_panel_and_fractional_scale() {
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            let closed_999 = editor_left_padding_for(999, false, true, 0.0, scale);
-            let closed_1000 = editor_left_padding_for(1000, false, true, 0.0, scale);
+            let closed_999 = editor_left_padding_for(999, false, true, 0.0, 0.0, scale);
+            let closed_1000 = editor_left_padding_for(1000, false, true, 0.0, 0.0, scale);
             assert_eq!(
                 closed_1000 - closed_999,
                 (10.0 * scale).round(),
                 "line-number digit boundary must move the shared text origin"
             );
 
-            let open = editor_left_padding_for(1000, false, true, 240.0 * scale, scale);
+            let open = editor_left_padding_for(1000, false, true, 240.0 * scale, 0.0, scale);
             assert_eq!(open - closed_1000, (240.0 * scale).round());
 
-            let git = editor_left_padding_for(1000, true, true, 0.0, scale);
+            let git = editor_left_padding_for(1000, true, true, 0.0, 0.0, scale);
             assert_eq!(git - closed_1000, (4.0 * scale).round());
+            let blame = editor_left_padding_for(1000, false, true, 0.0, 260.0 * scale, scale);
+            assert_eq!(blame - closed_1000, (260.0 * scale).round());
         }
     }
 }

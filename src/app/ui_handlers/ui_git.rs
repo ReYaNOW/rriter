@@ -212,6 +212,7 @@ impl App {
                 }
             }
             UiId::GitBlameToggle => self.toggle_git_blame_inline(),
+            UiId::GitBlameColumnMenuItem => self.handle_git_blame_column_menu_item(),
             UiId::GitLogsClear => {
                 self.ide_panel.git.clear_git_logs();
                 if let Some(renderer) = self.renderer.as_mut() {

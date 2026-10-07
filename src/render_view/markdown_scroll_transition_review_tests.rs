@@ -713,6 +713,7 @@ pub(crate) mod reviewer_stage2_integration {
                 false,
                 false,
                 0.0,
+                0.0,
                 scale,
             );
             let frame_x = crate::render_view::markdown_read::markdown_read_frame_x_for_editor_text(
@@ -737,6 +738,7 @@ pub(crate) mod reviewer_stage2_integration {
                 false,
                 true,
                 panel_left_w,
+                0.0,
                 scale,
             );
             let ide_frame_x =

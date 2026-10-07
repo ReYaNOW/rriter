@@ -9,6 +9,7 @@ pub struct BlameCommit {
     pub author: String,
     pub author_mail: String,
     pub author_time: i64,
+    pub author_tz: i32,
     pub summary: String,
     pub uncommitted: bool,
 }
@@ -30,6 +31,46 @@ pub struct GitBlameState {
     pub failed_key: Option<(crate::platform::PathKey, PathBuf, git2::Oid)>,
     pub messages: Vec<(git2::Oid, String)>,
     pub column_open: bool,
+    pub column_width: f32,
+    pub column_width_generation: Option<u64>,
+    pub context_menu: Option<GitBlameContextMenu>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GitBlameContextMenu {
+    pub x: f32,
+    pub y: f32,
+    pub opened_at: std::time::Instant,
+}
+
+impl GitBlameState {
+    pub fn current_for(&self, head: Option<&GitHeadSnapshot>) -> Option<&GitBlame> {
+        let head = head.filter(|head| head.path_in_head)?;
+        let oid = head.head_oid?;
+        self.key.as_ref().filter(|(repo, path, key_oid)| {
+            repo == &head.repo_key && path == &head.rel_path && *key_oid == oid
+        })?;
+        self.blame.as_ref()
+    }
+
+    pub fn invalidate(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.key = None;
+        self.blame = None;
+        self.pending = false;
+        self.failed_key = None;
+        self.messages.clear();
+        self.column_width = 0.0;
+        self.column_width_generation = None;
+    }
+
+    pub fn column_context_menu_label(&self) -> &'static str {
+        if self.column_open {
+            "Скрыть Git blame"
+        } else {
+            "Показать Git blame"
+        }
+    }
 }
 
 pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
@@ -76,6 +117,7 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
         let mut author = None;
         let mut author_mail = None;
         let mut author_time = None;
+        let mut author_tz = 0;
         let mut summary = None;
         let mut content_found = false;
         for line in lines.by_ref() {
@@ -95,6 +137,7 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
                         author,
                         author_mail,
                         author_time,
+                        author_tz,
                         summary,
                         uncommitted: oid.is_zero(),
                     });
@@ -127,6 +170,7 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
                         author_mail = Some(value.trim_start_matches('<').trim_end_matches('>').to_owned())
                     }
                     "author-time" if existing.is_none() => author_time = value.parse::<i64>().ok(),
+                    "author-tz" if existing.is_none() => author_tz = parse_timezone(value),
                     "summary" if existing.is_none() => summary = Some(value.to_owned()),
                     _ => {}
                 }
@@ -145,7 +189,7 @@ pub fn parse_porcelain(out: &str) -> Option<GitBlame> {
     }
     let line_commit: Vec<u32> = line_commit.into_iter().collect::<Option<_>>()?;
     let age_ranks = age_rank(&commits.iter().map(|commit| commit.author_time).collect::<Vec<_>>());
-    let column_labels = commits.iter().map(column_label).collect();
+    let column_labels: Vec<String> = commits.iter().map(column_label).collect();
     Some(GitBlame { commits, line_commit, age_ranks, column_labels })
 }
 
@@ -162,17 +206,6 @@ pub fn head_line_for(hunks: &[LineDiffHunk], line: usize) -> Option<usize> {
         return line.checked_sub(hunk.after_end)?.checked_add(hunk.before_end);
     }
     Some(line)
-}
-
-pub fn blame_blocks(line_commits: &[Option<u32>]) -> Vec<bool> {
-    let mut starts = Vec::with_capacity(line_commits.len());
-    let mut previous = None;
-    for (index, current) in line_commits.iter().copied().enumerate() {
-        let starts_block = index == 0 || current.is_none() || current != previous || previous.is_none();
-        starts.push(starts_block);
-        previous = current;
-    }
-    starts
 }
 
 pub fn age_rank(times: &[i64]) -> Vec<f32> {
@@ -208,11 +241,30 @@ pub fn truncate_to_width(text: &str, width: usize) -> String {
 }
 
 fn column_label(commit: &BlameCommit) -> String {
-    let days = commit.author_time.div_euclid(86_400);
+    let local_time = commit.author_time.saturating_add(i64::from(commit.author_tz));
+    let days = local_time.div_euclid(86_400);
     let (year, month, day) = unix_days_to_date(days);
     let date = format!("{day:02}.{month:02}.{:02} ", year.rem_euclid(100));
     let author = truncate_to_width(&commit.author, 24usize.saturating_sub(date.chars().count()));
     truncate_to_width(&format!("{date}{author}"), 24)
+}
+
+fn parse_timezone(value: &str) -> i32 {
+    let bytes = value.as_bytes();
+    if bytes.len() != 5 || !matches!(bytes[0], b'+' | b'-')
+        || !bytes[1..].iter().all(u8::is_ascii_digit)
+    {
+        return 0;
+    }
+    let hours = i32::from(bytes[1] - b'0') * 10 + i32::from(bytes[2] - b'0');
+    let minutes = i32::from(bytes[3] - b'0') * 10 + i32::from(bytes[4] - b'0');
+    if hours > 23 || minutes > 59 { return 0; }
+    let offset = hours * 3600 + minutes * 60;
+    if bytes[0] == b'-' { -offset } else { offset }
+}
+
+pub fn blame_block_starts(previous: Option<u32>, current: Option<u32>) -> bool {
+    current.is_none() || previous != current
 }
 
 fn unix_days_to_date(days: i64) -> (i64, i64, i64) {
@@ -295,7 +347,10 @@ mod tests {
 
     #[test]
     fn blocks_age_and_text_formatting_are_stable() {
-        assert_eq!(blame_blocks(&[Some(1), Some(1), Some(2), None, Some(2)]), vec![true, false, true, true, true]);
+        let lines = [Some(1), Some(1), Some(2), None, Some(2)];
+        assert_eq!(lines.iter().enumerate().map(|(index, current)| {
+            blame_block_starts(index.checked_sub(1).and_then(|previous| lines[previous]), *current)
+        }).collect::<Vec<_>>(), vec![true, false, true, true, true]);
         assert_eq!(age_rank(&[10, 20, 20]), vec![0.0, 1.0, 1.0]);
         assert_eq!(age_rank(&[10, 20, 1000]), vec![0.0, 0.5, 1.0]);
         assert_eq!(age_rank(&[10, 20, 20, 1000]), vec![0.0, 0.5, 0.5, 1.0]);
@@ -311,6 +366,24 @@ mod tests {
         let blame = parse_porcelain(&output).expect("valid porcelain");
         assert_eq!(blame.column_labels.len(), 1);
         assert!(blame.column_labels[0].chars().count() <= 24);
+        assert!(blame.column_labels[0].starts_with("14.11.23 "));
+    }
+
+    #[test]
+    fn porcelain_author_timezone_formats_column_date_and_falls_back_when_invalid() {
+        let id = oid('a');
+        let output = format!("{id} 1 1 1\nauthor Ada\nauthor-mail <ada@example.com>\nauthor-time 1700000000\nauthor-tz +0300\nsummary subject\nfilename file.rs\n\tline\n");
+        let blame = parse_porcelain(&output).expect("valid porcelain");
+        assert_eq!(blame.commits[0].author_tz, 10_800);
+        assert!(blame.column_labels[0].starts_with("15.11.23 "));
+        assert_eq!(
+            crate::app::git_panel::format_git_absolute_time(blame.commits[0].author_time, blame.commits[0].author_tz / 60),
+            "15 ноября 2023 г. в 01:13"
+        );
+
+        let malformed = output.replace("+0300", "+3x00");
+        let blame = parse_porcelain(&malformed).expect("malformed timezone falls back");
+        assert_eq!(blame.commits[0].author_tz, 0);
         assert!(blame.column_labels[0].starts_with("14.11.23 "));
     }
 
