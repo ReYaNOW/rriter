@@ -166,7 +166,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             json!({"id": format!("{id:?}"), "kind": kind, "rect": rect, "overlay": overlay})
         })
         .collect();
-    let blame_inline = app.editor.git_blame.inline_text.as_str();
+    let blame_inline = app.inline_blame_dwell.text.as_str();
     let blame_rect = ui.iter().find_map(|element| {
         (element.get("id").and_then(Value::as_str) == Some("EditorBlameInline"))
             .then(|| element.get("rect").cloned().unwrap_or(Value::Null))

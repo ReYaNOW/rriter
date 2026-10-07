@@ -30,10 +30,6 @@ pub struct GitBlameState {
     pub failed_key: Option<(crate::platform::PathKey, PathBuf, git2::Oid)>,
     pub messages: Vec<(git2::Oid, String)>,
     pub column_open: bool,
-    pub inline_text: String,
-    pub inline_line: Option<usize>,
-    pub inline_key: Option<(usize, usize, u64, u64)>,
-    pub inline_since: Option<std::time::Instant>,
 }
 
 pub fn parse_porcelain(out: &str) -> Option<GitBlame> {

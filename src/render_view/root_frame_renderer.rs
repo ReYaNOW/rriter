@@ -165,6 +165,7 @@ impl Renderer {
         show_readonly_notice: bool,
         readonly_notice_text: &str,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
+        inline_blame_dwell: &crate::app::git_blame::InlineBlameDwell,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
         pdf_dark_pages: bool,
         markdown_media: &crate::markdown_media::MarkdownMedia,
@@ -500,6 +501,7 @@ impl Renderer {
             &mut telemetry_root_phases,
             &mut telemetry_editor_time,
             inline_git_popup.map(|popup| popup.anchor_line),
+            inline_blame_dwell,
         );
 
         let overlays = self.draw_root_editor_overlays(
