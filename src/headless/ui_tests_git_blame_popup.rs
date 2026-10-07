@@ -64,10 +64,21 @@ fn headless_git_blame_commit_popup_shows_full_details_copies_hash_and_dismisses(
     assert!(renderer.git_blame_popup_hover.is_some());
 
     let popup = renderer.git_blame_popup_hover.unwrap_or_else(|| panic!("popup hover missing")).popup;
-    assert!(popup.3 > 280.0, "full multi-line message should expand popup height: {popup:?}");
-    let lines = run_script(&mut session, format!("mouse_move {} {}\n", popup.0 + popup.2 * 0.5, popup.1 + popup.3 * 0.5).as_bytes());
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_some()));
+    let line_h = 19.0 * TEST_SCALE;
+    let expected_height = (105.0 * TEST_SCALE) + 5.0 * line_h;
+    assert!((popup.3 - expected_height).abs() < 0.01, "popup should contain exactly five message rows: {popup:?}");
+    let start_x = x as f32;
+    let start_y = y as f32;
+    let end_x = popup.0 + popup.2 * 0.5;
+    let end_y = popup.1 + popup.3 * 0.5;
+    for step in 1..=8 {
+        let progress = step as f32 / 8.0;
+        let mouse_x = start_x + (end_x - start_x) * progress;
+        let mouse_y = start_y + (end_y - start_y) * progress;
+        let lines = run_script(&mut session, format!("mouse_move {mouse_x} {mouse_y}\n").as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_some()), "popup closed at step {step}");
+    }
 
     click_ui(&mut session, "GitBlameCopyHash");
     assert_eq!(dump(&mut session)["clipboard"]["text"].as_str(), Some(expected_oid.as_str()));
@@ -76,6 +87,44 @@ fn headless_git_blame_commit_popup_shows_full_details_copies_hash_and_dismisses(
     let lines = run_script(&mut session, b"mouse_move 0 0\n");
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     let _ = dump(&mut session);
+    assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_none()));
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_commit_popup_closes_when_dwell_key_changes() {
+    let (root, _file, mut session) = open_popup_fixture();
+    let _ = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let inline = dump(&mut session)["blame_inline"].clone();
+    let x = inline["x"].as_f64().unwrap_or_default() + inline["w"].as_f64().unwrap_or_default() * 0.5;
+    let y = inline["y"].as_f64().unwrap_or_default() + inline["h"].as_f64().unwrap_or_default() * 0.5;
+    let _ = run_script(&mut session, format!("mouse_move {x} {y}\n").as_bytes());
+    assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_some()));
+
+    session.app.editor.cursor = session.app.editor.line_offsets[2];
+    session.app.tick_git_blame_inline(Instant::now());
+    let _ = run_script(&mut session, b"settle 1000\n");
+    assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_none()));
+    drop(session);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_commit_popup_closes_on_tab_switch() {
+    let (root, _file, mut session) = open_popup_fixture();
+    let _ = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let inline = dump(&mut session)["blame_inline"].clone();
+    let x = inline["x"].as_f64().unwrap_or_default() + inline["w"].as_f64().unwrap_or_default() * 0.5;
+    let y = inline["y"].as_f64().unwrap_or_default() + inline["h"].as_f64().unwrap_or_default() * 0.5;
+    let _ = run_script(&mut session, format!("mouse_move {x} {y}\n").as_bytes());
+    assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_some()));
+
+    let other_file = root.join("other.txt");
+    std::fs::write(&other_file, "other tab\n").unwrap_or_else(|error| panic!("write second tab: {error}"));
+    let lines = run_script(&mut session, format!("open {}\n", other_file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.active_tab > 0);
     assert!(session.app.renderer.as_ref().is_some_and(|renderer| renderer.git_blame_popup_hover.is_none()));
     drop(session);
     let _ = std::fs::remove_dir_all(root);

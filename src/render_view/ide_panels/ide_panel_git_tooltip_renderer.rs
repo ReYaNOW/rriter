@@ -51,15 +51,6 @@ impl Renderer {
             self.git_blame_popup_details = None;
             return;
         };
-        let active_commit = dwell.line.and_then(|line| {
-            if current_key.generation != editor.git_blame.generation {
-                return None;
-            }
-            let head_line = crate::editor::head_line_for(&editor.git_hunks, line)?;
-            let blame = editor.git_blame.blame.as_ref()?;
-            let commit_idx = *blame.line_commit.get(head_line)? as usize;
-            blame.commits.get(commit_idx).filter(|commit| !commit.uncommitted)
-        });
         let hovered = self.git_blame_popup_hover.is_some_and(|hover| {
             if hover.key != current_key { return false; }
             let in_rect = |rect: (f32, f32, f32, f32)| {
@@ -75,6 +66,15 @@ impl Renderer {
             self.git_blame_popup_details = None;
             return;
         };
+        let active_commit = dwell.line.and_then(|line| {
+            if current_key.generation != editor.git_blame.generation {
+                return None;
+            }
+            let head_line = crate::editor::head_line_for(&editor.git_hunks, line)?;
+            let blame = editor.git_blame.blame.as_ref()?;
+            let commit_idx = *blame.line_commit.get(head_line)? as usize;
+            blame.commits.get(commit_idx).filter(|commit| !commit.uncommitted)
+        });
         let Some(commit) = active_commit else {
             self.git_blame_popup_hover = None;
             self.git_blame_popup_copied = None;
@@ -112,7 +112,7 @@ impl Renderer {
             }
         }
         let Some(details) = self.git_blame_popup_details.take() else { return };
-        let message = details.message.as_deref().unwrap_or(&details.summary);
+        let message = details.message.as_deref().unwrap_or(&details.summary).trim_end_matches('\n');
         let scale = 0.92;
         let pad_x = 10.0 * s;
         let pad_y = 7.0 * s;
@@ -127,11 +127,11 @@ impl Renderer {
         let title_h = 18.0 * s;
         let line_h = 19.0 * s;
         let popup_h = pad_y + title_h * 3.0 + 5.0 * s + message_lines as f32 * line_h + 8.0 * s + 24.0 * s + pad_y;
-        let mut x = annotation.0 + annotation.2 + 8.0 * s;
-        if x + popup_w > self.width - margin { x = annotation.0 - popup_w - 8.0 * s; }
-        x = x.clamp(margin, (self.width - popup_w - margin).max(margin));
+        let mut x = annotation.0 + annotation.2;
+        if x + popup_w > self.width - margin { x = annotation.0 - popup_w; }
+        x = x.clamp(margin, (self.width - popup_w - margin).max(margin)).round();
         let y = (annotation.1 + annotation.3 * 0.5 - popup_h * 0.5)
-            .clamp(margin, (self.height - popup_h - margin).max(margin));
+            .clamp(margin, (self.height - popup_h - margin).max(margin)).round();
         self.git_blame_popup_hover = Some(crate::renderer::GitBlamePopupHover {
             oid,
             key: current_key,
@@ -144,7 +144,7 @@ impl Renderer {
             self.ui.pick(UiRole::Selection, self.ui_theme.sel),
             self.ui.pick(UiRole::BgTooltip, [0.11, 0.12, 0.16, 0.98]),
         );
-        let content_x = x + pad_x;
+        let content_x = (x + pad_x).round();
         let mut top = y + pad_y;
         self.draw_commit_details_text_row(&details.author_display, CommitDetailsTextRow {
             x: content_x, top, line_h: title_h, scale: 0.86,
@@ -181,10 +181,10 @@ impl Renderer {
         let copied = self.git_blame_popup_copied == Some(oid);
         let label = if copied { "Хэш скопирован" } else { "Копировать хэш" };
         let button_w = self.measure_ui_width(label, 0.86) + 24.0 * s;
-        let button_y = top;
+        let button_y = top.round();
         let hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameCopyHash, content_x, button_y, button_w, 22.0 * s, mx, my);
-        self.push_rounded_rect(content_x, button_y, button_w, 22.0 * s, 4.0 * s, if hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
-        self.draw_string_scaled(label, content_x + 12.0 * s, (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
+        self.push_rounded_rect(content_x.round(), button_y, button_w, 22.0 * s, 4.0 * s, if hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
+        self.draw_string_scaled(label, (content_x + 12.0 * s).round(), (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
         self.git_blame_popup_details = Some(details);
     }
 

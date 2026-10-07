@@ -1337,7 +1337,7 @@ mod tests {
 
     #[test]
     fn git_blame_config_defaults_normalizes_and_roundtrips() {
-        assert_eq!(Config::default().git_blame_inline, false);
+        assert!(!Config::default().git_blame_inline);
         assert_eq!(Config::default().git_blame_delay_ms, 400);
         assert_eq!(normalize_git_blame_delay_ms(u32::MAX), 2000);
         assert_eq!(normalize_git_blame_delay_ms(199), 100);

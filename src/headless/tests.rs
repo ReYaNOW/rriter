@@ -331,13 +331,13 @@ pub(crate) mod tests_support {
         let dir = scratch_dir(name);
         let file = dir.join("blame.txt");
         git_init(&dir);
-        std::fs::write(&file, "first\nsecond\n").unwrap();
+        std::fs::write(&file, "first\nsecond\n").unwrap_or_else(|error| panic!("write blame fixture: {error}"));
         git(&dir, &["add", "."]);
         git(&dir, &["-c", "user.name=Ada", "-c", "user.email=ada@example.invalid", "commit", "-qm", "first", "--date=2001-01-01T00:00:00Z"]);
-        std::fs::write(&file, "first\nsecond updated\n").unwrap();
+        std::fs::write(&file, "first\nsecond updated\n").unwrap_or_else(|error| panic!("update blame fixture: {error}"));
         git(&dir, &["add", "."]);
         git(&dir, &["-c", "user.name=Grace", "-c", "user.email=grace@example.invalid", "commit", "-qm", "second", "--date=2002-01-01T00:00:00Z"]);
-        std::fs::write(&file, "first updated\nsecond updated\nthird\n").unwrap();
+        std::fs::write(&file, "first updated\nsecond updated\nthird\n").unwrap_or_else(|error| panic!("update blame fixture: {error}"));
         git(&dir, &["add", "."]);
         git(&dir, &["-c", "user.name=Linus", "-c", "user.email=linus@example.invalid", "commit", "-qm", "third", "--date=2003-01-01T00:00:00Z"]);
         (dir, file)
@@ -1215,7 +1215,7 @@ mod session_cases {
         assert_eq!(
             keys,
             [
-                "atlas", "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "hover",
+                "atlas", "blame_inline", "blame_status_visible", "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "hover",
                 "ide_panel", "markdown_media_stats", "markdown_toc", "mode",
                 "overlays", "scale", "size", "tabs", "themes", "ui", "writes_allowed"
             ]

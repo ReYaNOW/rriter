@@ -25,7 +25,7 @@ fn wait_for_annotation(session: &mut HeadlessSession, author: &str) -> String {
             .as_str()
             .is_some_and(|text| text.contains(author))
     });
-    dump(session)["blame_inline"]["text"].as_str().unwrap().to_owned()
+    dump(session)["blame_inline"]["text"].as_str().unwrap_or_else(|| panic!("blame annotation missing")).to_owned()
 }
 
 fn move_cursor_to_line(session: &mut HeadlessSession, line: usize) {

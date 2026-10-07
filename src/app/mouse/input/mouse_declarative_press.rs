@@ -151,7 +151,7 @@ impl App {
                 )
                 && self.close_active_api_output_example_menu()
             {
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
                 if clicked_id.is_none() {
                     return true;
                 }

@@ -13,14 +13,14 @@ const TEST_SCALE: f32 = 4.0 / 3.0;
 fn head_fixture(name: &str) -> (PathBuf, PathBuf) {
     let root = scratch_dir(name);
     let file = root.join("tracked.txt");
-    std::fs::write(&file, "first\nsecond\n").unwrap();
+    std::fs::write(&file, "first\nsecond\n").unwrap_or_else(|error| panic!("write HEAD fixture: {error}"));
     git_init(&root);
     git(&root, &["add", "."]);
     git(&root, &["commit", "-qm", "initial"]);
     (root, file)
 }
 
-fn ide_session(root: &PathBuf, file: &PathBuf) -> crate::headless::HeadlessSession {
+fn ide_session(root: &std::path::Path, file: &std::path::Path) -> crate::headless::HeadlessSession {
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, root);
     let lines = run_script(
         &mut session,

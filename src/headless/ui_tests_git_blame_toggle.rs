@@ -10,12 +10,13 @@ use crate::headless::HeadlessSession;
 fn seed_blame_config() {
     let root = crate::headless::tests_support::ensure_test_profile_root();
     let config_path = crate::platform::app_paths_for_root(&root).config.join("config.json");
-    std::fs::create_dir_all(config_path.parent().expect("config parent")).unwrap();
+    let parent = config_path.parent().unwrap_or_else(|| panic!("config path has no parent"));
+    std::fs::create_dir_all(parent).unwrap_or_else(|error| panic!("create test config directory: {error}"));
     std::fs::write(
         config_path,
         r#"{"git_blame_inline":false,"git_blame_delay_ms":400}"#,
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("write test blame config: {error}"));
 }
 
 fn settings_session() -> HeadlessSession {

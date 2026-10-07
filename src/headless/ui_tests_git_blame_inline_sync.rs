@@ -21,7 +21,7 @@ fn wait_for_annotation(session: &mut crate::headless::HeadlessSession, author: &
             .as_str()
             .is_some_and(|text| text.contains(author))
     });
-    dump(session)["blame_inline"]["text"].as_str().unwrap().to_owned()
+    dump(session)["blame_inline"]["text"].as_str().unwrap_or_else(|| panic!("blame annotation missing")).to_owned()
 }
 
 fn wait_for_disk_text(session: &mut crate::headless::HeadlessSession, file: &std::path::Path, text: &str) {

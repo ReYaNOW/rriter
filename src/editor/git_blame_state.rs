@@ -234,7 +234,7 @@ mod tests {
     use crate::editor::LineDiffHunk;
 
     fn oid(ch: char) -> String {
-        std::iter::repeat(ch).take(40).collect()
+        std::iter::repeat_n(ch, 40).collect()
     }
 
     fn porcelain(entries: &[(&str, usize, usize, &str, &str, i64, &str)]) -> String {
