@@ -368,34 +368,6 @@ fn decode_git_text(bytes: &[u8], source: &str) -> Result<crate::platform::Decode
     crate::platform::decode_text_bytes(bytes).map_err(|error| format!("{source}: {error}"))
 }
 
-fn read_head_blob(repo: &git2::Repository, rel_path: &Path) -> Result<String, String> {
-    let head = match repo.head() {
-        Ok(head) => head,
-        Err(_) => return Ok(String::new()),
-    };
-    let tree = head
-        .peel_to_tree()
-        .map_err(|err| format!("HEAD tree: {}", err.message()))?;
-    let entry = match tree.get_path(rel_path) {
-        Ok(entry) => entry,
-        Err(_) => return Ok(String::new()),
-    };
-    let object = entry
-        .to_object(repo)
-        .map_err(|err| format!("HEAD object: {}", err.message()))?;
-    let blob = object
-        .peel_to_blob()
-        .map_err(|err| format!("HEAD blob: {}", err.message()))?;
-    Ok(decode_git_text(blob.content(), "HEAD blob")?.text)
-}
-
-pub(crate) fn load_head_text_for_worktree_path(abs_path: &Path) -> Option<String> {
-    let repo = git2::Repository::discover(abs_path).ok()?;
-    let repo_root = repo.workdir()?.to_path_buf();
-    let rel_path = crate::platform::relative_to(abs_path, &repo_root)?;
-    read_head_blob(&repo, &rel_path).ok()
-}
-
 fn read_index_blob(
     repo: &git2::Repository,
     rel_path: &Path,
@@ -451,7 +423,7 @@ fn load_git_diff_with_side(
     let base_text = if matches!(status, GitFileStatus::Added | GitFileStatus::Untracked) {
         String::new()
     } else {
-        read_head_blob(&repo, old_path)?
+        crate::app::git_baseline::read_head_blob(&repo, old_path)?
     };
     let worktree = if matches!(status, GitFileStatus::Deleted) {
         crate::platform::DecodedTextFile {
@@ -541,32 +513,6 @@ impl App {
                     .cloned()
                     .map(|file| (repo_root.clone(), file))
             })
-    }
-
-    pub(crate) fn current_file_git_base_text(&self) -> Option<String> {
-        if !self.is_ide_mode || self.active_tab_is_git_diff() {
-            return None;
-        }
-        self.git_base_text_for_path(self.file_path.as_ref()?)
-    }
-
-    /// HEAD text of a file inside an open workspace (gutter base); `None` outside or untracked.
-    pub(crate) fn git_base_text_for_path(&self, path: &Path) -> Option<String> {
-        let abs_path = self.abs_path_for_workspace(path);
-        if !self
-            .ide_workspaces
-            .iter()
-            .any(|workspace| crate::platform::path_is_within(&abs_path, workspace))
-        {
-            return None;
-        }
-        load_head_text_for_worktree_path(&abs_path)
-    }
-
-    pub(crate) fn refresh_current_editor_git_base(&mut self) {
-        let base_text = self.current_file_git_base_text();
-        self.editor.set_git_base_text(base_text);
-        self.inline_git_popup = None;
     }
 
     pub fn active_tab_is_git_diff(&self) -> bool {
@@ -1441,8 +1387,8 @@ impl App {
         self.show_notice("Файл открыт в режиме только чтение");
     }
 
-    pub(crate) fn show_notice(&mut self, message: &'static str) {
-        self.readonly_notice_text = message;
+    pub(crate) fn show_notice(&mut self, message: impl Into<String>) {
+        self.readonly_notice_text = message.into();
         self.readonly_notice_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
         if let Some(window) = self.window.as_ref() {

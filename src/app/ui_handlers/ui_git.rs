@@ -211,6 +211,7 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitBlameToggle => self.toggle_git_blame_inline(),
             UiId::GitLogsClear => {
                 self.ide_panel.git.clear_git_logs();
                 if let Some(renderer) = self.renderer.as_mut() {
@@ -233,9 +234,7 @@ impl App {
             | UiId::GitLogsBody
             | UiId::GitLogsScroll
             | UiId::GitWorkspaceScroll => {
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.handle_git_panel_passive_click(id);
             }
             UiId::GitGraphCopyCommit(workspace_idx, commit_idx) => {
                 self.copy_git_graph_commit(workspace_idx, commit_idx);
@@ -245,6 +244,12 @@ impl App {
             }
             UiId::GitGraphOpenCommit(workspace_idx, commit_idx) => {
                 self.open_git_graph_commit(workspace_idx, commit_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitBlameCopyHash | UiId::GitBlameShowInGraph => {
+                self.handle_git_blame_popup_action(id);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

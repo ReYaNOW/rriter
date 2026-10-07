@@ -57,6 +57,9 @@
     "src/app/api_mock/types.rs": {
       "enum_variant_names": 2
     },
+    "src/app/app_behavior_tests/app_behavior_autocomplete_base_cases.rs": {
+      "too_many_lines": 1
+    },
     "src/app/app_behavior_tests/app_behavior_ty_detail_tests.rs": {
       "len_zero": 1,
       "manual_contains": 1
@@ -850,6 +853,9 @@
     },
     "src/render_view/root_frame_helpers.rs": {
       "manual_clamp": 2
+    },
+    "src/render_view/root_frame_layout_renderer.rs": {
+      "struct_excessive_bools": 2
     },
     "src/render_view/root_frame_overlay_helpers.rs": {
       "unwrap_used": 2

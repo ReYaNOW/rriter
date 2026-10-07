@@ -453,6 +453,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                 self.modifiers = winit::keyboard::ModifiersState::empty();
                 self.left_shift_down = false;
                 if focused {
+                    self.on_window_focus_gained();
                     self.render_suspended = false;
                     if let Some(r) = self.renderer.as_mut() {
                         r.suppress_popups_until_next_mouse_move();

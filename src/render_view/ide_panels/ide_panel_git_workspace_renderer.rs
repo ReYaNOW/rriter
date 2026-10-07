@@ -62,6 +62,7 @@ impl Renderer {
         mx: f32,
         my: f32,
         blink_alpha: f32,
+        git_blame_inline: bool,
     ) {
         let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
         let inner_w = (panel_w - pad * 2.0).max(1.0);
@@ -331,11 +332,34 @@ impl Renderer {
             );
         }
 
-        let refresh_x = logs_btn.x + logs_btn.w + refresh_gap;
+        let blame_btn_x = logs_btn.x + logs_btn.w + refresh_gap;
+        let blame_btn_w = (64.0 * s).min((panel_x + pad + inner_w - blame_btn_x).max(1.0));
+        let blame_btn = Button {
+            x: blame_btn_x,
+            y: graph_btn_y,
+            w: blame_btn_w,
+            h: 22.0 * s,
+            text: "Blame".to_string(),
+            icon: None,
+            text_scale: 0.78,
+            icon_size: 0.0,
+        };
+        let blame_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::GitBlameToggle,
+            blame_btn.x,
+            blame_btn.y,
+            blame_btn.w,
+            blame_btn.h,
+            mx,
+            my,
+        );
+        render_git_graph_button(self, &blame_btn, s, blame_hovered, git_blame_inline);
+
+        let refresh_x = blame_btn.x + blame_btn.w + refresh_gap;
         let refresh_available_w = (panel_x + pad + inner_w - refresh_x).max(0.0);
         let refresh_label_w = self.measure_ui_width("Обновить", 0.78);
         let refresh_full_w = refresh_label_w + 22.0 * s + 18.0 * s;
-        let mut notice_x = logs_btn.x + logs_btn.w + 8.0 * s;
+        let mut notice_x = blame_btn.x + blame_btn.w + 8.0 * s;
         if refresh_available_w >= 30.0 * s {
             let refresh_icon_only = refresh_available_w < refresh_full_w;
             let refresh_btn = Button {

@@ -11,6 +11,13 @@ struct EditorCtrlWheelLayout {
     button_size: f32,
 }
 
+struct EditorAdjustSetting<'a> {
+    label: &'a str,
+    value: &'a str,
+    decrement: crate::ui_system::UiId,
+    increment: crate::ui_system::UiId,
+}
+
 fn editor_ctrl_wheel_layout(content_x: f32, content_w: f32, scale: f32) -> EditorCtrlWheelLayout {
     let content_w = content_w.max(1.0);
     let gap = (8.0 * scale).min(content_w * 0.04).max(0.0);
@@ -501,13 +508,59 @@ impl Renderer {
         multiplier: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
+        let value = ctrl_wheel_multiplier_label(multiplier);
+        self.draw_editor_adjust_setting(
+            content_x,
+            content_w,
+            row_y,
+            EditorAdjustSetting {
+                label: "Ускорение Ctrl + колесо",
+                value: &value,
+                decrement: crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(-1),
+                increment: crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(1),
+            },
+            ui_registry,
+        );
+    }
+
+    pub(crate) fn draw_editor_blame_delay_setting(
+        &mut self,
+        content_x: f32,
+        content_w: f32,
+        row_y: f32,
+        delay_ms: u32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let value = format!("{delay_ms} мс");
+        self.draw_editor_adjust_setting(
+            content_x,
+            content_w,
+            row_y,
+            EditorAdjustSetting {
+                label: "Задержка Git blame",
+                value: &value,
+                decrement: crate::ui_system::UiId::SettingsEditorBlameDelayAdjust(-1),
+                increment: crate::ui_system::UiId::SettingsEditorBlameDelayAdjust(1),
+            },
+            ui_registry,
+        );
+    }
+
+    fn draw_editor_adjust_setting(
+        &mut self,
+        content_x: f32,
+        content_w: f32,
+        row_y: f32,
+        setting: EditorAdjustSetting<'_>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
         let scale = self.scale_factor;
         let row_y = row_y.round();
         let row_h = (30.0 * scale).round().max(1.0);
         let layout = editor_ctrl_wheel_layout(content_x, content_w, scale);
         let mut label_scratch = String::new();
         self.draw_tree_label_clipped(
-            "Ускорение Ctrl + колесо",
+            setting.label,
             content_x.round(),
             Self::tree_row_text_y(row_y, row_h, scale),
             layout.label_w,
@@ -549,10 +602,9 @@ impl Renderer {
             5.0 * scale,
             self.ui.pick(UiRole::BgInput, [0.20, 0.21, 0.26, 1.0]),
         );
-        let value = ctrl_wheel_multiplier_label(multiplier);
-        let text_w = self.measure_ui_width(&value, 0.78);
+        let text_w = self.measure_ui_width(setting.value, 0.78);
         self.draw_string_scaled_pixel_snapped(
-            &value,
+            setting.value,
             (value_x + (value_w - text_w) * 0.5).round(),
             Self::tree_row_text_y(row_y, row_h, scale),
             self.ui.pick(UiRole::TextPrimary, [0.92, 0.92, 0.95, 1.0]),
@@ -561,7 +613,7 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
         ui_registry.register_icon_button(
-            crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(-1),
+            setting.decrement,
             &decrement,
             self,
             mx,
@@ -570,7 +622,7 @@ impl Renderer {
             false,
         );
         ui_registry.register_icon_button(
-            crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(1),
+            setting.increment,
             &increment,
             self,
             mx,

@@ -346,6 +346,7 @@ impl Renderer {
             status_progress_elapsed,
             status_progress_value,
             is_ui_disabled,
+            git_blame_inline,
             ..
         } = layout;
         let RootFrameViewport {
@@ -433,6 +434,7 @@ impl Renderer {
             is_ui_disabled,
             blink_alpha,
             active_api_route,
+            git_blame_inline,
             is_ide_mode,
             status_progress_label,
             status_progress_elapsed,

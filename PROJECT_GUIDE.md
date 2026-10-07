@@ -1464,6 +1464,9 @@ Root:
 * `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
 * `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
+* `src/headless/ui_tests_git_blame_toggle.rs` -> headless UI tests for Git blame toggle/status persistence, delay adjustment, and zero-delay annotations.
+* `src/headless/ui_tests_git_blame_popup.rs` -> headless UI tests for Git blame commit details popup, clipboard copy, and hover dismissal.
+* `src/headless/ui_tests_git_blame_graph.rs` -> headless UI test for revealing a blame commit beyond the first Git graph page.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
@@ -1472,7 +1475,7 @@ Root:
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
 * `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
-* `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
+* `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier, Git blame delay), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
 * `src/headless/ui_tests_hotkeys.rs` -> headless UI tests for keymap overrides from `config.json`, configurable commands, and terminal shortcut ownership.
 * `src/headless/ui_tests_hotkeys_characterization.rs` / `src/headless/ui_tests_hotkeys_characterization_editor.rs` / `src/headless/ui_tests_hotkeys_characterization_file_tree.rs` / `src/headless/ui_tests_hotkeys_characterization_database.rs` / `src/headless/ui_tests_hotkeys_characterization_api_markdown.rs` / `src/headless/ui_tests_hotkeys_characterization_pdf_image.rs` / `src/headless/ui_tests_hotkeys_characterization_git_settings.rs` -> headless UI characterization for existing keyboard routing across editor, file tree, Database, API/Markdown, PDF/Image, and Git/Settings.
@@ -1647,7 +1650,10 @@ Entrypoints/state:
 * `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
+* `src/app/git_baseline.rs` -> HEAD snapshots, baseline loading, and open-tab HEAD refresh.
+* `src/app/git_blame.rs` -> background blame loading, per-tab stale-result checks, and lazy commit-message reads.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
+* `src/editor/git_blame_state.rs` -> shared HEAD snapshot and pure Git blame data, parsing, mapping, and formatting helpers.
 * `src/app/project_search.rs` -> project-wide explicit search state, results list, filter and layout; includes the pieces below.
 * `src/app/project_search_engine.rs` -> search worker, traversal, decoding, fallback scanning, match collection.
 * `src/app/project_search_matcher.rs` -> pattern planning, include/exclude ignore matching, UTF-16 helpers.

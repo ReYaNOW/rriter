@@ -910,7 +910,8 @@ mod reader_stage1_review_v1 {
         renderer.draw_editor_visible_text(
             &editor, &[], &[], None, sample, "", &[], sample.len(), sample.len(),
             None, 0, sample.len(), 0.0, 0.0, 900.0, 900.0, 0.0, false, true, false,
-            dpi, 0, renderer.visual_lines.len(), &mut registry, None, None, &[], &[],
+            dpi, 0, renderer.visual_lines.len(), &mut registry, None, None, &[], &[], None,
+            0, &crate::app::git_blame::InlineBlameDwell::default(),
         );
         let bounds = |color| {
             let ys: Vec<_> = renderer.vertices.iter().filter(|v| v.color == color)

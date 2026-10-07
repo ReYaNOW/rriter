@@ -22,6 +22,7 @@ struct RootFramePanelLayout<'a> {
         &'a crate::app::database::DatabaseQueryTabMeta,
         &'a crate::app::database::DatabaseQueryTabState,
     )>,
+    git_blame_inline: bool,
     database_query_modal_open: bool,
     database_query_results_h: f32,
     modal_overlay_open: bool,
@@ -196,6 +197,7 @@ impl Renderer {
         show_settings: bool,
         dialog_window_open: bool,
         is_ide_mode: bool,
+        git_blame_inline: bool,
     ) -> RootFramePanelLayout<'a> {
         let (total_lines, visible_cursor_line) = if markdown_read_active {
             // Preview owns its own virtualized layout and scroll surface; avoid rebuilding
@@ -315,6 +317,7 @@ impl Renderer {
             status_progress_value,
             editor_bottom_h,
             is_ui_disabled,
+            git_blame_inline,
         }
     }
 
@@ -439,6 +442,7 @@ impl Renderer {
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         layout: RootFramePanelLayout<'_>,
+        git_blame_inline: bool,
         has_lsp_diagnostics: bool,
         is_ide_mode: bool,
         blink_alpha: f32,
@@ -499,6 +503,7 @@ impl Renderer {
                 is_ui_disabled,
                 blink_alpha,
                 active_api_route,
+                git_blame_inline,
             );
             if let Some(stage_start) = stage_start {
                 *telemetry_side_panel_time = stage_start.elapsed().as_secs_f32();

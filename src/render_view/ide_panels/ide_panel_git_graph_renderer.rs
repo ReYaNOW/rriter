@@ -175,6 +175,15 @@ impl Renderer {
         for idx in first..last {
             let commit = &commits[idx];
             let row_y = rows_y + idx as f32 * row_h - scroll;
+            if ide_panel.git.graph_reveal.highlight_oid() == Some(commit.oid.as_ref()) {
+                self.push_rect(
+                    panel_x,
+                    row_y,
+                    panel_w,
+                    row_h,
+                    self.ui.pick(UiRole::Selection, [0.38, 0.28, 0.58, 0.28]),
+                );
+            }
             let hovered = hover_settled
                 && ui_registry.register_rect_clipped(
                     crate::ui_system::UiId::GitGraphCommit(active_workspace, idx),

@@ -1,0 +1,357 @@
+use crate::headless::tests_support::{
+    git, git_blame_fixture, git_init, run_script, scratch_dir, wait_until,
+    workspace_with_explorer,
+};
+use std::path::Path;
+
+pub(super) const TEST_WIDTH: u32 = 1280;
+pub(super) const TEST_HEIGHT: u32 = 720;
+pub(super) const TEST_SCALE: f32 = 4.0 / 3.0;
+
+pub(super) fn open_and_wait(session: &mut crate::headless::HeadlessSession, file: &Path, expected_lines: usize) {
+    let lines = run_script(session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(session, 8000, "Git blame result", |session| {
+        session.app.editor.git_blame.blame.is_some() || session.app.editor.git_blame.failed_key.is_some()
+    });
+    let blame = session.app.editor.git_blame.blame.as_ref().unwrap_or_else(|| {
+        panic!("Git blame failed for {}; key={:?}", file.display(), session.app.editor.git_blame.key)
+    });
+    assert_eq!(blame.line_commit.len(), expected_lines);
+}
+
+#[test]
+fn headless_git_blame_loads_committed_files_with_git_line_counts() {
+    let (root, file) = git_blame_fixture("ui-git-blame-inline");
+    let crlf = root.join("crlf.txt");
+    let no_final_newline = root.join("no-final-newline.txt");
+    let empty = root.join("empty.txt");
+    let bom = root.join("bom.txt");
+    std::fs::write(&crlf, "one\r\ntwo\r\n").unwrap();
+    std::fs::write(&no_final_newline, "single line").unwrap();
+    std::fs::write(&empty, "").unwrap();
+    std::fs::write(&bom, "\u{feff}bom\nsecond\n").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-qm", "line endings"]);
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+
+    open_and_wait(&mut session, &file, 3);
+    open_and_wait(&mut session, &crlf, 2);
+    open_and_wait(&mut session, &no_final_newline, 1);
+    open_and_wait(&mut session, &empty, 0);
+    open_and_wait(&mut session, &bom, 2);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_skips_untracked_unborn_and_outside_files() {
+    let (root, _) = git_blame_fixture("ui-git-blame-unavailable");
+    let untracked = root.join("untracked.txt");
+    std::fs::write(&untracked, "not committed\n").unwrap();
+    let outside_root = scratch_dir("ui-git-blame-outside");
+    let outside = outside_root.join("outside.txt");
+    std::fs::write(&outside, "outside repo\n").unwrap();
+    let unborn_root = scratch_dir("ui-git-blame-unborn");
+    git_init(&unborn_root);
+    let unborn = unborn_root.join("unborn.txt");
+    std::fs::write(&unborn, "no commits\n").unwrap();
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+    let notice_before = session.app.readonly_notice_text.clone();
+    let notice_until_before = session.app.readonly_notice_until;
+
+    for (file, workspace) in [
+        (untracked.clone(), root.clone()),
+        (outside.clone(), root.clone()),
+        (unborn.clone(), unborn_root.clone()),
+    ] {
+        let lines = run_script(
+            &mut session,
+            format!("workspace {}\nopen {}\n", workspace.display(), file.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        assert!(!session.app.editor.git_blame.pending);
+        assert!(session.app.editor.git_blame.blame.is_none());
+        assert!(session.app.git_blame_rx.is_empty());
+        assert_eq!(session.app.readonly_notice_text, notice_before);
+        assert_eq!(session.app.readonly_notice_until, notice_until_before);
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside_root);
+    let _ = std::fs::remove_dir_all(unborn_root);
+}
+
+#[test]
+fn headless_git_blame_keeps_tabs_separate_and_loads_full_messages() {
+    let (root, _) = git_blame_fixture("ui-git-blame-tabs");
+    let large = root.join("large.txt");
+    let second = root.join("second.txt");
+    let large_text = "line\n".repeat(20_000);
+    std::fs::write(&large, large_text).unwrap();
+    std::fs::write(&second, "second file\n").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "Multi-line subject\n\nfull body"]);
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+
+    let lines = run_script(&mut session, format!("open {}\n", large.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let first_tab = session.app.active_tab;
+    let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let second_tab = session.app.active_tab;
+    assert_ne!(first_tab, second_tab);
+    session.app.switch_to_tab(first_tab);
+    session.app.switch_to_tab(second_tab);
+    wait_until(&mut session, 12_000, "both tab blame results", |session| {
+        session.app.tabs[first_tab].editor.git_blame.blame.is_some()
+            && session.app.editor.git_blame.blame.is_some()
+    });
+    assert_eq!(session.app.tabs[first_tab].editor.git_blame.blame.as_ref().unwrap().line_commit.len(), 20_000);
+    assert_eq!(session.app.editor.git_blame.blame.as_ref().unwrap().line_commit.len(), 1);
+
+    let oid = session.app.editor.git_blame.blame.as_ref().unwrap().commits[0].oid;
+    session.app.request_commit_message(oid);
+    session.app.request_commit_message(oid);
+    assert_eq!(session.app.git_blame_message_rx.len(), 1, "duplicate requests should share the in-flight lookup");
+    wait_until(&mut session, 5000, "full blame commit message", |session| {
+        session.app.editor.git_blame.messages.iter().any(|(cached, _)| *cached == oid)
+    });
+    let message = session.app.editor.git_blame.messages.iter().find(|(cached, _)| *cached == oid).unwrap();
+    assert_eq!(message.1, "Multi-line subject\n\nfull body\n");
+
+    let missing_oid = git2::Oid::from_str("0000000000000000000000000000000000000000").unwrap();
+    session.app.request_commit_message(missing_oid);
+    wait_until(&mut session, 5000, "failed blame message lookup", |session| {
+        session.app.git_blame_message_rx.iter().any(|receiver| receiver.failed)
+    });
+    session.app.request_commit_message(missing_oid);
+    assert_eq!(session.app.git_blame_message_rx.len(), 1, "failed lookups should not be retried for the same oid");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_failed_key_is_attempted_once() {
+    let (root, file) = git_blame_fixture("ui-git-blame-failure");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 5000, "HEAD snapshot", |session| {
+        session.app.editor.git_head.is_some()
+    });
+    let head_oid = session.app.editor.git_head.as_ref().unwrap().head_oid.unwrap();
+    let object_path = root.join(".git/objects").join(&head_oid.to_string()[..2]).join(&head_oid.to_string()[2..]);
+    std::fs::remove_file(object_path).unwrap();
+    session.app.git_blame_inline = true;
+    session.app.ensure_blame_for_active();
+    assert_eq!(session.app.git_blame_rx.len(), 1);
+    wait_until(&mut session, 5000, "forced blame failure", |session| {
+        session.app.editor.git_blame.failed_key.is_some()
+    });
+    assert!(session.app.editor.git_blame.blame.is_none());
+    session.app.ensure_blame_for_active();
+    assert!(session.app.git_blame_rx.is_empty(), "failed key must not spawn a retry");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_modified_line_sleeps_after_dwell() {
+    let (root, file) = git_blame_fixture("ui-git-blame-inline-modified-idle");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+    session.app.git_blame_delay_ms = 100;
+    open_and_wait(&mut session, &file, 3);
+    session.app.editor.cursor = session.app.editor.line_offsets[0];
+    // `settle` drains the typing's async results (highlight, hunk recompute) so `idle` sees only blame.
+    let lines = run_script(&mut session, b"type modified\nsettle 1000\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+
+    let idle = run_script(&mut session, b"idle 250\n");
+    let idle = idle.last().unwrap();
+    assert!(idle.contains("frames=0"), "a modified line should not draw frames: {idle}");
+    assert!(idle.contains("flow=wait deadline_ms=none"), "a modified line must not leave a past wake deadline: {idle}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+fn inline_dwell_session(
+    name: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, crate::headless::HeadlessSession) {
+    let (root, file) = git_blame_fixture(name);
+    let second = root.join("second.txt");
+    std::fs::write(&second, "other file\n").unwrap_or_else(|error| panic!("write second fixture: {error}"));
+    git(&root, &["add", "second.txt"]);
+    git(&root, &["-c", "user.name=Tab Author", "-c", "user.email=tab@example.invalid", "commit", "-qm", "other file"]);
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &root);
+    session.app.git_blame_inline = true;
+    session.app.git_blame_delay_ms = 400;
+    open_and_wait(&mut session, &file, 3);
+    (root, file, second, session)
+}
+
+#[test]
+fn headless_git_blame_inline_dwell_formats_once_and_idles() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-dwell");
+    let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    if session.app.inline_blame_dwell.key.is_none() {
+        session.app.tick_git_blame_inline(started);
+    }
+    let started = session.app.inline_blame_dwell.since.unwrap_or(started);
+    let wake_deadline = started + std::time::Duration::from_millis(400);
+    assert_eq!(session.app.git_blame_inline_wake_at(started), Some(wake_deadline));
+    assert_eq!(session.app.git_blame_inline_wake_at(wake_deadline + std::time::Duration::from_millis(1)), None);
+    assert!(!session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(399)));
+    assert!(session.app.inline_blame_dwell.text.is_empty());
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
+    assert!(session.app.inline_blame_dwell.text.contains("Linus"));
+    assert!(session.app.inline_blame_dwell.text.contains("third"));
+
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    assert_eq!(dump["blame_inline"]["text"], session.app.inline_blame_dwell.text);
+    assert!(dump["blame_inline"]["w"].as_f64().unwrap() > 0.0);
+    assert!(dump["blame_inline"]["h"].as_f64().unwrap() > 0.0);
+    assert!(dump["blame_inline"]["y"].as_f64().unwrap() >= 0.0);
+    let first_row_y = dump["blame_inline"]["y"].as_f64().unwrap();
+    let row_h = dump["blame_inline"]["h"].as_f64().unwrap();
+    let idle = run_script(&mut session, b"idle 50\n");
+    assert!(idle.last().unwrap().contains("frames=0") && idle.last().unwrap().contains("wakes=1"), "{idle:?}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_annotation_tracks_the_next_row_geometry() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-row-geometry");
+    let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    if session.app.inline_blame_dwell.key.is_none() {
+        session.app.tick_git_blame_inline(started);
+    }
+    let started = session.app.inline_blame_dwell.since.unwrap_or(started);
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    let first_row_y = dump["blame_inline"]["y"].as_f64().unwrap();
+    let row_h = dump["blame_inline"]["h"].as_f64().unwrap();
+    session.app.editor.cursor = session.app.editor.line_offsets[1];
+    assert!(!crate::app::git_blame::inline_blame_matches_current(
+        &session.app.editor,
+        session.app.active_tab,
+        &session.app.inline_blame_dwell,
+    ), "render gate must reject the previous line before the dwell tick");
+    let moved = std::time::Instant::now();
+    assert!(session.app.tick_git_blame_inline(moved));
+    assert!(session.app.inline_blame_dwell.text.is_empty());
+    assert!(session.app.tick_git_blame_inline(moved + std::time::Duration::from_millis(400)));
+    assert!(session.app.inline_blame_dwell.text.contains("Grace"));
+    assert!(session.app.inline_blame_dwell.text.contains("second"));
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    let second_row_y = dump["blame_inline"]["y"].as_f64().unwrap();
+    assert!((second_row_y - first_row_y - row_h).abs() < 0.01, "inline hit rect should follow adjacent cursor rows: first={first_row_y}, second={second_row_y}, h={row_h}");
+    let renderer = session.app.renderer.as_ref().unwrap();
+    let cursor_row = renderer.visual_lines.iter().find(|line| line.physical_line == 2).unwrap();
+    let next_row = renderer.visual_lines.iter().find(|line| line.physical_line == 3).unwrap();
+    assert!((row_h - f64::from(renderer.line_height)).abs() < 0.01);
+    let tab_bar_h = crate::render_view::editor_content_top_inset(false, true, false, TEST_SCALE);
+    let render_scroll_y = session.app.scroll_y.current.round() - tab_bar_h;
+    let expected_row_top = f64::from(cursor_row.y_offset - render_scroll_y);
+    assert!((second_row_y - expected_row_top).abs() <= 1.0, "inline rect must start at the cursor row top: rect_y={second_row_y}, expected={expected_row_top}");
+    let next_row_top = f64::from(next_row.y_offset - render_scroll_y);
+    assert!(second_row_y + row_h <= next_row_top + 1.0, "inline rect must end before the next row: rect_bottom={}, next_row_top={next_row_top}", second_row_y + row_h);
+    assert!(cursor_row.y_offset > 0.0, "the checked annotation belongs to the second physical cursor row");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_render_gate_rejects_a_stale_version() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-version-gate");
+    let started = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    if session.app.inline_blame_dwell.key.is_none() {
+        session.app.tick_git_blame_inline(started);
+    }
+    let started = session.app.inline_blame_dwell.since.unwrap_or(started);
+    assert!(session.app.tick_git_blame_inline(started + std::time::Duration::from_millis(400)));
+    let current_version = session.app.editor.version;
+    session.app.editor.version = current_version.wrapping_add(1);
+    assert!(!crate::app::git_blame::inline_blame_matches_current(
+        &session.app.editor,
+        session.app.active_tab,
+        &session.app.inline_blame_dwell,
+    ), "render gate must reject stale text after an edit version change");
+    session.app.editor.version = current_version;
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_tab_switch_tracks_the_active_file() {
+    let (root, _, second, mut session) = inline_dwell_session("ui-git-blame-inline-tab-switch");
+    let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 8000, "second file blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+    });
+    let switched = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    assert!(!session.app.tick_git_blame_inline(switched + std::time::Duration::from_millis(399)));
+    assert!(session.app.inline_blame_dwell.text.is_empty());
+    assert!(session.app.tick_git_blame_inline(switched + std::time::Duration::from_millis(400)));
+    assert!(session.app.inline_blame_dwell.text.contains("Tab Author"));
+    assert!(session.app.inline_blame_dwell.text.contains("other file"));
+    assert_eq!(session.app.git_blame_inline_wake_at(switched + std::time::Duration::from_millis(400)), None);
+
+    session.app.switch_to_tab(0);
+    let returned = std::time::Instant::now();
+    assert!(!crate::app::git_blame::inline_blame_matches_current(
+        &session.app.editor,
+        session.app.active_tab,
+        &session.app.inline_blame_dwell,
+    ), "returning to tab A must hide tab B's annotation before the dwell tick");
+    assert!(session.app.tick_git_blame_inline(returned));
+    assert!(session.app.inline_blame_dwell.text.is_empty(), "returning to a tab must restart inline blame dwell");
+    assert!(!session.app.tick_git_blame_inline(returned + std::time::Duration::from_millis(399)));
+    assert!(session.app.inline_blame_dwell.text.is_empty());
+    assert!(session.app.tick_git_blame_inline(returned + std::time::Duration::from_millis(400)));
+    assert!(session.app.inline_blame_dwell.text.contains("Linus"), "tab A keeps its cursor on the opening line");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn headless_git_blame_inline_hides_long_lines_and_tracks_head_changes() {
+    let (root, _, _, mut session) = inline_dwell_session("ui-git-blame-inline-long-line");
+    let long = root.join("long.txt");
+    std::fs::write(&long, "x".repeat(4000)).unwrap();
+    git(&root, &["add", "long.txt"]);
+    git(&root, &["-c", "user.name=Long Author", "-c", "user.email=long@example.invalid", "commit", "-qm", "long line"]);
+    let lines = run_script(&mut session, format!("open {}\n", long.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 8000, "long file blame result", |session| {
+        session.app.editor.git_blame.blame.is_some()
+    });
+    let long_dwell = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    assert!(session.app.tick_git_blame_inline(long_dwell + std::time::Duration::from_millis(400)));
+    let frame = run_script(&mut session, b"mouse_move 0 0\ndump\n");
+    let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
+    assert!(dump["blame_inline"].is_null());
+
+    // Same content under a new HEAD: the open buffer stays clean, only the blame owner changes.
+    git(&root, &["-c", "user.name=Focus Author", "-c", "user.email=focus@example.invalid", "commit", "--amend", "--reset-author", "-qm", "external head"]);
+    let new_head = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    session.app.on_window_focus_gained();
+    wait_until(&mut session, 8000, "external HEAD snapshot", |session| {
+        session.app.editor.git_head.as_ref().and_then(|head| head.head_oid).is_some_and(|oid| oid.to_string() == new_head)
+    });
+    wait_until(&mut session, 8000, "external HEAD blame", |session| {
+        session.app.editor.git_blame.blame.as_ref().is_some_and(|blame| {
+            blame.commits.iter().any(|commit| commit.author == "Focus Author")
+        })
+    });
+    assert!(!session.app.inline_blame_dwell.text.contains("Long Author"));
+    let focused = session.app.inline_blame_dwell.since.unwrap_or_else(std::time::Instant::now);
+    assert!(!session.app.tick_git_blame_inline(focused + std::time::Duration::from_millis(399)));
+    assert!(session.app.tick_git_blame_inline(focused + std::time::Duration::from_millis(400)));
+    assert!(session.app.inline_blame_dwell.text.contains("Focus Author"));
+
+    let _ = std::fs::remove_dir_all(root);
+}

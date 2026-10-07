@@ -415,14 +415,23 @@ impl App {
         };
         if load == TabLoad::GitBasePending {
             if with_git {
-                let base = self.git_base_text_for_path(&path);
+                let snapshot = crate::app::git_baseline::load_workspace_head_snapshot(
+                    &path,
+                    &self.ide_workspaces,
+                );
                 let editor = if is_active { &mut self.editor } else { &mut self.tabs[idx].editor };
-                editor.set_git_base_text(base);
+                let (git_head, base) = snapshot
+                    .map(|(snapshot, text)| (Some(snapshot), Some(text)))
+                    .unwrap_or((None, None));
+                editor.set_git_head_snapshot(git_head, base);
                 if is_active {
                     self.inline_git_popup = None;
                 }
                 self.tabs[idx].load = TabLoad::Loaded;
                 self.notify_lsp_tab_open(idx);
+                if is_active {
+                    self.ensure_blame_for_active();
+                }
             }
             return;
         }
@@ -462,7 +471,14 @@ impl App {
         editor.set_clean_text(&text);
         apply_initial_import_folds(&mut editor, &ext, &text);
         if with_git {
-            editor.set_git_base_text(self.git_base_text_for_path(&path));
+            let snapshot = crate::app::git_baseline::load_workspace_head_snapshot(
+                &path,
+                &self.ide_workspaces,
+            );
+            let (git_head, base) = snapshot
+                .map(|(snapshot, text)| (Some(snapshot), Some(text)))
+                .unwrap_or((None, None));
+            editor.set_git_head_snapshot(git_head, base);
             self.startup_trace.mark("ide-tab-git");
         }
         if is_active {
@@ -476,6 +492,9 @@ impl App {
         self.tabs[idx].load = if with_git { TabLoad::Loaded } else { TabLoad::GitBasePending };
         if with_git {
             self.notify_lsp_tab_open(idx);
+            if is_active {
+                self.ensure_blame_for_active();
+            }
         }
     }
 

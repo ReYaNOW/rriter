@@ -219,6 +219,7 @@ impl Renderer {
                     is_ui_disabled,
                     blink_alpha,
                     active_api_route,
+                    false,
                 );
             }
         }
@@ -239,6 +240,7 @@ impl Renderer {
         progress_label: Option<&str>,
         progress_elapsed_secs: Option<f32>,
         progress_value: Option<f32>,
+        git_blame_inline: bool,
     ) {
         self.draw_status_bar_with_cursor_position(
             editor,
@@ -255,6 +257,7 @@ impl Renderer {
             progress_label,
             progress_elapsed_secs,
             progress_value,
+            git_blame_inline,
         );
     }
 
@@ -274,6 +277,7 @@ impl Renderer {
         progress_label: Option<&str>,
         progress_elapsed_secs: Option<f32>,
         progress_value: Option<f32>,
+        git_blame_inline: bool,
     ) {
         let bar_h = ide_status_bar_height(s).round();
         let bar_y = ide_status_bar_y(self.height, panel_bottom_h, s).round();
@@ -461,7 +465,47 @@ impl Renderer {
         } else {
             false
         };
-        let left_status_limit = if show_diagnostics {
+        let blame_label_w = self.measure_ui_width("Blame", text_scale).round() + 12.0 * s;
+        let blame_x = if show_diagnostics {
+            diagnostics_right + 4.0 * s
+        } else {
+            diag_x
+        };
+        let show_blame = git_blame_inline
+            && blame_x + blame_label_w + language_w + 12.0 * s < bar_x + bar_w * 0.55;
+        let blame_right = if show_blame {
+            let hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::StatusGitBlame,
+                blame_x.round(),
+                bar_y,
+                blame_label_w,
+                bar_h,
+                mx,
+                my,
+            );
+            if hovered {
+                self.push_rect(
+                    blame_x.round(),
+                    bar_y,
+                    blame_label_w,
+                    bar_h,
+                    self.ui.ink(0.07),
+                );
+            }
+            self.draw_string_scaled(
+                "Blame",
+                (blame_x + 6.0 * s).round(),
+                text_y.round(),
+                self.ui.pick(UiRole::TextPrimary, self.ui_theme.fg),
+                text_scale,
+            );
+            blame_x + blame_label_w
+        } else {
+            bar_x + pad_x
+        };
+        let left_status_limit = if show_blame {
+            blame_right
+        } else if show_diagnostics {
             diagnostics_right
         } else {
             bar_x + pad_x

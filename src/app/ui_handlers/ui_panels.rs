@@ -29,6 +29,7 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::StatusGitBlame => self.toggle_git_blame_inline(),
             UiId::TerminalBody => {
                 self.is_dragging = true;
                 self.search_focused = false;

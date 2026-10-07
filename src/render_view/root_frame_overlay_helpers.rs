@@ -120,6 +120,7 @@ impl Renderer {
         ui_my: f32,
         blink_alpha: f32,
         modal_overlay_open: bool,
+        inline_blame_dwell: Option<&crate::app::git_blame::InlineBlameDwell>,
     ) -> bool {
         if !is_ide_mode {
             self.reset_git_file_tooltip_overlay();
@@ -152,8 +153,17 @@ impl Renderer {
 
         if modal_overlay_open {
             self.reset_git_file_tooltip_overlay();
+            self.git_blame_popup_hover = None;
+            self.git_blame_popup_copied = None;
+            self.git_blame_popup_details = None;
         } else {
             self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
+            if let Some(dwell) = inline_blame_dwell {
+                self.draw_git_blame_commit_popup(editor, dwell, ui_registry, ui_mx, ui_my, s);
+            } else {
+                self.git_blame_popup_hover = None;
+                self.git_blame_popup_details = None;
+            }
         }
 
         wants_pointer |=
@@ -191,6 +201,7 @@ impl Renderer {
         modal_overlay_open: bool,
         s: f32,
         blank_editor_area: bool,
+        git_blame_inline: bool,
         empty_ide_open_label: &str,
     ) -> (bool, Vec<(usize, usize)>) {
         if blank_editor_area {
@@ -237,6 +248,7 @@ impl Renderer {
                 None,
                 None,
                 None,
+                git_blame_inline,
             );
         }
 
@@ -254,6 +266,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            None,
         );
         self.flush();
 
@@ -594,6 +607,7 @@ impl Renderer {
         is_ui_disabled: bool,
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        git_blame_inline: bool,
         is_ide_mode: bool,
         status_progress_label: Option<&str>,
         status_progress_elapsed: Option<f32>,
@@ -630,6 +644,7 @@ impl Renderer {
                 status_progress_label,
                 status_progress_elapsed,
                 status_progress_value,
+                git_blame_inline,
             );
         }
         self.draw_dialog_dim_if_open(dialog_window_open);
@@ -653,10 +668,11 @@ impl Renderer {
         ui_my: f32,
         blink_alpha: f32,
         show_readonly_notice: bool,
-        readonly_notice_text: &'static str,
+        readonly_notice_text: &str,
         tab_bar_h: f32,
         is_ui_disabled: bool,
         modal_overlay_open: bool,
+        inline_blame_dwell: &crate::app::git_blame::InlineBlameDwell,
         real_height: f32,
         mut chrome_detail_start: Option<Instant>,
         telemetry_frame_start: Option<Instant>,
@@ -687,6 +703,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            Some(inline_blame_dwell),
         );
 
         if show_readonly_notice {

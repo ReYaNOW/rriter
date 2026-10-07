@@ -1,5 +1,264 @@
+pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 102.0;
+pub(crate) const GIT_GRAPH_ROW_H: f32 = 34.0;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GitGraphReveal {
+    search: Option<GitGraphRevealSearch>,
+    highlight_oid: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GitGraphRevealSearch {
+    workspace_idx: usize,
+    repo_root: std::path::PathBuf,
+    oid: String,
+    last_requested_offset: Option<usize>,
+}
+
+impl GitGraphReveal {
+    fn start(&mut self, workspace_idx: usize, repo_root: std::path::PathBuf, oid: String) {
+        self.cancel();
+        self.search = Some(GitGraphRevealSearch {
+            workspace_idx,
+            repo_root,
+            oid,
+            last_requested_offset: None,
+        });
+        self.highlight_oid = None;
+    }
+
+    fn search(&self) -> Option<&GitGraphRevealSearch> {
+        self.search.as_ref()
+    }
+
+    pub(crate) fn highlight_oid(&self) -> Option<&str> {
+        self.highlight_oid.as_deref()
+    }
+
+    pub(crate) fn is_searching(&self) -> bool {
+        self.search.is_some()
+    }
+
+    fn mark_page_requested(&mut self, offset: usize) {
+        if let Some(search) = self.search.as_mut() {
+            search.last_requested_offset = Some(offset);
+        }
+    }
+
+    fn retry_page(&mut self) {
+        if let Some(search) = self.search.as_mut() {
+            search.last_requested_offset = None;
+        }
+    }
+
+    fn finish_found(&mut self) {
+        let Some(search) = self.search.take() else { return };
+        self.highlight_oid = Some(search.oid);
+    }
+
+    fn finish_not_found(&mut self) {
+        self.search = None;
+        self.highlight_oid = None;
+    }
+
+    fn finish_error(&mut self) {
+        self.search = None;
+        self.highlight_oid = None;
+    }
+
+    fn cancel(&mut self) {
+        self.search = None;
+        self.highlight_oid = None;
+    }
+}
+
 impl App {
+    #[cfg(not(test))]
+    const GIT_GRAPH_REVEAL_LIMIT: usize = 5000;
+    #[cfg(test)]
+    const GIT_GRAPH_REVEAL_LIMIT: usize = 250;
+
+    pub(crate) fn reveal_commit_in_graph(&mut self, repo_root: &std::path::Path, oid: &str) {
+        let workspace_idx = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .find_map(|workspace| {
+                let root = workspace.repo_root.as_ref()?;
+                crate::platform::paths_equal(root, repo_root)
+                    .then_some((workspace.workspace_idx, root.clone()))
+            })
+            .or_else(|| {
+                self.ide_workspaces
+                    .iter()
+                    .enumerate()
+                    .find(|(_, workspace_root)| {
+                        crate::platform::relative_to(repo_root, workspace_root).is_some()
+                    })
+                    .map(|(workspace_idx, _)| (workspace_idx, repo_root.to_path_buf()))
+            });
+        let Some((workspace_idx, repo_root)) = workspace_idx else {
+            self.show_notice("Рабочая область Git не найдена");
+            self.clear_git_graph_reveal();
+            return;
+        };
+
+        self.ide_panel.open(crate::app::PanelId::Git);
+        self.ide_panel.git.bottom_pane = GitBottomPane::Graph;
+        self.select_git_graph_workspace_root(workspace_idx, repo_root.clone());
+        self.ide_panel
+            .git
+            .graph_reveal
+            .start(workspace_idx, repo_root.clone(), oid.to_string());
+        self.ide_panel.git.graph_notice = Some("Ищу коммит…".to_string());
+        self.show_notice("Ищу коммит…");
+        self.advance_git_graph_reveal();
+    }
+
+    pub(crate) fn reveal_inline_blame_commit_in_graph(&mut self) {
+        let Some((repo_root, oid)) = self.renderer.as_ref().and_then(|renderer| {
+            let hover = renderer.git_blame_popup_hover?;
+            Some((self.editor.git_head.as_ref()?.repo_root.clone(), hover.oid.to_string()))
+        }) else {
+            return;
+        };
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.git_blame_popup_hover = None;
+            renderer.git_blame_popup_details = None;
+            renderer.git_blame_popup_copied = None;
+        }
+        self.reveal_commit_in_graph(&repo_root, &oid);
+    }
+
+    pub(crate) fn handle_git_blame_popup_action(&mut self, id: crate::ui_system::UiId) {
+        match id {
+            crate::ui_system::UiId::GitBlameCopyHash => self.copy_git_blame_commit_hash(),
+            crate::ui_system::UiId::GitBlameShowInGraph => {
+                self.reveal_inline_blame_commit_in_graph()
+            }
+            _ => {}
+        }
+    }
+
+    fn clear_git_graph_reveal(&mut self) {
+        self.ide_panel.git.graph_reveal.cancel();
+        if self.ide_panel.git.graph_notice.as_deref() == Some("Ищу коммит…") {
+            self.ide_panel.git.graph_notice = None;
+        }
+    }
+
+    fn advance_git_graph_reveal(&mut self) {
+        let Some(reveal) = self.ide_panel.git.graph_reveal.search() else {
+            return;
+        };
+        let workspace_idx = reveal.workspace_idx;
+        if !self.ide_panel.is_open(crate::app::PanelId::Git)
+            || !self.ide_panel.git.graph_open()
+            || self.ide_panel.git.graph_workspace_idx != Some(reveal.workspace_idx)
+            || !self.ide_panel.git.graph_repo_root.as_ref().is_some_and(|root| {
+                crate::platform::paths_equal(root, &reveal.repo_root)
+            })
+        {
+            self.clear_git_graph_reveal();
+            return;
+        }
+        if let Some(idx) = self
+            .ide_panel
+            .git
+            .graph_snapshot
+            .iter()
+            .position(|commit| commit.oid.as_ref() == reveal.oid)
+        {
+            self.ide_panel.git.graph_reveal.finish_found();
+            let scale = self
+                .renderer
+                .as_ref()
+                .map_or(1.0, |renderer| renderer.scale_factor);
+            let view_h = self
+                .renderer
+                .as_ref()
+                .and_then(|_| crate::app::mouse::git_graph_rows_bounds(self, scale))
+                .map_or(0.0, |(_, rows_h)| rows_h);
+            let max_scroll = crate::app::git_panel::git_graph_max_scroll(
+                self.ide_panel.git.graph_snapshot.len(),
+                view_h,
+                scale,
+            );
+            let row_h = crate::app::git_panel::GIT_GRAPH_ROW_H * scale;
+            let row_center = (idx as f32 + 0.5) * row_h;
+            self.ide_panel.git.graph_scroll.target = (row_center - view_h * 0.5)
+                .clamp(0.0, max_scroll);
+            self.ide_panel.git.graph_notice = None;
+            return;
+        }
+        if self.ide_panel.git.graph_pending {
+            return;
+        }
+        match self.ide_panel.git.graph_notice.take() {
+            Some(notice) if notice != "Ищу коммит…" => {
+                self.ide_panel.git.graph_reveal.finish_error();
+                self.show_notice(notice);
+                return;
+            }
+            Some(notice) => self.ide_panel.git.graph_notice = Some(notice),
+            None => {}
+        }
+        let loaded = self.ide_panel.git.graph_snapshot.len();
+        if reveal.last_requested_offset == Some(loaded)
+            || !self.ide_panel.git.graph_has_more
+            || loaded >= Self::GIT_GRAPH_REVEAL_LIMIT
+        {
+            self.ide_panel.git.graph_reveal.finish_not_found();
+            self.ide_panel.git.graph_notice = None;
+            self.show_notice("Коммит не найден в загруженной истории");
+            return;
+        }
+        let page_size = crate::app::git_panel::GIT_GRAPH_LIMIT_STEP
+            .min(Self::GIT_GRAPH_REVEAL_LIMIT.saturating_sub(loaded));
+        let next_limit = loaded.saturating_add(page_size);
+        let Some(repo_root) = self.ide_panel.git.graph_repo_root.clone() else {
+            self.clear_git_graph_reveal();
+            return;
+        };
+        if self
+            .ide_panel
+            .git
+            .graph_pending_roots
+            .contains(&crate::platform::PathKey::new(&repo_root))
+        {
+            return;
+        }
+        self.ide_panel.git.graph_commit_limit = next_limit;
+        self.ide_panel.git.graph_reveal.mark_page_requested(loaded);
+        self.spawn_git_task(GitAction::LoadGraph {
+            workspace_idx,
+            repo_root,
+            offset: loaded,
+            limit: next_limit,
+            reset_scroll: false,
+            activate: true,
+        });
+        self.ide_panel.git.graph_notice = Some("Ищу коммит…".to_string());
+        self.show_notice("Ищу коммит…");
+    }
+
+    pub(crate) fn clear_git_graph_highlight(&mut self) {
+        self.clear_git_graph_reveal();
+    }
+
+    pub(crate) fn handle_git_panel_passive_click(&mut self, id: crate::ui_system::UiId) {
+        if matches!(id, crate::ui_system::UiId::GitGraphCommit(_, _)) {
+            self.clear_git_graph_highlight();
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     pub fn refresh_git_panel(&mut self) {
+        self.clear_git_graph_reveal();
         if self.ide_workspaces.is_empty() {
             self.ide_panel.git.snapshot = GitStatusSnapshot::default();
             self.ide_panel.git.reset_async_state();
@@ -163,6 +422,7 @@ impl App {
             updated = true;
         }
         if reload_graph_cache {
+            self.clear_git_graph_reveal();
             self.ide_panel.git.graph_cache.clear();
             self.ide_panel.git.graph_latest_request_by_root.clear();
             self.ide_panel.git.graph_pending_roots.clear();
@@ -176,6 +436,9 @@ impl App {
             self.prefetch_git_graph_for_known_workspaces(force_prefetch_graph_after_status);
         } else if self.ide_panel.git.graph_refresh_after_status && !self.ide_panel.git.graph_open() {
             self.ide_panel.git.graph_refresh_after_status = false;
+        }
+        if status_event_applied {
+            self.check_git_heads(crate::app::git_baseline::HeadCheckReason::GitAction);
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
@@ -213,7 +476,22 @@ impl App {
                                 crate::platform::paths_equal(root, &event.repo_root)
                             });
                         if same_workspace && same_root {
-                            if event.offset == 0 {
+                            let reveal_page_was_superseded = event.offset == 0
+                                && self
+                                    .ide_panel
+                                    .git
+                                    .graph_reveal
+                                    .search()
+                                    .is_some_and(|search| {
+                                        search.last_requested_offset.is_some()
+                                    });
+                            if reveal_page_was_superseded {
+                                if let Some(notice) = event.notice {
+                                    self.ide_panel.git.graph_notice = Some(notice);
+                                } else {
+                                    self.ide_panel.git.graph_reveal.retry_page();
+                                }
+                            } else if event.offset == 0 {
                                 self.apply_git_graph_result(
                                     event.commits,
                                     event.lane_count,
@@ -225,6 +503,7 @@ impl App {
                             } else if event.offset == self.ide_panel.git.graph_snapshot.len() {
                                 self.append_git_graph_result(
                                     event.commits,
+                                    event.notice,
                                     event.limit,
                                     event.has_more,
                                 );
@@ -271,6 +550,9 @@ impl App {
                     .graph_pending_roots
                     .contains(&crate::platform::PathKey::new(root))
             });
+        if updated {
+            self.advance_git_graph_reveal();
+        }
         updated
     }
 
@@ -279,19 +561,19 @@ impl App {
         self.ide_panel.git.toggle_graph_pane();
         if self.ide_panel.git.graph_open() {
             self.ensure_git_graph_loaded();
+        } else {
+            self.clear_git_graph_reveal();
         }
     }
 
     pub fn toggle_git_logs(&mut self) {
         self.ide_panel.git.close_commit_menus();
+        self.clear_git_graph_reveal();
         self.ide_panel.git.toggle_logs_pane();
     }
 
     pub fn select_git_graph_workspace(&mut self, workspace_idx: usize) {
         self.ide_panel.git.close_commit_menus();
-        if self.ide_panel.git.graph_workspace_idx == Some(workspace_idx) {
-            return;
-        }
         let Some(repo_root) = self
             .ide_panel
             .git
@@ -304,6 +586,25 @@ impl App {
             self.ide_panel.git.graph_notice = Some("No Git repo".to_string());
             return;
         };
+        self.select_git_graph_workspace_root(workspace_idx, repo_root);
+    }
+
+    fn select_git_graph_workspace_root(&mut self, workspace_idx: usize, repo_root: PathBuf) {
+        if self.ide_panel.git.graph_workspace_idx == Some(workspace_idx)
+            && self.ide_panel.git.graph_repo_root.as_ref().is_some_and(|active| {
+                crate::platform::paths_equal(active, &repo_root)
+            })
+        {
+            if self.ide_panel.git.graph_snapshot.is_empty()
+                && !self.ide_panel.git.graph_pending
+                && !self.apply_cached_git_graph_for_selected(true)
+            {
+                self.load_git_graph_for_selected_workspace();
+            }
+            return;
+        }
+        self.clear_git_graph_reveal();
+        self.ide_panel.git.graph_notice = None;
         self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
         self.ide_panel.git.graph_repo_root = Some(repo_root);
         self.ide_panel.git.graph_snapshot.clear();
@@ -396,13 +697,14 @@ impl App {
     fn append_git_graph_result(
         &mut self,
         mut commits: Vec<GitGraphCommit>,
+        notice: Option<String>,
         limit: usize,
         has_more: bool,
     ) {
         self.ide_panel.git.graph_snapshot.append(&mut commits);
         self.ide_panel.git.graph_lane_count =
             apply_git_graph_lanes(&mut self.ide_panel.git.graph_snapshot);
-        self.ide_panel.git.graph_notice = None;
+        self.ide_panel.git.graph_notice = notice;
         self.ide_panel.git.graph_commit_limit = limit;
         self.ide_panel.git.graph_has_more = has_more;
         self.ide_panel.git.graph_pending = false;

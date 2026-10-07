@@ -49,7 +49,9 @@ impl App {
 
             if !clicked_inside {
                 self.lsp_actions_menu = None;
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             } else {
                 return true;
             }
@@ -149,7 +151,7 @@ impl App {
                 )
                 && self.close_active_api_output_example_menu()
             {
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
                 if clicked_id.is_none() {
                     return true;
                 }
@@ -178,6 +180,27 @@ impl App {
                 .as_ref()
                 .and_then(|renderer| renderer.git_graph_tooltip_hover)
                 .is_some_and(|hover| hover.contains(mx, my));
+            let in_blame_popup_body = self
+                .renderer
+                .as_ref()
+                .and_then(|renderer| renderer.git_blame_popup_hover)
+                .is_some_and(|hover| {
+                    mx >= hover.popup.0
+                        && mx <= hover.popup.0 + hover.popup.2
+                        && my >= hover.popup.1
+                        && my <= hover.popup.1 + hover.popup.3
+                });
+            if in_blame_popup_body
+                && button == winit::event::MouseButton::Left
+                && state == ElementState::Pressed
+                && !matches!(
+                    clicked_id,
+                    Some(crate::ui_system::UiId::GitBlameCopyHash | crate::ui_system::UiId::GitBlameShowInGraph)
+                )
+            {
+                self.window.as_ref().unwrap().request_redraw();
+                return true;
+            }
             if in_graph_tooltip_body
                 && button == winit::event::MouseButton::Left
                 && state == ElementState::Pressed

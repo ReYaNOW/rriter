@@ -1,6 +1,27 @@
 use crate::editor::Editor;
 use std::path::{Path, PathBuf};
 
+pub(crate) const GIT_BLAME_DELAY_DEFAULT: u32 = 400;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitBlameSettings {
+    pub inline: bool,
+    pub delay_ms: u32,
+}
+
+impl Default for GitBlameSettings {
+    fn default() -> Self {
+        Self {
+            inline: false,
+            delay_ms: GIT_BLAME_DELAY_DEFAULT,
+        }
+    }
+}
+
+pub(crate) fn normalize_git_blame_delay_ms(value: u32) -> u32 {
+    (value.clamp(0, 2000) / 100) * 100
+}
+
 pub(crate) const CTRL_WHEEL_MULTIPLIER_DEFAULT: f32 = 2.0;
 pub(crate) const CTRL_WHEEL_MULTIPLIER_MIN: f32 = 1.25;
 pub(crate) const CTRL_WHEEL_MULTIPLIER_MAX: f32 = 5.0;
@@ -26,6 +47,7 @@ pub struct Config {
     pub pdf_dark_pages: bool,
     pub theme: crate::theme::ThemeSelection,
     pub ctrl_wheel_multiplier: f32,
+    pub git_blame: GitBlameSettings,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
     pub rust_settings: crate::app::RustSettings,
@@ -44,6 +66,7 @@ impl Default for Config {
             pdf_dark_pages: true,
             theme: crate::theme::ThemeSelection::default(),
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
+            git_blame: GitBlameSettings::default(),
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
             rust_settings: crate::app::RustSettings::default(),
@@ -623,6 +646,8 @@ fn format_config_content(config: &Config) -> String {
         "editor_theme": config.theme.editor.key(),
         "ui_theme": config.theme.ui.key(),
         "ctrl_wheel_multiplier": normalize_ctrl_wheel_multiplier(config.ctrl_wheel_multiplier),
+        "git_blame_inline": config.git_blame.inline,
+        "git_blame_delay_ms": normalize_git_blame_delay_ms(config.git_blame.delay_ms),
         "tool_paths": tool_paths,
         "dart": {
             "enabled": config.dart_settings.enabled,
@@ -695,6 +720,12 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .and_then(serde_json::Value::as_f64)
     {
         config.window_width = value;
+    }
+    if let Some(value) = value.get("git_blame_inline").and_then(serde_json::Value::as_bool) {
+        config.git_blame.inline = value;
+    }
+    if let Some(value) = value.get("git_blame_delay_ms").and_then(serde_json::Value::as_u64) {
+        config.git_blame.delay_ms = normalize_git_blame_delay_ms(value.min(u32::MAX as u64) as u32);
     }
     if let Some(value) = value
         .get("window_height")
@@ -1315,6 +1346,36 @@ mod tests {
         let reparsed = parse_config_content(&formatted, Config::default());
         assert_eq!(reparsed.ctrl_wheel_multiplier, 3.25);
         assert!(formatted.contains("\"ctrl_wheel_multiplier\": 3.25"));
+    }
+
+    #[test]
+    fn git_blame_config_defaults_normalizes_and_roundtrips() {
+        assert!(!Config::default().git_blame.inline);
+        assert_eq!(Config::default().git_blame.delay_ms, 400);
+        assert_eq!(normalize_git_blame_delay_ms(u32::MAX), 2000);
+        assert_eq!(normalize_git_blame_delay_ms(199), 100);
+        assert_eq!(normalize_git_blame_delay_ms(99), 0);
+        let negative = parse_config_content(
+            r#"{"git_blame_delay_ms":-1}"#,
+            Config {
+                git_blame: GitBlameSettings { delay_ms: 700, ..GitBlameSettings::default() },
+                ..Config::default()
+            },
+        );
+        assert_eq!(negative.git_blame.delay_ms, 700);
+        let parsed = parse_config_content(
+            r#"{"git_blame_inline":true,"git_blame_delay_ms":987654321}"#,
+            Config::default(),
+        );
+        assert!(parsed.git_blame.inline);
+        assert_eq!(parsed.git_blame.delay_ms, 2000);
+        let config = Config {
+            git_blame: GitBlameSettings { inline: true, delay_ms: 700 },
+            ..Config::default()
+        };
+        let roundtrip = parse_config_content(&format_config_content(&config), Config::default());
+        assert!(roundtrip.git_blame.inline);
+        assert_eq!(roundtrip.git_blame.delay_ms, 700);
     }
 
     #[test]

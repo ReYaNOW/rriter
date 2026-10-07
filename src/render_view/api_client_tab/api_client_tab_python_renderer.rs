@@ -404,6 +404,9 @@ impl Renderer {
             None,
             empty_inlay,
             &[],
+            None,
+            0,
+            &crate::app::git_blame::InlineBlameDwell::default(),
         );
 
         self.line_height = old_line_height;

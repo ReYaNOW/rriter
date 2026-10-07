@@ -59,6 +59,7 @@ impl Renderer {
             status_progress_label,
             status_progress_elapsed,
             status_progress_value,
+            git_blame_inline,
             is_ui_disabled,
             ..
         } = layout;
@@ -137,6 +138,7 @@ impl Renderer {
                 status_progress_label,
                 status_progress_elapsed,
                 status_progress_value,
+                git_blame_inline,
             );
         }
         if let Some((path, tx, ty)) = tab_tooltip {
@@ -159,6 +161,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            None,
         );
         self.flush();
         self.register_root_resize_blockers(
@@ -276,6 +279,7 @@ impl Renderer {
             status_progress_label,
             status_progress_elapsed,
             status_progress_value,
+            git_blame_inline,
             is_ui_disabled,
             ..
         } = layout;
@@ -336,6 +340,7 @@ impl Renderer {
             status_progress_label,
             status_progress_elapsed,
             status_progress_value,
+            git_blame_inline,
         );
         if let Some(image) = tabs.get(active_tab).and_then(|tab| tab.image.as_deref()) {
             let (_, _, body_w, body_h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
@@ -372,6 +377,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            None,
         );
         self.flush();
         self.register_root_resize_blockers(
@@ -439,6 +445,7 @@ impl Renderer {
             status_progress_label,
             status_progress_elapsed,
             status_progress_value,
+            git_blame_inline,
             is_ui_disabled,
             ..
         } = layout;
@@ -551,6 +558,7 @@ impl Renderer {
             is_ui_disabled,
             blink_alpha,
             active_api_route,
+            git_blame_inline,
             is_ide_mode,
             status_progress_label,
             status_progress_elapsed,

@@ -142,6 +142,9 @@ impl App {
                 } else {
                     &[]
                 };
+                let blame_popup_before = self.renderer.as_ref().and_then(|renderer| {
+                    renderer.git_blame_popup_hover.map(|popup| (popup.key, popup.oid))
+                });
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -183,13 +186,22 @@ impl App {
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
-                    self.readonly_notice_text,
+                    &self.readonly_notice_text,
                     self.inline_git_popup.as_ref(),
+                    &self.inline_blame_dwell,
+                    self.git_blame_inline,
                     &self.pdf_engine,
                     self.pdf_dark_pages,
                     &self.markdown_media,
                     &self.empty_ide_open_label,
                 );
+
+                let blame_popup_after = self.renderer.as_ref().and_then(|renderer| {
+                    renderer.git_blame_popup_hover.map(|popup| (popup.key, popup.oid))
+                });
+                if blame_popup_after.is_some() && blame_popup_after != blame_popup_before {
+                    self.request_inline_blame_commit_message();
+                }
 
                 self.target_sticky_lines = target_sticky;
                 if self
@@ -554,6 +566,7 @@ impl App {
                         rust_row.as_ref(),
                         self.ide_panel.database.settings(),
                         self.ctrl_wheel_multiplier,
+                        self.git_blame_delay_ms,
                         &mut self.keymap_settings,
                         &mut self.ui_registry,
                     );

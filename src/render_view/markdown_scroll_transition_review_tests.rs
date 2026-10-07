@@ -586,6 +586,8 @@ pub(crate) mod reviewer_stage2_integration {
             false,
             "Файл открыт в режиме только чтение",
             None,
+            &crate::app::git_blame::InlineBlameDwell::default(),
+            false,
             &app.pdf_engine,
             app.pdf_dark_pages,
             &app.markdown_media,
@@ -633,6 +635,7 @@ pub(crate) mod reviewer_stage2_integration {
                     Some("Git operation with a deliberately long label"),
                     Some(125.5),
                     Some(0.42),
+                    false,
                 );
                 let toggle = app
                     .ui_registry
@@ -663,6 +666,7 @@ pub(crate) mod reviewer_stage2_integration {
                     None,
                     None,
                     None,
+                    false,
                 );
                 assert_eq!(
                     app.ui_registry
@@ -686,6 +690,7 @@ pub(crate) mod reviewer_stage2_integration {
                     None,
                     None,
                     None,
+                    false,
                 );
                 assert!(app.ui_registry.rect_for(crate::ui_system::UiId::PdfDarkToggle).is_some());
             }
