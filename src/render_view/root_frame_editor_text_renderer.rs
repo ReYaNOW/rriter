@@ -496,6 +496,14 @@ impl Renderer {
             );
         }
 
+        if editor.git_blame.column_open
+            && active_git_diff_state.is_none()
+            && is_ide_mode
+            && !show_welcome
+        {
+            self.draw_git_blame_column(editor, ui_registry, layout, editor_text);
+        }
+
         for i in 0..self.merged_intervals_cache.len() {
             let m = self.merged_intervals_cache[i];
             if m.bottom < 0.0 || m.top > real_height {
@@ -541,5 +549,64 @@ impl Renderer {
         }
 
         gutter_x
+    }
+
+    fn draw_git_blame_column(
+        &mut self,
+        editor: &Editor,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        layout: RootFramePanelLayout<'_>,
+        editor_text: RootFrameEditorText<'_>,
+    ) {
+        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let s = layout.s;
+        let column_width = (blame.column_width as f32 * 10.0 + 12.0) * s;
+        let column_x = (self.left_padding - 24.0 * s - column_width).round();
+        let strip_color = self.ui.pick(crate::theme::UiRole::GitCommit, [0.42, 0.66, 1.0, 1.0]);
+        let gutter_hit_clip = crate::ui_system::UiClipRect::new(
+            0.0,
+            editor_text.editor_clip_y,
+            self.width,
+            editor_text.editor_clip_h,
+        );
+        let gutter_bottom = editor_text.editor_clip_y + editor_text.editor_clip_h;
+        for i in editor_text.skip_visual_lines..editor_text.end_visual_line {
+            let v_line = self.visual_lines[i];
+            let phys_idx = v_line.physical_line.saturating_sub(1);
+            let line_top = v_line.y_offset - editor_text.render_scroll_y;
+            if line_top + self.line_height <= editor_text.editor_clip_y || line_top >= gutter_bottom {
+                continue;
+            }
+            let Some(head_line) = crate::editor::head_line_for(&editor.git_hunks, phys_idx) else { continue };
+            let Some(&commit_idx) = blame.line_commit.get(head_line) else { continue };
+            if blame.commits.get(commit_idx as usize).is_none_or(|commit| commit.uncommitted) {
+                continue;
+            }
+            let rank = blame.age_ranks.get(commit_idx as usize).copied().unwrap_or(0.0);
+            let mut color = strip_color;
+            color[3] = 0.18 + rank.clamp(0.0, 1.0) * 0.72;
+            self.push_rect(column_x, line_top.round(), (3.0 * s).round().max(1.0), self.line_height.round(), color);
+
+            let first_visual_segment = i == 0
+                || self.visual_lines[i - 1].physical_line != v_line.physical_line;
+            if first_visual_segment
+                && blame.column_block_starts.get(head_line).copied().unwrap_or(false)
+                && let Some(label) = blame.column_labels.get(commit_idx as usize)
+            {
+                let label_x = (column_x + 6.0 * s).round();
+                let baseline = (self.baseline_offset + v_line.y_offset - editor_text.render_scroll_y).round();
+                self.draw_string_scaled_stable(label, label_x, baseline, self.theme.line_num, 0.82);
+                ui_registry.register_rect_clipped(
+                    crate::ui_system::UiId::EditorBlameColumnRow(phys_idx),
+                    column_x,
+                    line_top,
+                    column_width,
+                    self.line_height,
+                    gutter_hit_clip,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
+            }
+        }
     }
 }

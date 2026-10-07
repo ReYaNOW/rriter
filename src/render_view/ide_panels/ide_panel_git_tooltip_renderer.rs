@@ -81,6 +81,71 @@ impl Renderer {
             self.git_blame_popup_details = None;
             return;
         };
+        self.draw_git_blame_commit_popup_at(editor, commit, annotation, current_key, ui_registry, mx, my, s);
+    }
+
+    pub(crate) fn draw_git_blame_column_popup(
+        &mut self,
+        editor: &crate::editor::Editor,
+        active_tab: usize,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        s: f32,
+    ) {
+        let hovered_line = match ui_registry.hovered() {
+            Some(crate::ui_system::UiId::EditorBlameColumnRow(line)) => Some(line),
+            _ => None,
+        };
+        let existing = self.git_blame_popup_hover;
+        let pointer_in_popup = existing.is_some_and(|hover| {
+            mx >= hover.popup.0 && mx <= hover.popup.0 + hover.popup.2
+                && my >= hover.popup.1 && my <= hover.popup.1 + hover.popup.3
+        });
+        let line = hovered_line.or_else(|| {
+            existing
+                .filter(|hover| hover.key.tab == active_tab
+                    && hover.key.version == editor.version
+                    && hover.key.generation == editor.git_blame.generation
+                    && pointer_in_popup)
+                .map(|hover| hover.key.line)
+        });
+        let Some(line) = line else {
+            self.git_blame_popup_hover = None;
+            self.git_blame_popup_copied = None;
+            self.git_blame_popup_details = None;
+            return;
+        };
+        let anchor = if hovered_line == Some(line) {
+            ui_registry.rect_for(crate::ui_system::UiId::EditorBlameColumnRow(line))
+        } else {
+            existing.map(|hover| hover.annotation)
+        };
+        let Some(anchor) = anchor else { return };
+        let Some(head_line) = crate::editor::head_line_for(&editor.git_hunks, line) else { return };
+        let Some(blame) = editor.git_blame.blame.as_ref() else { return };
+        let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
+        let Some(commit) = blame.commits.get(commit_idx as usize).filter(|commit| !commit.uncommitted) else { return };
+        let key = crate::app::git_blame::InlineDwellKey {
+            tab: active_tab,
+            line,
+            version: editor.version,
+            generation: editor.git_blame.generation,
+        };
+        self.draw_git_blame_commit_popup_at(editor, commit, anchor, key, ui_registry, mx, my, s);
+    }
+
+    fn draw_git_blame_commit_popup_at(
+        &mut self,
+        editor: &crate::editor::Editor,
+        commit: &crate::editor::BlameCommit,
+        annotation: (f32, f32, f32, f32),
+        current_key: crate::app::git_blame::InlineDwellKey,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        s: f32,
+    ) {
         let oid = commit.oid;
         let cached_message = editor.git_blame.messages.iter().find(|(cached, _)| *cached == oid).map(|(_, message)| message);
         let details_stale = self.git_blame_popup_details.as_ref().is_none_or(|details| {

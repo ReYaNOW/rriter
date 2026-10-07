@@ -455,6 +455,7 @@ pub enum UiId {
     EditorScrollbarX,
     EditorTextBody,
     EditorBlameInline,
+    EditorBlameColumnRow(usize),
     GitBlamePopupBody,
     GitBlameCopyHash,
     GitBlameShowInGraph,

@@ -73,6 +73,17 @@ impl App {
         }
     }
 
+    pub(crate) fn reveal_git_blame_line_in_graph(&mut self, line: usize) {
+        let Some(snapshot) = self.editor.git_head.as_ref() else { return };
+        let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, line) else { return };
+        let Some(blame) = self.editor.git_blame.blame.as_ref() else { return };
+        let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
+        let Some(commit) = blame.commits.get(commit_idx as usize).filter(|commit| !commit.uncommitted) else { return };
+        let repo_root = snapshot.repo_root.clone();
+        let oid = commit.oid.to_string();
+        self.reveal_commit_in_graph(&repo_root, &oid);
+    }
+
     pub(crate) fn request_inline_blame_commit_message(&mut self) {
         let Some(key) = self.inline_blame_dwell.key else { return };
         if key.generation != self.editor.git_blame.generation
@@ -89,6 +100,15 @@ impl App {
         if !commit.uncommitted {
             self.request_commit_message(commit.oid);
         }
+    }
+
+    pub(crate) fn request_git_blame_popup_message(&mut self) {
+        let Some(oid) = self.renderer.as_ref().and_then(|renderer| {
+            renderer.git_blame_popup_hover.map(|hover| hover.oid)
+        }) else {
+            return;
+        };
+        self.request_commit_message(oid);
     }
 
     pub(crate) fn toggle_git_blame_inline(&mut self) {
@@ -206,6 +226,8 @@ impl App {
                 let blame = crate::editor::parse_porcelain(&out)
                     .or_else(|| out.is_empty().then(|| GitBlame {
                         commits: Vec::new(), line_commit: Vec::new(), age_ranks: Vec::new(), column_labels: Vec::new(),
+                        column_width: 0,
+                        column_block_starts: Vec::new(),
                     }))
                     .ok_or_else(|| "Не удалось разобрать результат Git blame".to_string())?;
                 let repo = git2::Repository::open(&worker_key.repo_root)
@@ -450,6 +472,8 @@ mod tests {
             line_commit: vec![0, 0],
             age_ranks: Vec::new(),
             column_labels: Vec::new(),
+            column_width: 0,
+            column_block_starts: Vec::new(),
         };
         assert!(consistent_blame(blame.clone(), 1).is_none());
         assert!(consistent_blame(blame, 2).is_some());
