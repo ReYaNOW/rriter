@@ -210,6 +210,10 @@ fn headless_git_blame_inline_dwell_formats_once_and_tracks_the_active_file() {
     let dump: serde_json::Value = serde_json::from_str(frame.last().unwrap().strip_prefix("ok ").unwrap()).unwrap();
     let second_row_y = dump["blame_inline"]["y"].as_f64().unwrap();
     assert!((second_row_y - first_row_y - row_h).abs() < 0.01, "inline hit rect should follow adjacent cursor rows: first={first_row_y}, second={second_row_y}, h={row_h}");
+    let renderer = session.app.renderer.as_ref().unwrap();
+    let cursor_row = renderer.visual_lines.iter().find(|line| line.physical_line == 2).unwrap();
+    assert!((row_h - f64::from(renderer.line_height)).abs() < 0.01);
+    assert!(cursor_row.y_offset > 0.0, "the checked annotation belongs to the second physical cursor row");
     let current_version = session.app.editor.version;
     session.app.editor.version = current_version.wrapping_add(1);
     assert!(!crate::app::git_blame::inline_blame_matches_current(
