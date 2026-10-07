@@ -209,6 +209,26 @@ pub struct GitGraphTooltipHover {
     pub h: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct CommitDetails {
+    pub oid: String,
+    pub short_oid: String,
+    pub author: String,
+    pub author_display: String,
+    pub author_mail: Option<String>,
+    pub time: String,
+    pub summary: String,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GitBlamePopupHover {
+    pub oid: git2::Oid,
+    pub key: crate::app::git_blame::InlineDwellKey,
+    pub annotation: (f32, f32, f32, f32),
+    pub popup: (f32, f32, f32, f32),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GitTooltipTimer {
     pub kind: u8,
@@ -515,6 +535,10 @@ pub struct Renderer {
     pub git_action_tooltip: Option<(u8, usize, String, f32, f32)>,
     pub git_graph_tooltip: Option<(usize, usize, f32, f32)>,
     pub git_graph_tooltip_hover: Option<GitGraphTooltipHover>,
+    pub(crate) git_graph_tooltip_details: Option<CommitDetails>,
+    pub(crate) git_blame_popup_hover: Option<GitBlamePopupHover>,
+    pub(crate) git_blame_popup_copied: Option<git2::Oid>,
+    pub(crate) git_blame_popup_details: Option<CommitDetails>,
     pub(crate) git_graph_tooltip_text: String,
     pub(crate) git_graph_tooltip_text_rows: Vec<GitGraphTooltipTextRow>,
     pub(crate) git_graph_tooltip_selection_anchor: Option<usize>,

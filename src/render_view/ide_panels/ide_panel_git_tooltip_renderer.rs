@@ -1,5 +1,193 @@
+struct CommitDetailsTextRow {
+    x: f32,
+    top: f32,
+    line_h: f32,
+    scale: f32,
+    color: [f32; 4],
+    mono: bool,
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_commit_details_text_row(
+        &mut self,
+        text: &str,
+        row: CommitDetailsTextRow,
+        graph_selectable: bool,
+    ) {
+        if graph_selectable {
+            let start = self.push_git_graph_tooltip_text_row(text, row.x, row.top, row.line_h, row.scale, row.mono);
+            self.draw_git_graph_selectable_text(
+                text,
+                row.x,
+                row.top + row.line_h * 0.62,
+                row.color,
+                row.scale,
+                start,
+                row.top,
+                row.line_h,
+                row.mono,
+            );
+        } else if row.mono {
+            self.draw_string_mono_scaled(text, row.x.round(), (row.top + row.line_h * 0.62).round(), row.color, row.scale);
+        } else {
+            self.draw_string_scaled_stable(text, row.x.round(), (row.top + row.line_h * 0.62).round(), row.color, row.scale);
+        }
+    }
+
+    pub(crate) fn draw_git_blame_commit_popup(
+        &mut self,
+        editor: &crate::editor::Editor,
+        dwell: &crate::app::git_blame::InlineBlameDwell,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        s: f32,
+    ) {
+        let annotation = ui_registry.rect_for(crate::ui_system::UiId::EditorBlameInline);
+        let Some(current_key) = dwell.key else {
+            self.git_blame_popup_hover = None;
+            self.git_blame_popup_copied = None;
+            self.git_blame_popup_details = None;
+            return;
+        };
+        let active_commit = dwell.line.and_then(|line| {
+            if current_key.generation != editor.git_blame.generation {
+                return None;
+            }
+            let head_line = crate::editor::head_line_for(&editor.git_hunks, line)?;
+            let blame = editor.git_blame.blame.as_ref()?;
+            let commit_idx = *blame.line_commit.get(head_line)? as usize;
+            blame.commits.get(commit_idx).filter(|commit| !commit.uncommitted)
+        });
+        let hovered = self.git_blame_popup_hover.is_some_and(|hover| {
+            if hover.key != current_key { return false; }
+            let in_rect = |rect: (f32, f32, f32, f32)| {
+                mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3
+            };
+            in_rect(hover.popup) || in_rect(hover.annotation) || annotation.is_some_and(in_rect)
+        });
+        let Some(annotation) = annotation.filter(|_| {
+            hovered || ui_registry.hovered() == Some(crate::ui_system::UiId::EditorBlameInline)
+        }) else {
+            self.git_blame_popup_hover = None;
+            self.git_blame_popup_copied = None;
+            self.git_blame_popup_details = None;
+            return;
+        };
+        let Some(commit) = active_commit else {
+            self.git_blame_popup_hover = None;
+            self.git_blame_popup_copied = None;
+            self.git_blame_popup_details = None;
+            return;
+        };
+        let oid = commit.oid;
+        let cached_message = editor.git_blame.messages.iter().find(|(cached, _)| *cached == oid).map(|(_, message)| message);
+        let details_stale = self.git_blame_popup_details.as_ref().is_none_or(|details| {
+            self.git_blame_popup_hover.is_none_or(|hover| hover.oid != oid)
+                || details.author != commit.author
+                || details.author_mail.as_deref() != Some(commit.author_mail.as_str())
+                || details.summary != commit.summary
+                || details.message.as_deref() != cached_message.map(String::as_str)
+        });
+        if details_stale {
+            let full_oid = oid.to_string();
+            let author_display = if commit.author_mail.is_empty() {
+                commit.author.clone()
+            } else {
+                format!("{} <{}>", commit.author, commit.author_mail)
+            };
+            self.git_blame_popup_details = Some(crate::renderer::CommitDetails {
+                short_oid: commit.short_oid.clone(),
+                oid: full_oid,
+                author: commit.author.clone(),
+                author_display,
+                author_mail: Some(commit.author_mail.clone()),
+                time: crate::app::git_panel::format_git_absolute_time(commit.author_time, 0),
+                summary: commit.summary.clone(),
+                message: cached_message.cloned(),
+            });
+            if self.git_blame_popup_copied.is_some_and(|copied| copied != oid) {
+                self.git_blame_popup_copied = None;
+            }
+        }
+        let Some(details) = self.git_blame_popup_details.take() else { return };
+        let message = details.message.as_deref().unwrap_or(&details.summary);
+        let scale = 0.92;
+        let pad_x = 10.0 * s;
+        let pad_y = 7.0 * s;
+        let margin = 6.0 * s;
+        let popup_w = (440.0 * s).min((self.width - margin * 2.0).max(260.0 * s));
+        let inner_w = (popup_w - pad_x * 2.0).max(1.0);
+        let mut message_lines = 0usize;
+        for line in message.split('\n') {
+            message_lines += self.git_graph_tooltip_wrapped_line_count(line, inner_w, scale);
+        }
+        message_lines = message_lines.max(1);
+        let title_h = 18.0 * s;
+        let line_h = 19.0 * s;
+        let popup_h = pad_y + title_h * 3.0 + 5.0 * s + message_lines as f32 * line_h + 8.0 * s + 24.0 * s + pad_y;
+        let mut x = annotation.0 + annotation.2 + 8.0 * s;
+        if x + popup_w > self.width - margin { x = annotation.0 - popup_w - 8.0 * s; }
+        x = x.clamp(margin, (self.width - popup_w - margin).max(margin));
+        let y = (annotation.1 + annotation.3 * 0.5 - popup_h * 0.5)
+            .clamp(margin, (self.height - popup_h - margin).max(margin));
+        self.git_blame_popup_hover = Some(crate::renderer::GitBlamePopupHover {
+            oid,
+            key: current_key,
+            annotation,
+            popup: (x, y, popup_w, popup_h),
+        });
+        ui_registry.register_blocker(crate::ui_system::UiId::GitBlamePopupBody, x, y, popup_w, popup_h, mx, my);
+        self.push_rounded_rect_border(
+            x, y, popup_w, popup_h, 7.0 * s, (1.0 * s).round().max(1.0),
+            self.ui.pick(UiRole::Selection, self.ui_theme.sel),
+            self.ui.pick(UiRole::BgTooltip, [0.11, 0.12, 0.16, 0.98]),
+        );
+        let content_x = x + pad_x;
+        let mut top = y + pad_y;
+        self.draw_commit_details_text_row(&details.author_display, CommitDetailsTextRow {
+            x: content_x, top, line_h: title_h, scale: 0.86,
+            color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]), mono: false,
+        }, false);
+        top += title_h;
+        self.draw_commit_details_text_row(&details.time, CommitDetailsTextRow {
+            x: content_x, top, line_h: title_h, scale: 0.86,
+            color: self.ui.pick(UiRole::TextSecondary, [0.78, 0.82, 0.92, 1.0]), mono: false,
+        }, false);
+        top += title_h;
+        self.draw_commit_details_text_row(&details.oid, CommitDetailsTextRow {
+            x: content_x, top, line_h: title_h, scale: 0.82,
+            color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]), mono: true,
+        }, false);
+        top += title_h + 5.0 * s;
+        for message_line in message.split('\n') {
+            let mut remaining = message_line;
+            while !remaining.is_empty() {
+                let end = self.git_graph_tooltip_wrap_end(remaining, inner_w, scale);
+                let end = if end == 0 { remaining.char_indices().nth(1).map_or(remaining.len(), |(idx, _)| idx) } else { end };
+                let text = remaining[..end].trim_end();
+                self.draw_commit_details_text_row(text, CommitDetailsTextRow {
+                    x: content_x, top, line_h, scale,
+                    color: self.ui.pick(UiRole::GitCommit, [0.86, 0.90, 1.0, 1.0]), mono: false,
+                }, false);
+                top += line_h;
+                if end >= remaining.len() { break; }
+                remaining = remaining[end..].trim_start();
+            }
+            if message_line.is_empty() { top += line_h; }
+        }
+        top += 5.0 * s;
+        let copied = self.git_blame_popup_copied == Some(oid);
+        let label = if copied { "Хэш скопирован" } else { "Копировать хэш" };
+        let button_w = self.measure_ui_width(label, 0.86) + 24.0 * s;
+        let button_y = top;
+        let hovered = ui_registry.register_rect(crate::ui_system::UiId::GitBlameCopyHash, content_x, button_y, button_w, 22.0 * s, mx, my);
+        self.push_rounded_rect(content_x, button_y, button_w, 22.0 * s, 4.0 * s, if hovered { self.ui.pick(UiRole::RowHover, [0.20, 0.23, 0.31, 1.0]) } else { self.ui.ink(0.12) });
+        self.draw_string_scaled(label, content_x + 12.0 * s, (button_y + 15.0 * s).round(), self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]), 0.86);
+        self.git_blame_popup_details = Some(details);
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_git_file_tooltip(&mut self, text: &str, mouse_x: f32, mouse_y: f32, s: f32) {
         let tooltip_scale = 0.88;
@@ -181,6 +369,9 @@ impl Renderer {
         self.git_graph_tooltip_text_rows.clear();
         self.git_graph_tooltip_stable_w = 0.0;
         self.clear_git_graph_tooltip_selection();
+        self.git_blame_popup_hover = None;
+        self.git_blame_popup_copied = None;
+        self.git_blame_popup_details = None;
         self.git_tooltip_waiting = false;
         git_tooltip_reset(&mut self.git_tooltip_timer);
         self.reset_delayed_tooltip_anchor();
@@ -744,6 +935,26 @@ impl Renderer {
             self.clear_git_graph_tooltip_selection();
             self.git_graph_tooltip_visible_copied = None;
         }
+        let details_stale = self.git_graph_tooltip_details.as_ref().is_none_or(|details| {
+            details.oid.as_str() != commit.oid.as_ref()
+                || details.author != commit.author_name
+                || details.author_mail.as_deref() != Some(commit.author_email.as_str())
+                || details.time != commit.absolute_time
+                || details.summary != commit.summary
+        });
+        if details_stale {
+            self.git_graph_tooltip_details = Some(crate::renderer::CommitDetails {
+                oid: commit.oid.to_string(),
+                short_oid: commit.short_oid.clone(),
+                author: commit.author_name.clone(),
+                author_display: commit.author_name.clone(),
+                author_mail: Some(commit.author_email.clone()),
+                time: commit.absolute_time.clone(),
+                summary: commit.summary.clone(),
+                message: None,
+            });
+        }
+        let Some(details) = self.git_graph_tooltip_details.take() else { return };
         if self.git_graph_tooltip_seen_copied != copied_commit {
             self.git_graph_tooltip_seen_copied = copied_commit;
             self.git_graph_tooltip_visible_copied =
@@ -766,8 +977,7 @@ impl Renderer {
             scratch,
             format_args!("{} ({})", commit.relative_time, commit.absolute_time),
         );
-        let summary_lines =
-            self.git_graph_tooltip_wrapped_line_count(&commit.summary, inner_w, 0.9);
+        let summary_lines = self.git_graph_tooltip_wrapped_line_count(&details.summary, inner_w, 0.9);
         scratch.clear();
         if let Some(stats) = commit.stats {
             let _ =
@@ -885,24 +1095,17 @@ impl Renderer {
             title_icon_size,
             self.ui.pick(UiRole::Icon, self.ui_theme.sel),
         );
-        let row_start = self.push_git_graph_tooltip_text_row(
-            &commit.author_name,
-            author_x,
-            author_row_top,
-            title_line_h,
-            title_scale,
-            false,
-        );
-        self.draw_git_graph_selectable_text(
-            &commit.author_name,
-            author_x,
-            author_text_y,
-            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
-            title_scale,
-            row_start,
-            author_row_top,
-            title_line_h,
-            false,
+        self.draw_commit_details_text_row(
+            &details.author,
+            CommitDetailsTextRow {
+                x: author_x,
+                top: author_row_top,
+                line_h: title_line_h,
+                scale: title_scale,
+                color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
+                mono: false,
+            },
+            true,
         );
         self.draw_atlas_icon(
             crate::widgets::IconType::NumberCount,
@@ -931,27 +1134,20 @@ impl Renderer {
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(
             scratch,
-            format_args!("{} ({})", commit.relative_time, commit.absolute_time),
+            format_args!("{} ({})", commit.relative_time, details.time),
         );
         let date_x = (content_x + title_icon_size + title_icon_gap).round();
-        let row_start = self.push_git_graph_tooltip_text_row(
+        self.draw_commit_details_text_row(
             scratch,
-            date_x,
-            date_row_top,
-            title_line_h,
-            title_scale,
-            false,
-        );
-        self.draw_git_graph_selectable_text(
-            scratch,
-            date_x,
-            date_text_y,
-            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
-            title_scale,
-            row_start,
-            date_row_top,
-            title_line_h,
-            false,
+            CommitDetailsTextRow {
+                x: date_x,
+                top: date_row_top,
+                line_h: title_line_h,
+                scale: title_scale,
+                color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
+                mono: false,
+            },
+            true,
         );
         self.draw_atlas_icon(
             crate::widgets::IconType::NumberCount,
@@ -973,7 +1169,7 @@ impl Renderer {
 
         line_top += 6.0 * s;
         line_top = self.draw_git_graph_wrapped_selectable_text(
-            &commit.summary,
+            &details.summary,
             content_x,
             line_top,
             20.0 * s,
@@ -1095,23 +1291,16 @@ impl Renderer {
         line_top += 5.0 * s;
         let hash_w = self.measure_git_graph_tooltip_mono_width(&commit.short_oid, 0.86);
         let hash_x = content_x;
-        let row_start = self.push_git_graph_tooltip_text_row(
-            &commit.short_oid,
-            hash_x,
-            line_top,
-            18.0 * s,
-            0.86,
-            true,
-        );
-        self.draw_git_graph_selectable_text(
-            &commit.short_oid,
-            hash_x,
-            line_top + 18.0 * s * 0.62,
-            self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
-            0.86,
-            row_start,
-            line_top,
-            18.0 * s,
+        self.draw_commit_details_text_row(
+            &details.short_oid,
+            CommitDetailsTextRow {
+                x: hash_x,
+                top: line_top,
+                line_h: 18.0 * s,
+                scale: 0.86,
+                color: self.ui.pick(UiRole::TextPrimary, [1.0, 1.0, 1.0, 1.0]),
+                mono: true,
+            },
             true,
         );
         let copy_size = 16.0 * s;
@@ -1180,6 +1369,7 @@ impl Renderer {
             self.ui.pick(UiRole::Link, [0.38, 0.62, 1.0, 1.0]),
             0.86,
         );
+        self.git_graph_tooltip_details = Some(details);
     }
 
 }

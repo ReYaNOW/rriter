@@ -250,6 +250,12 @@ impl App {
                     window.request_redraw();
                 }
             }
+            UiId::GitBlameCopyHash => {
+                self.copy_git_blame_commit_hash();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitMessageInput => {
                 self.ide_panel.git.close_commit_menus();
                 self.ide_panel.git.close_repo_action_menu();

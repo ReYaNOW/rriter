@@ -455,6 +455,8 @@ pub enum UiId {
     EditorScrollbarX,
     EditorTextBody,
     EditorBlameInline,
+    GitBlamePopupBody,
+    GitBlameCopyHash,
     MarkdownReadBody,
     MarkdownReadScrollbar,
     MarkdownCodeCopy(usize),

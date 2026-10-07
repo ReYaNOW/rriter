@@ -61,6 +61,36 @@ pub(crate) struct CommitMessageReceiver {
 }
 
 impl App {
+    pub(crate) fn copy_git_blame_commit_hash(&mut self) {
+        let Some(oid) = self.renderer.as_ref().and_then(|renderer| {
+            renderer.git_blame_popup_hover.map(|hover| hover.oid)
+        }) else {
+            return;
+        };
+        self.set_clipboard_text(oid.to_string());
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.git_blame_popup_copied = Some(oid);
+        }
+    }
+
+    pub(crate) fn request_inline_blame_commit_message(&mut self) {
+        let Some(key) = self.inline_blame_dwell.key else { return };
+        if key.generation != self.editor.git_blame.generation
+            || key.tab != self.active_tab
+            || key.version != self.editor.version
+            || self.inline_blame_dwell.line != Some(key.line)
+        {
+            return;
+        }
+        let Some(head_line) = crate::editor::head_line_for(&self.editor.git_hunks, key.line) else { return };
+        let Some(blame) = self.editor.git_blame.blame.as_ref() else { return };
+        let Some(commit_idx) = blame.line_commit.get(head_line).copied() else { return };
+        let Some(commit) = blame.commits.get(commit_idx as usize) else { return };
+        if !commit.uncommitted {
+            self.request_commit_message(commit.oid);
+        }
+    }
+
     pub(crate) fn toggle_git_blame_inline(&mut self) {
         self.git_blame_inline = !self.git_blame_inline;
         self.save_current_config();
@@ -373,9 +403,11 @@ mod tests {
     #[test]
     fn stale_blame_generation_is_rejected() {
         let key = key();
-        let mut state = GitBlameState::default();
-        state.key = Some((key.repo_key.clone(), key.rel_path.clone(), key.oid));
-        state.generation = 7;
+        let state = GitBlameState {
+            key: Some((key.repo_key.clone(), key.rel_path.clone(), key.oid)),
+            generation: 7,
+            ..GitBlameState::default()
+        };
         assert!(blame_state_matches(&state, &key, 7));
         assert!(!blame_state_matches(&state, &key, 6));
     }
@@ -383,16 +415,20 @@ mod tests {
     #[test]
     fn blame_result_routes_by_state_after_tab_reorder() {
         let key = key();
-        let mut original = GitBlameState::default();
-        original.key = Some((key.repo_key.clone(), key.rel_path.clone(), key.oid));
-        original.generation = 7;
-        let mut other = GitBlameState::default();
-        other.key = Some((
-            crate::platform::PathKey::new(std::path::Path::new("/other")),
-            PathBuf::from("other.txt"),
-            key.oid,
-        ));
-        other.generation = 7;
+        let original = GitBlameState {
+            key: Some((key.repo_key.clone(), key.rel_path.clone(), key.oid)),
+            generation: 7,
+            ..GitBlameState::default()
+        };
+        let other = GitBlameState {
+            key: Some((
+                crate::platform::PathKey::new(std::path::Path::new("/other")),
+                PathBuf::from("other.txt"),
+                key.oid,
+            )),
+            generation: 7,
+            ..GitBlameState::default()
+        };
         let reordered = [other, original];
 
         assert_eq!(matching_blame_state_index(reordered.iter(), &key, 7), Some(1));

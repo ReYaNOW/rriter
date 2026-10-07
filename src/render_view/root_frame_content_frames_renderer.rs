@@ -161,6 +161,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            None,
         );
         self.flush();
         self.register_root_resize_blockers(
@@ -376,6 +377,7 @@ impl Renderer {
             ui_my,
             blink_alpha,
             modal_overlay_open,
+            None,
         );
         self.flush();
         self.register_root_resize_blockers(
