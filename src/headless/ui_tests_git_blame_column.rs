@@ -31,20 +31,25 @@ fn headless_git_blame_column_refreshes_after_closing_active_tab() {
         let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
         assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     }
-    session.app.switch_to_tab(1);
+    // Opening two files in a fresh workspace yields exactly [second.txt, blame.txt].
+    assert_eq!(session.app.tabs.len(), 2);
+    session.app.switch_to_tab(0);
+    assert_eq!(session.app.file_path.as_deref(), Some(second_file.as_path()));
     session.app.editor.git_blame.column_open = true;
     session.app.ensure_blame_for_active();
     wait_until(&mut session, 8000, "initial second-file blame", |session| {
         session.app.editor.git_blame.current_for(session.app.editor.git_head.as_ref()).is_some()
     });
-    session.app.switch_to_tab(2);
+    session.app.switch_to_tab(1);
+    assert_eq!(session.app.file_path.as_deref(), Some(first_file.as_path()));
 
     std::fs::write(&second_file, "new committed line\n").unwrap();
     git(&root, &["add", "second.txt"]);
     git(&root, &["commit", "-qm", "update second file"]);
     let expected_head = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
-    session.app.close_tab_at(2);
-    assert_eq!(session.app.active_tab, 1);
+    session.app.close_tab_at(1);
+    assert_eq!(session.app.active_tab, 0);
+    assert_eq!(session.app.file_path.as_deref(), Some(second_file.as_path()));
     assert!(session.app.editor.git_blame.current_for(session.app.editor.git_head.as_ref()).is_none());
     let interim = dump(&mut session);
     assert!(interim["blame_column"]["visible_labels"].as_array().is_some_and(Vec::is_empty));
