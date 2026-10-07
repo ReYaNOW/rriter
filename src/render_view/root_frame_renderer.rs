@@ -500,7 +500,7 @@ impl Renderer {
             telemetry_frame_start,
             &mut telemetry_root_phases,
             &mut telemetry_editor_time,
-            inline_git_popup.map(|popup| popup.anchor_line),
+            inline_git_popup.map(|popup| popup.anchor_line.saturating_sub(1)),
             inline_blame_dwell,
         );
 

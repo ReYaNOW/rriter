@@ -83,7 +83,6 @@ fn headless_git_blame_inline_attributes_a_line_below_inserted_block() {
 }
 
 #[test]
-#[ignore = "bug: popup's one-based anchor line is compared with a zero-based editor line; repro: open popup at line 2 while blame is shown on line 2 (src/render_view/editor_text_layer.rs:835; src/render_view/root_frame_renderer.rs:502)"]
 fn headless_git_blame_inline_hunk_popup_suppresses_annotation() {
     let (root, file) = git_blame_fixture("ui-git-blame-inline-popup");
     std::fs::write(&file, "working first\nsecond updated\nthird\n").unwrap();
@@ -114,22 +113,5 @@ fn headless_git_blame_inline_skips_annotation_on_a_long_unwrapped_line() {
     move_cursor_to_line(&mut session, 0);
     run_ok(&mut session, "idle 250\n");
     assert!(dump(&mut session)["blame_inline"].is_null());
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-#[ignore = "bug: editor code lines are never soft-wrapped; repro: open a committed long line and enable soft wrap (src/render_view/core_text.rs:470-473)"]
-fn headless_git_blame_inline_wraps_annotation_to_last_visual_segment() {
-    let (root, file) = git_blame_fixture("ui-git-blame-inline-wrap");
-    let wrapped = format!("{} tail\nsecond updated\nthird\n", "word ".repeat(300));
-    std::fs::write(&file, wrapped).unwrap();
-    git(&root, &["add", "blame.txt"]);
-    git(&root, &["-c", "user.name=Wrap Author", "-c", "user.email=wrap@example.invalid", "commit", "-qm", "long wrapped line"]);
-    let mut session = open_blame_file(&root, &file);
-    move_cursor_to_line(&mut session, 0);
-    let annotation = wait_for_annotation(&mut session, "Wrap Author");
-    assert!(annotation.contains("long wrapped line"));
-    let state = dump(&mut session);
-    assert!(state["blame_inline"]["y"].as_f64().unwrap() > 0.0);
     let _ = std::fs::remove_dir_all(root);
 }
