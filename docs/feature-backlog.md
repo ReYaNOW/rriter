@@ -101,6 +101,8 @@ PDF-просмотр, Markdown Read/Edit, установка uv/ruff/ty из р�
 | Inline assistant | Не пользуюсь |
 | Плагины / WASM API | Не хочу абстракцию для плагинов в коде; нужное добавляю сам |
 | Debugger (DAP) с UI | Баги ищут агенты в терминале (логи, тесты, pdb/lldb), панель отладки им не нужна |
+| Профилировщик (flame graph во вкладке) | Агенты запускают perf/samply/py-spy в терминале сами |
+| Kubernetes-панель | Хватает kubectl в терминале |
 | Импорт тем VS Code/Zed | Достаточно своих |
 | Jupyter / REPL / .ipynb | Не делаю data science |
 | Collaboration | Работаю один |
