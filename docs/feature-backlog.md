@@ -47,9 +47,7 @@ PDF-просмотр, Markdown Read/Edit, установка uv/ruff/ty из р�
 - **Рефакторинги через LSP** — показывать все code actions сервера (extract/inline/move где даёт сервер),
   своих не писать.
 
-### Запуск, отладка, тесты
-- **Debugger (DAP)** — брейкпоинты в gutter, step/continue, variables/call stack/watch; debugpy, Dart DAP,
-  codelldb.
+### Запуск и тесты
 - **Run configurations / Tasks** — сохранённые команды, кнопка Run, «запустить этот файл», runnables
   в gutter, вывод в панель.
 - **Test runner** — панель тестов (pytest / cargo test), запуск одного теста из gutter, дерево
@@ -102,6 +100,7 @@ PDF-просмотр, Markdown Read/Edit, установка uv/ruff/ty из р�
 | Agent panel (ACP или свой) | Терминала с Claude Code хватает |
 | Inline assistant | Не пользуюсь |
 | Плагины / WASM API | Не хочу абстракцию для плагинов в коде; нужное добавляю сам |
+| Debugger (DAP) с UI | Баги ищут агенты в терминале (логи, тесты, pdb/lldb), панель отладки им не нужна |
 | Импорт тем VS Code/Zed | Достаточно своих |
 | Jupyter / REPL / .ipynb | Не делаю data science |
 | Collaboration | Работаю один |
