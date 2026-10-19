@@ -61,6 +61,12 @@ impl Renderer {
         toc.max_scroll = (content_h - viewport_h).max(0.0);
         toc.scroll.clamp_target(0.0, toc.max_scroll);
         toc.scroll.current = toc.scroll.current.clamp(0.0, toc.max_scroll);
+        // Reader-follow reveal needs max_scroll, so it runs here rather than in follow_reader.
+        if std::mem::take(&mut toc.reveal_selected)
+            && let Some(index) = toc.selected
+        {
+            toc.reveal_row(index, row_h, viewport_h);
+        }
         toc.rect = Some((x, y, width, height));
 
         ui_registry.mark_overlay_start();

@@ -639,6 +639,9 @@ impl App {
                     }
                 }
 
+                if self.markdown_toc.open {
+                    self.follow_markdown_toc_reader();
+                }
                 if self.markdown_toc.open
                     && let Some(renderer) = self.renderer.as_mut()
                 {

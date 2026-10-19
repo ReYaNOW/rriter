@@ -512,10 +512,12 @@ pub struct Renderer {
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, IconAtlasEntry>,
     pub icon_logo: Option<glow::Texture>,
-    /// Кэш SVG-иконок для дерева файлов. Ключ содержит вариант темы.
-    pub file_icon_cache: rustc_hash::FxHashMap<(&'static str, bool), IconAtlasEntry>,
-    pub(crate) rasterized_file_icons:
-        rustc_hash::FxHashMap<(&'static str, bool), crate::app::file_tree::RasterizedIconState>,
+    /// Кэш SVG-иконок для дерева файлов. Ключ содержит файл/папку и вариант темы.
+    pub file_icon_cache: rustc_hash::FxHashMap<crate::app::file_tree::FileIconKey, IconAtlasEntry>,
+    pub(crate) rasterized_file_icons: rustc_hash::FxHashMap<
+        crate::app::file_tree::FileIconKey,
+        crate::app::file_tree::RasterizedIconState,
+    >,
     /// On-demand file icon rasterizations still allowed in this frame; reset at frame start.
     pub(crate) icon_rasterize_budget: u8,
     /// An icon was skipped this frame because the budget ran out; the frame loop

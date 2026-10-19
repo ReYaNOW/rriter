@@ -27,7 +27,7 @@ impl App {
                 // File icons are rasterized per light/dark variant; the other variant's
                 // raw rasters are dead weight (atlas entries stay for a quick switch back).
                 let is_dark = renderer.ui.is_dark;
-                renderer.rasterized_file_icons.retain(|(_, variant), _| *variant == is_dark);
+                renderer.rasterized_file_icons.retain(|icon, _| icon.is_dark == is_dark);
             }
         }
         if ui_variant_changed {

@@ -323,8 +323,8 @@ fn second_file_tree_scan_skips_known_icon_keys() {
     loop {
         match first.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
             FileTreeScanMessage::Nodes(_) => {}
-            FileTreeScanMessage::Icon(key, is_dark, _) => {
-                known_icons.insert((key, is_dark));
+            FileTreeScanMessage::Icon(icon, _) => {
+                known_icons.insert(icon);
             }
             FileTreeScanMessage::IconsReady => break,
             FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
@@ -336,8 +336,8 @@ fn second_file_tree_scan_skips_known_icon_keys() {
     loop {
         match second.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
             FileTreeScanMessage::Nodes(_) => {}
-            FileTreeScanMessage::Icon(key, is_dark, _) => {
-                assert!(!known_icons.contains(&(key, is_dark)));
+            FileTreeScanMessage::Icon(icon, _) => {
+                assert!(!known_icons.contains(&icon));
             }
             FileTreeScanMessage::IconsReady => break,
             FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),

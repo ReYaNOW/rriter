@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::{App, EditorTabKind, PendingAction};
 use super::markdown_nav::{
-    LinkAction, heading_for_anchor, heading_slugs, is_link_click, link_action,
+    LinkAction, heading_for_anchor, heading_slugs, is_link_click, link_action, toc_index_at,
 };
 use crate::render_view::markdown_read::MarkdownSourceAnchor;
 use crate::ui_system::UiId;
@@ -25,10 +25,27 @@ impl App {
                 .map(|document| document.headings(&self.markdown.read_source))
                 .unwrap_or_default();
             self.markdown_toc.open(&headings);
+            self.follow_markdown_toc_reader();
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+    }
+
+    /// Moves the TOC highlight to the heading the reader is in. Called every frame while the
+    /// popup is open, so it tracks scrolling; the popup itself ignores unchanged headings.
+    pub(crate) fn follow_markdown_toc_reader(&mut self) {
+        // Read mode follows the viewport through the layout's anchor line; Edit mode follows the caret.
+        let position = if self.markdown_mode() == MarkdownMode::Read {
+            self.markdown
+                .read_layout
+                .viewport_source_anchor(self.scroll_y.current)
+                .map(|anchor| anchor.source_range.start)
+        } else {
+            Some(self.editor.cursor)
+        };
+        let current = position.and_then(|position| toc_index_at(&self.markdown_toc.items, position));
+        self.markdown_toc.follow_reader(current);
     }
 
     pub(crate) fn handle_markdown_toc_key(
