@@ -566,16 +566,15 @@ impl Renderer {
 
     fn upload_file_icon_from_pending_raster(
         &mut self,
-        key: &'static str,
+        cache_key: crate::app::file_tree::FileIconKey,
     ) -> Option<IconAtlasEntry> {
         use crate::app::file_tree::RasterizedIconState;
 
         // The file-tree scan only rasterizes keys of nodes it lists. A tab of a file outside
-        // the workspace (or in a collapsed folder) asks for a key nobody rasterized, so
-        // rasterize it here, once. `Missing` stays in the map as a negative cache, otherwise
-        // an absent asset would be re-rasterized every frame.
-        let is_dark = self.ui.is_dark;
-        let cache_key = (key, is_dark);
+        // the workspace (or in a collapsed folder), or any row drawn before the scan's icon
+        // messages arrive, asks for a key nobody rasterized, so rasterize it here, once.
+        // `Missing` stays in the map as a negative cache, otherwise an absent asset would be
+        // re-rasterized every frame.
         if !self.rasterized_file_icons.contains_key(&cache_key) {
             // At most one synchronous rasterization per frame; the rest retry next frame
             // (or get picked up by the file-tree scan).
@@ -584,11 +583,13 @@ impl Renderer {
                 return None;
             }
             self.icon_rasterize_budget -= 1;
-            let mut state = crate::app::file_tree::pre_rasterize_icon(key, false, is_dark);
-            if matches!(state, RasterizedIconState::Missing) {
-                // Callers pass an unreliable `is_folder`; folder-only keys live in another set.
-                state = crate::app::file_tree::pre_rasterize_icon(key, true, is_dark);
-            }
+            // File and folder keys share stems (`default` is a folder for folders and an
+            // asterisk for files): rasterize only from the caller's namespace.
+            let state = crate::app::file_tree::pre_rasterize_icon(
+                cache_key.key,
+                cache_key.is_folder,
+                cache_key.is_dark,
+            );
             self.rasterized_file_icons.insert(cache_key, state);
         }
         if !matches!(
@@ -611,19 +612,24 @@ impl Renderer {
     }
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
-    /// Загружает текстуру при первом обращении (не в draw-цикле — только при промахе кэша).
+    /// On a cache miss the icon is rasterized and uploaded on demand, so this can run inside the draw loop.
     pub fn draw_file_icon(
         &mut self,
         key: &'static str,
-        _is_folder: bool,
+        is_folder: bool,
         x: f32,
         y: f32,
         size: f32,
     ) {
-        let entry = if let Some(&entry) = self.file_icon_cache.get(&(key, self.ui.is_dark)) {
+        let cache_key = crate::app::file_tree::FileIconKey {
+            key,
+            is_folder,
+            is_dark: self.ui.is_dark,
+        };
+        let entry = if let Some(&entry) = self.file_icon_cache.get(&cache_key) {
             entry
         } else {
-            let Some(entry) = self.upload_file_icon_from_pending_raster(key) else {
+            let Some(entry) = self.upload_file_icon_from_pending_raster(cache_key) else {
                 return;
             };
             entry

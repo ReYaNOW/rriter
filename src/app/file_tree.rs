@@ -662,7 +662,7 @@ impl App {
                 .keys()
                 .chain(renderer.rasterized_file_icons.keys())
                 .copied()
-                .filter(|(_, variant)| *variant == is_dark)
+                .filter(|icon| icon.is_dark == is_dark)
                 .collect()
         });
         self.ide_panel.file_tree_error = None;
@@ -718,12 +718,12 @@ impl App {
                                 }
                                 updated = true;
                             }
-                            crate::app::file_tree::FileTreeScanMessage::Icon(key, is_dark, state) => {
+                            crate::app::file_tree::FileTreeScanMessage::Icon(icon, state) => {
                                 if let Some(renderer) = self.renderer.as_mut()
-                                    && renderer.ui.is_dark == is_dark
-                                    && !renderer.file_icon_cache.contains_key(&(key, is_dark))
+                                    && renderer.ui.is_dark == icon.is_dark
+                                    && !renderer.file_icon_cache.contains_key(&icon)
                                 {
-                                    renderer.rasterized_file_icons.insert((key, is_dark), state);
+                                    renderer.rasterized_file_icons.insert(icon, state);
                                 }
                                 updated = true;
                             }

@@ -144,7 +144,12 @@ pub(crate) struct TocItem {
 pub(crate) struct TocPopup {
     pub(crate) open: bool,
     pub(crate) items: Vec<TocItem>,
+    /// Highlighted row: the reader's current heading, or the row the arrow keys moved to.
     pub(crate) selected: Option<usize>,
+    /// Heading the reader was last reported to be in; `follow_reader` acts only on change.
+    pub(crate) followed_heading: Option<usize>,
+    /// Set when `follow_reader` moves the highlight; the next draw scrolls the row into view.
+    pub(crate) reveal_selected: bool,
     pub(crate) scroll: crate::scroll::ScrollState,
     pub(crate) rect: Option<(f32, f32, f32, f32)>,
     pub(crate) max_scroll: f32,
@@ -156,6 +161,8 @@ impl Default for TocPopup {
             open: false,
             items: Vec::new(),
             selected: None,
+            followed_heading: None,
+            reveal_selected: false,
             scroll: crate::scroll::ScrollState::new(7.0),
             rect: None,
             max_scroll: 0.0,
@@ -171,24 +178,30 @@ impl TocPopup {
             text: heading.text.clone(),
             source_range: heading.source_range.clone(),
         }));
-        self.selected = (!self.items.is_empty()).then_some(0);
+        // Nothing is highlighted until `follow_reader` reports the reader's heading.
+        self.selected = None;
+        self.followed_heading = None;
+        self.reveal_selected = false;
         self.scroll.jump_to(0.0);
         self.max_scroll = 0.0;
         self.open = true;
     }
 
-    pub(crate) fn close(&mut self) {
-        self.open = false;
-        self.rect = None;
+    /// Moves the highlight to `current` when the reader's heading changed since the last call.
+    /// Between reader moves the highlight stays where the arrow keys left it.
+    pub(crate) fn follow_reader(&mut self, current: Option<usize>) {
+        if current == self.followed_heading {
+            return;
+        }
+        self.followed_heading = current;
+        self.selected = current;
+        self.reveal_selected = true;
     }
 
-    pub(crate) fn move_selection(&mut self, delta: isize, row_h: f32, visible_h: f32) {
-        let Some(selected) = self.selected else {
-            return;
-        };
-        let next = selected.saturating_add_signed(delta).min(self.items.len().saturating_sub(1));
-        self.selected = Some(next);
-        let row_top = next as f32 * row_h;
+    /// Scrolls the popup list so row `index` is fully inside a viewport of `visible_h`.
+    /// Used by arrow navigation and by the reader follow, so both keep the highlight visible.
+    pub(crate) fn reveal_row(&mut self, index: usize, row_h: f32, visible_h: f32) {
+        let row_top = index as f32 * row_h;
         let row_bottom = row_top + row_h;
         if row_top < self.scroll.target {
             self.scroll.target = row_top;
@@ -197,6 +210,28 @@ impl TocPopup {
         }
         self.scroll.clamp_target(0.0, self.max_scroll);
     }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.rect = None;
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize, row_h: f32, visible_h: f32) {
+        let last = self.items.len().saturating_sub(1);
+        let next = match self.selected {
+            Some(selected) => selected.saturating_add_signed(delta).min(last),
+            // Above the first heading nothing is highlighted; the first arrow press starts at the top.
+            None if self.items.is_empty() => return,
+            None => 0,
+        };
+        self.selected = Some(next);
+        self.reveal_row(next, row_h, visible_h);
+    }
+}
+
+/// Index of the last TOC item starting at or before byte `position`; `None` above the first item.
+pub(crate) fn toc_index_at(items: &[TocItem], position: usize) -> Option<usize> {
+    items.partition_point(|item| item.source_range.start <= position).checked_sub(1)
 }
 
 /// Source range of the heading whose slug is `anchor`; GitHub matches fragments case-insensitively.
@@ -1139,5 +1174,61 @@ mod tests {
         assert_eq!(toc.selected, Some(1));
         toc.move_selection(1, 28.0, 28.0);
         assert_eq!(toc.selected, Some(1));
+    }
+
+    #[test]
+    fn toc_highlight_follows_reader_heading_and_arrows_hold_until_reader_moves() {
+        let source = "# First\n\n## Second\n\n## Third\n";
+        let headings = parse(source).headings(source);
+        let mut toc = TocPopup::default();
+        toc.open(&headings);
+        assert_eq!(toc.selected, None, "nothing is highlighted before the reader reports its heading");
+        toc.follow_reader(Some(1));
+        assert_eq!(toc.selected, Some(1));
+        toc.move_selection(1, 28.0, 28.0);
+        assert_eq!(toc.selected, Some(2));
+        toc.follow_reader(Some(1));
+        assert_eq!(toc.selected, Some(2), "arrow selection holds while the reader does not move");
+        toc.follow_reader(Some(0));
+        assert_eq!(toc.selected, Some(0), "a reader heading change moves the highlight");
+    }
+
+    #[test]
+    fn toc_index_at_picks_the_heading_whose_section_contains_the_position() {
+        let source = "Intro\n\n# A\n\ntext\n\n## B\n";
+        let headings = parse(source).headings(source);
+        let mut toc = TocPopup::default();
+        toc.open(&headings);
+        let a = source.find("# A").expect("heading A");
+        let b = source.find("## B").expect("heading B");
+        assert_eq!(toc_index_at(&toc.items, 0), None, "preamble is above the first heading");
+        assert_eq!(toc_index_at(&toc.items, a), Some(0));
+        assert_eq!(toc_index_at(&toc.items, b - 1), Some(0));
+        assert_eq!(toc_index_at(&toc.items, b), Some(1));
+        assert_eq!(toc_index_at(&toc.items, source.len()), Some(1));
+    }
+
+    #[test]
+    fn reader_follow_requests_reveal_only_on_heading_change_and_reveal_keeps_row_visible() {
+        let mut toc = TocPopup {
+            items: (0..30)
+                .map(|index| TocItem {
+                    level: 2,
+                    text: format!("H{index}"),
+                    source_range: index * 10..index * 10 + 5,
+                })
+                .collect(),
+            // 30 rows of 28 px in a 200 px viewport: the list scrolls up to 640 px.
+            max_scroll: 30.0 * 28.0 - 200.0,
+            ..TocPopup::default()
+        };
+        toc.follow_reader(Some(20));
+        assert!(toc.reveal_selected, "a changed heading must request a reveal");
+        toc.reveal_selected = false;
+        toc.follow_reader(Some(20));
+        assert!(!toc.reveal_selected, "an unchanged heading must not override arrow navigation");
+        // Row 20 spans 560..588 px; aligning its bottom with a 200 px viewport gives 588 - 200 = 388.
+        toc.reveal_row(20, 28.0, 200.0);
+        assert_eq!(toc.scroll.target, 388.0);
     }
 }

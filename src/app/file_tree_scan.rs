@@ -16,6 +16,16 @@ pub enum RasterizedIconState {
     Ready(Box<[u8]>),
 }
 
+/// Identity of one rasterized file-tree icon. File and folder icon keys are separate
+/// namespaces that share ~150 stems (`default`, `rust`, `docker`, ...): `default` is the
+/// plain folder for folders and the grey asterisk for files, so `is_folder` is part of it.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FileIconKey {
+    pub key: &'static str,
+    pub is_folder: bool,
+    pub is_dark: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GitignoreFingerprint {
     exists: bool,
@@ -364,7 +374,7 @@ fn push_file_nodes(
 #[derive(Debug)]
 pub enum FileTreeScanMessage {
     Nodes(Vec<FileNode>),
-    Icon(&'static str, bool, RasterizedIconState),
+    Icon(FileIconKey, RasterizedIconState),
     IconsReady,
     Failed(String),
 }
@@ -380,7 +390,7 @@ pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
     user_patterns: Vec<String>,
-    known_icons: FxHashSet<(&'static str, bool)>,
+    known_icons: FxHashSet<FileIconKey>,
     is_dark: bool,
     ui_waker: &crate::ui_waker::UiWaker,
 ) -> mpsc::Receiver<FileTreeScanMessage> {
@@ -417,23 +427,27 @@ pub fn spawn_scan(
 
         let mut needed_icons = rustc_hash::FxHashSet::default();
         for node in &full_nodes {
-            needed_icons.insert((node.icon_key, node.is_dir));
+            needed_icons.insert(FileIconKey {
+                key: node.icon_key,
+                is_folder: node.is_dir,
+                is_dark,
+            });
         }
-        needed_icons.retain(|(key, _)| !known_icons.contains(&(*key, is_dark)));
+        needed_icons.retain(|icon| !known_icons.contains(icon));
 
         // Отправляем полное дерево немедленно (текст появится мгновенно)
         let _ = worker_tx.send(FileTreeScanMessage::Nodes(full_nodes));
 
         // STEP 2: Параллельная растеризация иконок без блокировки UI
         if needed_icons.len() >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
-            needed_icons.into_par_iter().for_each(|(key, is_dir)| {
-                let state = crate::app::file_tree::pre_rasterize_icon(key, is_dir, is_dark);
-                let _ = worker_tx.send(FileTreeScanMessage::Icon(key, is_dark, state));
+            needed_icons.into_par_iter().for_each(|icon| {
+                let state = crate::app::file_tree::pre_rasterize_icon(icon.key, icon.is_folder, is_dark);
+                let _ = worker_tx.send(FileTreeScanMessage::Icon(icon, state));
             });
         } else {
-            for (key, is_dir) in needed_icons {
-                let state = crate::app::file_tree::pre_rasterize_icon(key, is_dir, is_dark);
-                let _ = worker_tx.send(FileTreeScanMessage::Icon(key, is_dark, state));
+            for icon in needed_icons {
+                let state = crate::app::file_tree::pre_rasterize_icon(icon.key, icon.is_folder, is_dark);
+                let _ = worker_tx.send(FileTreeScanMessage::Icon(icon, state));
             }
         }
 

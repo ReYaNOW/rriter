@@ -92,6 +92,12 @@ fn toc_read_navigation_edit_refresh_and_shortcut_routing() {
     wait_until(&mut session, WAIT_MS, "Reader scroll reaches second heading", |session| {
         !session.app.markdown_toc.open && (session.app.scroll_y.current - second_target).abs() < 1.0
     });
+    // Reopening at the second heading must highlight it; scroll 0 ("# First") would report index 0.
+    let state = open_toc_with_shortcut(&mut session);
+    assert_eq!(state["markdown_toc"]["open"], true);
+    assert_eq!(state["markdown_toc"]["selected"], 1);
+    let lines = run_script(&mut session, b"key escape\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 
     click_ui(&mut session, "MarkdownModeToggle");
     let replacement = format!("# Edited\n\n## Second\n\n{}", many_lines(30));
@@ -102,7 +108,9 @@ fn toc_read_navigation_edit_refresh_and_shortcut_routing() {
     let state = open_toc_with_shortcut(&mut session);
     assert_eq!(state["markdown_toc"]["open"], true);
     assert_eq!(state["markdown_toc"]["items"][0], "Edited");
-    let lines = run_script(&mut session, b"key enter\ndump\n");
+    // The caret ends in "Second" after typing, so the highlight follows it there.
+    assert_eq!(state["markdown_toc"]["selected"], 1);
+    let lines = run_script(&mut session, b"key up\nkey enter\ndump\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = state_reply(&lines);
     assert_eq!(state["markdown_toc"]["open"], false);

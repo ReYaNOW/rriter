@@ -128,6 +128,62 @@ fn headless_tree_250_files_expands_and_scrolls_within_budget() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A folder without its own icon (key "default") drawn before the scan delivered its raster
+/// goes through the renderer's on-demand rasterization. That path must rasterize the folder
+/// svg, not the file svg of the same key (`files/default.svg`, a grey asterisk).
+#[test]
+fn headless_tree_plain_folder_icon_survives_on_demand_rasterization() {
+    let dir = scratch_dir("ui-tree-plain-folder-icon");
+    std::fs::create_dir_all(dir.join("plainfolder")).unwrap();
+    assert_eq!(crate::app::file_icons::folder_icon_key_for_name("plainfolder"), "default");
+    let mut session = workspace_with_explorer(800, 500, 1.0, &dir);
+    let state = dump(&mut session);
+    let row = ui_rect(&state, "FileTreeNode(1)");
+    let arrow = ui_rect(&state, "FileTreeArrow(1)");
+    // The icon follows the disclosure arrow; one row height covers it.
+    let icon_rect = [arrow[0] + arrow[2], row[1], row[3], row[3]];
+    let shot = |session: &mut crate::headless::HeadlessSession, name: &str| {
+        let path = dir.join(format!("{name}.png"));
+        let lines = run_script(
+            session,
+            format!("mouse_move 0 0\nsettle 2000\nscreenshot {}\n", path.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        image::open(&path).unwrap().to_rgba8()
+    };
+    // The reference must be the scan's folder raster, not the asterisk the tree may draw
+    // before the scan delivers icons; wait until the folder icon is cached before shooting it.
+    wait_until(&mut session, 15_000, "folder icon delivered by scan", |session| {
+        session.app.renderer.as_ref().is_some_and(|renderer| {
+            renderer.file_icon_cache.keys().any(|key| key.key == "default" && key.is_folder)
+        })
+    });
+    let from_scan = shot(&mut session, "from-scan");
+
+    // Seeded: empty icon caches model a tree frame drawn before the scan's icon messages
+    // arrive (first open of a large tree, light/dark switch), so every icon goes on-demand.
+    let renderer = session.app.renderer.as_mut().unwrap();
+    renderer.file_icon_cache.clear();
+    renderer.rasterized_file_icons.clear();
+    let on_demand = shot(&mut session, "on-demand");
+
+    let mut differing = 0;
+    for y in icon_rect[1] as u32..(icon_rect[1] + icon_rect[3]) as u32 {
+        for x in icon_rect[0] as u32..(icon_rect[0] + icon_rect[2]) as u32 {
+            let a = from_scan.get_pixel(x, y).0;
+            let b = on_demand.get_pixel(x, y).0;
+            if a.iter().zip(b.iter()).any(|(a, b)| a.abs_diff(*b) > 24) {
+                differing += 1;
+            }
+        }
+    }
+    assert!(
+        differing <= 4,
+        "folder icon changed after on-demand rasterization: {differing} pixels differ in {icon_rect:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Frame budget on the app's own work: `update_ms + draw_cpu_ms` of every recorded frame.
 /// `total_ms` (and so `over_budget`) also holds the `glFinish` wait, which grows with every
 /// other GL context on the GPU (parallel test processes, a game): on the same frames it goes
