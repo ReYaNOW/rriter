@@ -58,7 +58,9 @@ impl App {
             return;
         }
 
-        self.forward_terminal_mouse_report(state, button, mx, my);
+        if self.forward_terminal_mouse_button(state, button, mx, my) {
+            return;
+        }
 
         if state == ElementState::Pressed
             && button == winit::event::MouseButton::Left

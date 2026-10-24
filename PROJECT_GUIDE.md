@@ -1702,6 +1702,7 @@ Input:
 * `src/app/mouse/cursor/cursor_helpers.rs` -> cursor geometry helpers and their tests.
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
 * `src/app/mouse/wheel_tests.rs` -> wheel routing and scroll state regressions included by `wheel.rs`.
+* `src/app/mouse/terminal_mouse.rs` -> terminal mouse reporting (press, release, motion, wheel under tracking), no-tracking wheel arrows, and the single DECSET 1004 focus reconciliation point.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
 * `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.

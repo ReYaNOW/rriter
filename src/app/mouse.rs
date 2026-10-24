@@ -324,6 +324,8 @@ mod hover_mouse_tests;
 mod hover_state_core;
 mod input;
 mod wheel;
+mod terminal_mouse;
+pub(crate) use terminal_mouse::TerminalMouseState;
 
 #[cfg(test)]
 pub(crate) use input::stop_click_scroll_anims;

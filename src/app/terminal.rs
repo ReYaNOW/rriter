@@ -96,6 +96,9 @@ pub struct Terminal {
     pub scroll_y: crate::scroll::ScrollState,
     pub(crate) presentation_intent: TerminalPresentationIntent,
     pub(crate) reveal_right_tail_when_presented: bool,
+    pub(crate) mouse: crate::app::mouse::TerminalMouseState,
+    /// Focus state last reported to the PTY (DECSET 1004); reconciled by `sync_terminal_focus_reports`.
+    pub(crate) focus_sent: bool,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
 }
 
@@ -154,6 +157,8 @@ impl Terminal {
             scroll_y: crate::scroll::ScrollState::new(7.0),
             presentation_intent: TerminalPresentationIntent::None,
             reveal_right_tail_when_presented: false,
+            mouse: crate::app::mouse::TerminalMouseState::default(),
+            focus_sent: false,
             title_cache,
         }
     }

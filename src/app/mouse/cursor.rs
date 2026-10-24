@@ -41,6 +41,10 @@ impl App {
             return;
         }
 
+        if self.forward_terminal_mouse_motion(px, py) {
+            return;
+        }
+
         let window_size = self.window.as_ref().unwrap().inner_size();
         if !cursor_position_allows_editor_hover(
             position.x as f32,

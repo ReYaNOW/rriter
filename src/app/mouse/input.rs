@@ -25,47 +25,6 @@ fn point_in_padded_rect(mx: f32, my: f32, rect: Rect, pad: f32) -> bool {
         && my <= rect.1 + rect.3 + pad
 }
 
-fn terminal_mouse_button_code(button: winit::event::MouseButton) -> u8 {
-    match button {
-        winit::event::MouseButton::Left => 0,
-        winit::event::MouseButton::Middle => 1,
-        winit::event::MouseButton::Right => 2,
-        _ => 0,
-    }
-}
-
-fn terminal_mouse_cell_x(mx: f32, panel_x: f32, char_w: f32) -> usize {
-    ((mx - panel_x).max(0.0) / char_w).floor() as usize + 1
-}
-
-fn terminal_mouse_cell_y(
-    my: f32,
-    term_content_y: f32,
-    term_content_h: f32,
-    scroll_offset: f32,
-    char_h: f32,
-    scale: f32,
-    visible_rows: usize,
-) -> usize {
-    let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(scale);
-    let offset_from_bottom =
-        (term_content_y + term_content_h - bottom_pad - my + scroll_offset) / char_h;
-    visible_rows
-        .saturating_sub(1)
-        .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
-        + 1
-}
-
-fn terminal_mouse_sgr_sequence(
-    btn_code: u8,
-    cell_x: usize,
-    cell_y: usize,
-    is_pressed: bool,
-) -> String {
-    let end_char = if is_pressed { 'M' } else { 'm' };
-    format!("\x1b[<{};{};{}{}", btn_code, cell_x, cell_y, end_char)
-}
-
 fn autocomplete_item_index_at(
     px: f32,
     py: f32,

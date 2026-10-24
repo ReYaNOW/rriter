@@ -318,30 +318,6 @@ fn hover_rect_helpers_union_and_padding_are_inclusive() {
 }
 
 #[test]
-fn terminal_mouse_helpers_match_sgr_protocol_edges() {
-    assert_eq!(
-        terminal_mouse_button_code(winit::event::MouseButton::Left),
-        0,
-    );
-    assert_eq!(
-        terminal_mouse_button_code(winit::event::MouseButton::Middle),
-        1,
-    );
-    assert_eq!(
-        terminal_mouse_button_code(winit::event::MouseButton::Right),
-        2,
-    );
-    assert_eq!(terminal_mouse_cell_x(0.0, 50.0, 10.0), 1);
-    assert_eq!(terminal_mouse_cell_x(75.0, 50.0, 10.0), 3);
-    assert_eq!(
-        terminal_mouse_cell_y(172.0, 100.0, 100.0, 0.0, 20.0, 1.0, 5),
-        4,
-    );
-    assert_eq!(terminal_mouse_sgr_sequence(0, 3, 4, true), "\x1b[<0;3;4M",);
-    assert_eq!(terminal_mouse_sgr_sequence(2, 1, 1, false), "\x1b[<2;1;1m",);
-}
-
-#[test]
 fn autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer() {
     let press = |pointer: f32, rect_h: f32, items: usize| {
         autocomplete_scrollbar((0.0, 10.0, 300.0, rect_h), items, 0.0, 1.0)

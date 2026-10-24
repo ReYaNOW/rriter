@@ -5,7 +5,8 @@ use crate::render_view::editor_scroll_content_height;
 use crate::render_view::minimap_ui::{minimap_thumb_height, minimap_view_metrics};
 
 impl App {
-    pub(crate) fn terminal_selection_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+    /// Grid cell under the pointer as `(column, absolute row)`; the row counts scrollback, so selection and mouse reports share one calculation.
+    pub(crate) fn terminal_mouse_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
         let (s, line_height, char_w) = {
             let renderer = self.renderer.as_mut()?;
             (
@@ -777,7 +778,7 @@ impl App {
         } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
             let active = self.ide_panel.active_terminal;
             if let Some((cell_x, cell_y)) =
-                self.terminal_selection_cell(position.x as f32, position.y as f32)
+                self.terminal_mouse_cell(position.x as f32, position.y as f32)
             {
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
