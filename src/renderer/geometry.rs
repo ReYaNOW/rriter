@@ -25,12 +25,27 @@ pub(crate) fn quad_vertices(
     color: [f32; 4],
     mode: f32,
 ) -> [Vertex; 6] {
+    quad_vertices_sdf(x, y, w, h, u, v, uw, vh, color, mode, [0.0, 0.0, 0.0])
+}
+
+/// Same as `quad_vertices`, with per-vertex shader parameters for modes that read `sdf_params`.
+pub(crate) fn quad_vertices_sdf(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    u: f32,
+    v: f32,
+    uw: f32,
+    vh: f32,
+    color: [f32; 4],
+    mode: f32,
+    sdf_params: [f32; 3],
+) -> [Vertex; 6] {
     let x1 = x.round();
     let y1 = y.round();
     let x2 = (x + w).round();
     let y2 = (y + h).round();
-
-    let sdf_params = [0.0, 0.0, 0.0];
 
     let v1 = Vertex {
         pos: [x1, y1],

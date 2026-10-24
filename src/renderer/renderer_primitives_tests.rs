@@ -86,6 +86,37 @@ impl Renderer {
             .extend_from_slice(&quad_vertices(x, y, w, h, u, v, uw, vh, color, mode));
     }
 
+    /// Pushes one terminal decoration rectangle drawn by the decoration shader mode. `u` and `uw` are
+    /// the phase span in pattern periods; the quad covers the full height (`v` 0, `vh` 1). `style` is
+    /// the shader template in `sdf_params.x`: 1 wave, 2 dots, any other value dashes.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn push_decoration_quad(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        u: f32,
+        uw: f32,
+        color: [f32; 4],
+        style: f32,
+    ) {
+        self.ensure_vertex_capacity(6);
+        self.vertices.extend_from_slice(&quad_vertices_sdf(
+            x,
+            y,
+            w,
+            h,
+            u,
+            0.0,
+            uw,
+            1.0,
+            color,
+            DECORATION_MODE,
+            [style, 0.0, 0.0],
+        ));
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn push_quad_subpixel_y(
         &mut self,

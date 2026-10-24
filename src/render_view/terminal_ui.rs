@@ -711,7 +711,11 @@ impl Renderer {
                                 };
                                 let baseline_y = draw_y + self.baseline_offset * term_scale;
                                 if crate::renderer::terminal_force_text_presentation(ch)
-                                    && let Some(g) = self.get_terminal_glyph(ch, prefer_color)
+                                    && let Some(g) = self.get_terminal_glyph(
+                                        ch,
+                                        prefer_color,
+                                        crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
+                                    )
                                     && g.is_emoji == 0.0
                                 {
                                     let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
@@ -738,6 +742,7 @@ impl Renderer {
                                         ch,
                                         prefer_color,
                                         self.final_text_pixel_size(term_scale),
+                                        crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
                                     ) {
                                         // lint: subpixel-glyph-ok block elements fill the cell
                                         self.push_quad(

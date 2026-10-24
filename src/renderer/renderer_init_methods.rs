@@ -543,6 +543,15 @@ impl Renderer {
 
             fonts.push(FontData::new_static(nerd_font_data));
 
+            let terminal_styled_fonts = [
+                FontData::new_static(include_bytes!("../fonts/JetBrainsMonoNerdFont-Bold.ttf")),
+                FontData::new_static(include_bytes!("../fonts/JetBrainsMonoNerdFont-Italic.ttf")),
+                FontData::new_static(include_bytes!(
+                    "../fonts/JetBrainsMonoNerdFont-BoldItalic.ttf"
+                )),
+            ];
+            let terminal_x_height_em = terminal_regular_x_height_em(nerd_font_data);
+
             let symbol_font_paths = [
                 "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
                 "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
@@ -661,6 +670,8 @@ impl Renderer {
                 scale_context: ScaleContext::new(),
                 glyphs: HashMap::new(),
                 ui_glyphs: HashMap::new(),
+                terminal_styled_fonts,
+                terminal_x_height_em,
                 ascii_advances: [0.0; 128],
                 atlas_x: 2,
                 atlas_y: 2,
