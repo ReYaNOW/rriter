@@ -151,7 +151,7 @@ impl App {
                 let active = self.ide_panel.active_terminal;
                 let mut tracking = false;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                    if crate::app::terminal::lock_terminal_grid(&term.grid).mouse_tracking {
+                    if crate::app::terminal::lock_terminal_grid(&term.grid).mouse_tracking().enabled() {
                         tracking = true;
                     }
                 }
@@ -182,13 +182,8 @@ impl App {
                     let mut cell_y = 1;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                        let scrollback_len = if grid.is_alt {
-                            0
-                        } else {
-                            grid.scrollback.len()
-                        };
-                        let total_lines = scrollback_len + grid.lines.len();
-                        let max_scroll = if grid.is_alt {
+                        let total_lines = grid.total_rows();
+                        let max_scroll = if grid.is_alt_screen() {
                             0.0
                         } else {
                             crate::render_view::terminal_ui::terminal_max_scroll(
@@ -198,7 +193,7 @@ impl App {
                                 s,
                             )
                         };
-                        let scroll_offset = if grid.is_alt {
+                        let scroll_offset = if grid.is_alt_screen() {
                             0.0
                         } else {
                             term.scroll_y.current.min(max_scroll).round()
@@ -210,23 +205,23 @@ impl App {
                             scroll_offset,
                             char_h,
                             s,
-                            grid.visible_rows,
+                            grid.rows(),
                         );
 
                         if is_pressed {
                             if let Some((selection_x, selection_y)) = selection_cell {
-                                grid.selection = Some((
+                                grid.set_selection(Some((
                                     selection_x,
                                     selection_y,
                                     selection_x,
                                     selection_y,
-                                ));
+                                )));
                             }
-                        } else if let Some((sx, sy, ex, ey)) = grid.selection {
+                        } else if let Some((sx, sy, ex, ey)) = grid.selection() {
                             if sx != ex || sy != ey {
                                 is_drag = true;
                             } else {
-                                grid.selection = None;
+                                grid.set_selection(None);
                             }
                         }
                     }

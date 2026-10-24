@@ -799,20 +799,12 @@ impl App {
         {
             if let Some(term) = self.ide_panel.terminals.get(self.ide_panel.active_terminal) {
                 let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                let total_lines = if grid.is_alt {
-                    grid.lines.len()
-                } else {
-                    grid.scrollback.len() + grid.lines.len()
-                };
+                let total_lines = grid.total_rows();
                 for y in 0..total_lines {
-                    let row = if grid.is_alt {
-                        &grid.lines[y]
-                    } else if y < grid.scrollback.len() {
-                        &grid.scrollback[y]
-                    } else {
-                        &grid.lines[y - grid.scrollback.len()]
+                    let Some(row) = grid.row(y) else {
+                        continue;
                     };
-                    let line_str: String = row.iter().map(|c| c.c).collect();
+                    let line_str: String = row.iter().map(|c| c.ch()).collect();
                     for mat in re.find_iter(&line_str) {
                         if let Some((start_col, end_col)) =
                             terminal_match_cell_range(&line_str, mat.start(), mat.end())
@@ -855,16 +847,12 @@ impl App {
                     .get_mut(self.ide_panel.active_terminal)
                 {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                    grid.selection = Some((sx, sy, ex, ey));
+                    grid.set_selection(Some((sx, sy, ex, ey)));
                     if let Some((char_h, term_content_h, s)) = terminal_viewport {
-                        let total_lines = if grid.is_alt {
-                            grid.lines.len()
-                        } else {
-                            grid.scrollback.len() + grid.lines.len()
-                        };
+                        let total_lines = grid.total_rows();
                         let offset_from_bottom = total_lines.saturating_sub(1).saturating_sub(sy);
 
-                        let max_scroll = if grid.is_alt {
+                        let max_scroll = if grid.is_alt_screen() {
                             0.0
                         } else {
                             crate::render_view::terminal_ui::terminal_max_scroll(

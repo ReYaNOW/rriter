@@ -37,8 +37,8 @@ fn ui_visible(app: &App, id: UiId) -> bool {
     app.ui_registry.element_hits().any(|(hit_id, _, rect, _)| hit_id == id && rect.is_some())
 }
 
-fn row_is(row: &[crate::app::terminal::Cell], expected: &str) -> bool {
-    let mut cells = row.iter().map(|cell| cell.c).skip_while(|c| c.is_whitespace());
+fn row_is(row: &[ronsole_term::Cell], expected: &str) -> bool {
+    let mut cells = row.iter().map(|cell| cell.ch()).skip_while(|c| c.is_whitespace());
     let mut expected = expected.chars();
     loop {
         match (cells.next(), expected.next()) {
@@ -59,9 +59,9 @@ fn output_done(app: &App) -> bool {
         return false;
     };
     let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-    grid.lines
-        .iter()
-        .chain(grid.scrollback.iter().rev().take(SCROLLBACK_TAIL_ROWS))
+    let tail_start = grid.scrollback_len().saturating_sub(SCROLLBACK_TAIL_ROWS);
+    (tail_start..grid.total_rows())
+        .filter_map(|index| grid.row(index))
         .any(|row| row_is(row, LAST_LINE))
 }
 

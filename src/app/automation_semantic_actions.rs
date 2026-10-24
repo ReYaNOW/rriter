@@ -246,7 +246,7 @@ fn terminal_panel_open_state(app: &App) -> TerminalPanelOpenState {
     terminal_panel_open_state_from_values(
         app.ide_panel.is_open(PanelId::Terminal),
         app.ide_panel.terminals.iter().map(|terminal| {
-            let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready;
+            let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready();
             (terminal.presentation_intent, ready)
         }),
     )
@@ -279,9 +279,8 @@ fn panel_failure_diagnostics(app: &App, requested_panel: PanelId) -> String {
             |terminal| {
                 let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
                 format!(
-                    "presentation_ready={} presentation_layout_ready={} presentation_intent={:?}",
-                    grid.presentation_ready,
-                    grid.presentation_layout_ready,
+                    "presentation_ready={} presentation_intent={:?}",
+                    grid.presentation_ready(),
                     terminal.presentation_intent
                 )
             },
@@ -727,14 +726,13 @@ struct TerminalTuiState {
     non_blank_cells: usize,
 }
 
-fn terminal_grid_tui_state(grid: &crate::app::terminal::TermGrid) -> TerminalTuiState {
+fn terminal_grid_tui_state(grid: &ronsole_term::Term) -> TerminalTuiState {
     TerminalTuiState {
-        alternate_screen: grid.is_alt,
-        non_blank_cells: grid
-            .lines
-            .iter()
+        alternate_screen: grid.is_alt_screen(),
+        non_blank_cells: (0..grid.rows())
+            .filter_map(|y| grid.visible_row(y))
             .flat_map(|line| line.iter())
-            .filter(|cell| !cell.c.is_whitespace())
+            .filter(|cell| !cell.ch().is_whitespace())
             .count(),
     }
 }
@@ -751,10 +749,10 @@ fn terminal_basic_command() -> &'static [u8] {
     b"echo RRiter\r"
 }
 
-fn terminal_grid_contains(grid: &crate::app::terminal::TermGrid, needle: &str) -> bool {
-    grid.scrollback.iter().chain(grid.lines.iter()).any(|line| {
+fn terminal_grid_contains(grid: &ronsole_term::Term, needle: &str) -> bool {
+    (0..grid.total_rows()).filter_map(|index| grid.row(index)).any(|line| {
         line.iter()
-            .map(|cell| cell.c)
+            .map(|cell| cell.ch())
             .collect::<String>()
             .contains(needle)
     })

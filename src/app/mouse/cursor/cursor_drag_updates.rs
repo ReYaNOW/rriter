@@ -23,13 +23,8 @@ impl App {
         let panel_x = terminal_panel_x + 10.0 * s;
         let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-        let scrollback_len = if grid.is_alt {
-            0
-        } else {
-            grid.scrollback.len()
-        };
-        let total_lines = scrollback_len + grid.lines.len();
-        let max_scroll = if grid.is_alt {
+        let total_lines = grid.total_rows();
+        let max_scroll = if grid.is_alt_screen() {
             0.0
         } else {
             crate::render_view::terminal_ui::terminal_max_scroll(
@@ -42,7 +37,7 @@ impl App {
         let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
             term.scroll_y.current,
             max_scroll,
-            grid.is_alt,
+            grid.is_alt_screen(),
         );
         let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(s);
         let offset_from_bottom =
@@ -52,7 +47,7 @@ impl App {
             .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
             .min(total_lines.saturating_sub(1));
         let cell_x = (((px - panel_x) / char_w).floor() as usize)
-            .min(grid.cols.saturating_sub(1));
+            .min(grid.cols().saturating_sub(1));
         Some((cell_x, cell_y))
     }
 
@@ -786,10 +781,10 @@ impl App {
             {
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                    if let Some((sx, sy, _, _)) = grid.selection {
-                        grid.selection = Some((sx, sy, cell_x, cell_y));
+                    if let Some((sx, sy, _, _)) = grid.selection() {
+                        grid.set_selection(Some((sx, sy, cell_x, cell_y)));
                     } else {
-                        grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                        grid.set_selection(Some((cell_x, cell_y, cell_x, cell_y)));
                     }
                     self.window.as_ref().unwrap().request_redraw();
                 }

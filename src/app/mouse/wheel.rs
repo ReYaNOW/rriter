@@ -567,10 +567,10 @@ impl App {
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                        let is_alt = grid.is_alt;
-                        let app_cursor = grid.app_cursor_keys;
-                        let mouse_tracking = grid.mouse_tracking;
-                        let total_lines = grid.scrollback.len() + grid.lines.len();
+                        let is_alt = grid.is_alt_screen();
+                        let app_cursor = grid.app_cursor_keys();
+                        let mouse_tracking = grid.mouse_tracking().enabled();
+                        let total_lines = grid.total_rows();
                         drop(grid);
 
                         if is_alt {

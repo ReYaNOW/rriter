@@ -582,9 +582,9 @@ impl App {
                 let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                 let input = match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
-                        if primary && grid.selection.is_some() {
+                        if primary && grid.selection().is_some() {
                             clipboard_text = crate::app::terminal::terminal_selection_text(&grid);
-                            grid.selection = None;
+                            grid.set_selection(None);
                             None
                         } else if terminal_ctrl {
                             Some(vec![0x03])
@@ -600,7 +600,7 @@ impl App {
                         terminal_ctrl,
                         terminal_alt,
                         self.modifiers.super_key(),
-                        grid.app_cursor_keys,
+                        grid.app_cursor_keys(),
                     ),
                 };
                 drop(grid);
@@ -635,7 +635,7 @@ impl App {
                         .terminals
                         .get_mut(self.ide_panel.active_terminal)
                     {
-                        crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
+                        crate::app::terminal::lock_terminal_grid(&term.grid).set_selection(None);
                     }
                 }
                 PhysicalKey::Code(KeyCode::Enter) => {

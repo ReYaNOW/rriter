@@ -20,6 +20,11 @@ impl App {
         self.editor_theme_id = editor;
         self.ui_theme_id = ui;
         self.theme = crate::renderer::Theme::for_id(editor, self.system_selection);
+        for terminal in &self.ide_panel.terminals {
+            crate::app::terminal::lock_terminal_grid(&terminal.grid).set_palette(
+                crate::render_view::terminal_colors::terminal_palette(&self.theme),
+            );
+        }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.set_themes(self.theme.clone(), ui, self.system_selection);
             renderer.theme_gen = renderer.theme_gen.wrapping_add(1);

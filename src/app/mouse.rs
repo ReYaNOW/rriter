@@ -292,10 +292,10 @@ fn active_terminal_scrollbar_geometry(
     let renderer = app.renderer.as_ref()?;
     let terminal = app.ide_panel.terminals.get(app.ide_panel.active_terminal)?;
     let grid = crate::platform::lock_recover(&terminal.grid);
-    if grid.is_alt {
+    if grid.is_alt_screen() {
         return None;
     }
-    let total_lines = grid.scrollback.len() + grid.lines.len();
+    let total_lines = grid.total_rows();
     drop(grid);
 
     let scale = renderer.scale_factor;

@@ -140,12 +140,12 @@ impl App {
                     .get(self.ide_panel.active_terminal)
                 {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                    if !grid.mouse_tracking
+                    if !grid.mouse_tracking().enabled()
                         && grid
-                            .selection
+                            .selection()
                             .is_some_and(|(sx, sy, ex, ey)| sx == ex && sy == ey)
                     {
-                        grid.selection = None;
+                        grid.set_selection(None);
                     }
                 }
             }

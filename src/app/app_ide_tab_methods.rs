@@ -197,7 +197,7 @@ impl App {
             .terminals
             .get(self.ide_panel.active_terminal)
             .is_some_and(|terminal| {
-                crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready
+                crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready()
             })
     }
 
@@ -233,7 +233,7 @@ impl App {
                     let intent = terminal.presentation_intent;
                     (intent != crate::app::terminal::TerminalPresentationIntent::None).then(|| {
                         let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid)
-                            .presentation_ready;
+                            .presentation_ready();
                         (idx, intent, ready)
                     })
                 }),
@@ -278,7 +278,7 @@ impl App {
         }
         self.cancel_terminal_presentation_intents();
         let ready = crate::app::terminal::lock_terminal_grid(&self.ide_panel.terminals[idx].grid)
-            .presentation_ready;
+            .presentation_ready();
         if ready {
             self.ide_panel.active_terminal = idx;
             self.reveal_active_terminal_tab_now();
@@ -323,6 +323,7 @@ impl App {
             self.window.clone(),
             cwd.as_deref(),
             display_number,
+            crate::render_view::terminal_colors::terminal_palette(&self.theme),
         );
         terminal.presentation_intent = if reveal_panel_when_ready {
             crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
