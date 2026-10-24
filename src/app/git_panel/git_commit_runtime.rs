@@ -516,7 +516,7 @@ impl Trace2HookTracker {
 }
 
 struct GitAnsiDecoder {
-    parser: alacritty_terminal::vte::Parser,
+    parser: ronsole_term::vte::Parser,
     fg: Option<u8>,
     bold: bool,
 }
@@ -524,7 +524,7 @@ struct GitAnsiDecoder {
 impl Default for GitAnsiDecoder {
     fn default() -> Self {
         Self {
-            parser: alacritty_terminal::vte::Parser::new(),
+            parser: ronsole_term::vte::Parser::new(),
             fg: None,
             bold: false,
         }
@@ -565,8 +565,8 @@ impl GitAnsiPerformer<'_> {
         });
     }
 
-    fn apply_sgr(&mut self, params: &alacritty_terminal::vte::Params) {
-        crate::app::terminal::apply_ansi_sgr(
+    fn apply_sgr(&mut self, params: &ronsole_term::vte::Params) {
+        apply_ansi_sgr(
             params,
             self.fg,
             self.bold,
@@ -577,7 +577,7 @@ impl GitAnsiPerformer<'_> {
     }
 }
 
-impl alacritty_terminal::vte::Perform for GitAnsiPerformer<'_> {
+impl ronsole_term::vte::Perform for GitAnsiPerformer<'_> {
     fn print(&mut self, c: char) {
         self.push_char(c);
     }
@@ -592,7 +592,7 @@ impl alacritty_terminal::vte::Perform for GitAnsiPerformer<'_> {
 
     fn hook(
         &mut self,
-        _params: &alacritty_terminal::vte::Params,
+        _params: &ronsole_term::vte::Params,
         _intermediates: &[u8],
         _ignore: bool,
         _action: char,
@@ -606,7 +606,7 @@ impl alacritty_terminal::vte::Perform for GitAnsiPerformer<'_> {
 
     fn csi_dispatch(
         &mut self,
-        params: &alacritty_terminal::vte::Params,
+        params: &ronsole_term::vte::Params,
         _intermediates: &[u8],
         _ignore: bool,
         action: char,

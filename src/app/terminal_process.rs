@@ -1,6 +1,5 @@
-use super::terminal::TermGrid;
 use crate::platform::{self, PlatformKind, ProcessTree};
-use alacritty_terminal::vte::Parser;
+use ronsole_term::{Term, TermSink};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -17,6 +16,9 @@ const INITIAL_ROWS: u16 = 60;
 const TERMINAL_SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 const TERMINAL_TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const TERMINAL_EXIT_BEFORE_OUTPUT: &[u8] = b"RRiter terminal exited before producing output\r\n";
+
+/// Bounded queue for PTY replies (DA, DSR, and similar); a full queue drops the reply.
+const TERMINAL_REPLY_QUEUE_CAPACITY: usize = 32;
 pub(crate) const TERMINAL_TITLE_MAX_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,7 +141,7 @@ pub(crate) struct TerminalProcess {
 
 impl TerminalProcess {
     pub(crate) fn spawn(
-        grid: Arc<Mutex<TermGrid>>,
+        grid: Arc<Mutex<Term>>,
         title_cache: TerminalTitleCache,
         window: Option<Arc<crate::platform::WindowHost>>,
         cwd: Option<&Path>,
@@ -198,7 +200,7 @@ impl TerminalProcess {
         let master_pty = Arc::new(Mutex::new(pair.master));
         let (title_stop_tx, title_worker) = match install_terminal_title_refresh(
             master_pty.clone(),
-            title_cache,
+            title_cache.clone(),
             shell.title.clone(),
             cwd.map(Path::to_path_buf),
             window.clone(),
@@ -212,7 +214,9 @@ impl TerminalProcess {
                 return Err(error);
             }
         };
-        if let Err(error) = install_terminal_io_threads(&grid, reader, writer.clone(), window) {
+        if let Err(error) =
+            install_terminal_io_threads(&grid, reader, writer.clone(), window, title_cache)
+        {
             if let Some(stop_tx) = title_stop_tx {
                 let _ = stop_tx.send(());
             }
@@ -638,36 +642,80 @@ fn install_terminal_title_refresh(
     Ok((None, None))
 }
 
-fn advance_terminal_output_batch(parser: &mut Parser, grid: &mut TermGrid, chunks: &[Vec<u8>]) {
-    for chunk in chunks {
-        parser.advance(grid, chunk);
-    }
-    grid.dirty = true;
+/// Host side of `ronsole_term::TermSink`: forwards replies to the PTY writer and
+/// programmed titles to the title cache. Clipboard and working-directory events
+/// are ignored until their hosts are wired.
+pub(crate) struct RriterTermSink {
+    title_cache: Option<TerminalTitleCache>,
+    reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
 }
 
-fn finish_terminal_output_stream(parser: &mut Parser, grid: &mut TermGrid) -> bool {
-    if grid.presentation_ready {
+impl RriterTermSink {
+    pub(crate) fn new(
+        title_cache: Option<TerminalTitleCache>,
+        reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    ) -> Self {
+        Self {
+            title_cache,
+            reply_tx,
+        }
+    }
+}
+
+impl TermSink for RriterTermSink {
+    fn reply(&mut self, bytes: &[u8]) {
+        if let Some(tx) = self.reply_tx.as_ref() {
+            // A full queue drops the reply: blocking here would stall the parser under the grid lock.
+            let _ = tx.try_send(bytes.to_vec());
+        }
+    }
+
+    fn title(&mut self, title: &str) {
+        if let Some(cache) = self.title_cache.as_ref() {
+            crate::platform::lock_recover(cache).set_programmed(title.to_string());
+        }
+    }
+
+    fn clipboard_set(&mut self, _text: String) {}
+
+    fn working_directory(&mut self, _host: &str, _path: &[u8]) {}
+}
+
+fn advance_terminal_output_batch(grid: &mut Term, sink: &mut RriterTermSink, chunks: &[Vec<u8>]) {
+    let now = Instant::now();
+    let mut grid_changed = false;
+    for chunk in chunks {
+        grid_changed |= grid.advance(chunk, now, sink).grid_changed;
+    }
+    if grid_changed {
+        grid.mark_changed();
+    }
+}
+
+fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> bool {
+    if grid.presentation_ready() {
         return false;
     }
 
-    parser.advance(grid, TERMINAL_EXIT_BEFORE_OUTPUT);
+    grid.advance(TERMINAL_EXIT_BEFORE_OUTPUT, Instant::now(), sink);
     true
 }
 
 fn install_terminal_io_threads(
-    grid: &Arc<Mutex<TermGrid>>,
+    grid: &Arc<Mutex<Term>>,
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     window: Option<Arc<crate::platform::WindowHost>>,
+    title_cache: TerminalTitleCache,
 ) -> io::Result<()> {
-    let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let reader_finished = Arc::new(AtomicBool::new(false));
 
     let parser_grid = grid.clone();
     let parser_reader_finished = reader_finished.clone();
+    let mut sink = RriterTermSink::new(Some(title_cache), Some(reply_tx));
     crate::platform::spawn_named("rriter-terminal-parser", move || {
-        let mut parser = Parser::new();
         let request_redraw = || {
             if let Some(window) = window.as_ref() {
                 window.request_redraw();
@@ -693,7 +741,7 @@ fn install_terminal_io_threads(
             let Ok(mut grid) = parser_grid.lock() else {
                 break;
             };
-            advance_terminal_output_batch(&mut parser, &mut grid, &chunks);
+            advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
             drop(grid);
             request_redraw();
             first = rx.recv().ok();
@@ -703,7 +751,7 @@ fn install_terminal_io_threads(
             let Ok(mut grid) = parser_grid.lock() else {
                 return;
             };
-            if finish_terminal_output_stream(&mut parser, &mut grid) {
+            if finish_terminal_output_stream(&mut grid, &mut sink) {
                 drop(grid);
                 request_redraw();
             }
@@ -756,7 +804,6 @@ fn install_terminal_io_threads(
         )
     })?;
 
-    crate::platform::lock_recover(&grid).reply_tx = Some(reply_tx);
     Ok(())
 }
 

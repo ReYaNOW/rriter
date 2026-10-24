@@ -24,6 +24,7 @@ mod settings_database_ui;
 mod settings_keymap_ui;
 pub mod sticky;
 pub mod tabs_ui;
+pub mod terminal_colors;
 pub mod terminal_ui;
 pub(crate) mod tree_ui;
 pub mod ui;
