@@ -570,11 +570,7 @@ impl Renderer {
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
             let new_rows = terminal_visible_rows(term_content_h, char_h, s);
 
-            if grid.cols() != new_cols || grid.rows() != new_rows {
-                grid.resize(new_cols, new_rows);
-                // Term::resize clears the selection only on column change; a row-only resize
-                // would leave selection indices pointing at shifted rows.
-                grid.set_selection(None);
+            if crate::app::terminal::resize_terminal_grid(&mut grid, new_cols, new_rows) {
                 term.resize_pty(
                     clamp_terminal_pty_dimension(new_cols),
                     clamp_terminal_pty_dimension(new_rows),

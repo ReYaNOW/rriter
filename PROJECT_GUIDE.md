@@ -331,7 +331,7 @@ Important constraints:
 * Graphics stack: `winit`, `glutin`, `glow`.
 * Text/render support: `swash`, `image`, `resvg`, `tiny-skia`.
 * Syntax: Tree-sitter crates.
-* Terminal: `alacritty_terminal`, `portable-pty`.
+* Terminal: `ronsole-term` (terminal core crate), `portable-pty`.
 * Async/background helpers: channels/std threads where used.
 
 #### `Makefile`

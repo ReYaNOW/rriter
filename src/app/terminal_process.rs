@@ -1086,6 +1086,54 @@ mod tests {
         assert_eq!(queued, TERMINAL_REPLY_QUEUE_CAPACITY);
     }
 
+    /// Write target that copies every byte into a shared buffer the test can inspect.
+    struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut bytes = self
+                .0
+                .lock()
+                .map_err(|_| io::Error::other("recording buffer poisoned"))?;
+            bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn terminal_io_threads_write_device_attributes_reply_to_writer() {
+        let grid = Arc::new(Mutex::new(crate::app::terminal::test_term(8, 2)));
+        let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(RecordingWriter(recorded.clone()))));
+        let title_cache: TerminalTitleCache =
+            Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
+
+        // The reader yields one DA1 query; the reply must travel parser -> channel -> writer.
+        install_terminal_io_threads(
+            &grid,
+            Box::new(std::io::Cursor::new(b"\x1b[c".to_vec())),
+            writer,
+            None,
+            title_cache,
+        )
+        .expect("terminal io threads spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let written = recorded.lock().expect("recorded buffer").clone();
+            if written.windows(b"\x1b[?62c".len()).any(|w| w == b"\x1b[?62c") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "DA1 reply not written, got {written:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn terminal_presentation_waits_for_displayable_output_without_timeout_fallback() {
         let mut grid = crate::app::terminal::test_term(24, 3);

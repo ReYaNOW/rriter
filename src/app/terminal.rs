@@ -18,6 +18,18 @@ pub(crate) fn lock_terminal_grid(grid: &Mutex<Term>) -> MutexGuard<'_, Term> {
     recover_terminal_lock(grid.lock())
 }
 
+/// Resizes the grid when its size changes and drops the selection: reflow moves rows, so
+/// selection indices would point at the wrong text. Returns whether a resize happened.
+#[inline]
+pub(crate) fn resize_terminal_grid(grid: &mut Term, cols: usize, rows: usize) -> bool {
+    if grid.cols() == cols && grid.rows() == rows {
+        return false;
+    }
+    grid.resize(cols, rows);
+    grid.set_selection(None);
+    true
+}
+
 /// Builds a `Term` with the production config (scrollback, identity) and a fixed
 /// palette, for tests that need a grid without spawning a process.
 #[cfg(test)]
@@ -60,7 +72,7 @@ pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
         let line_end = if y == end_y { end_x } else { last_col };
         for x in line_start..=line_end {
             if let Some(cell) = row.get(x) {
-                result.push(cell.ch());
+                cell.append_text_to(&mut result);
             }
         }
         if y != end_y {
@@ -221,11 +233,43 @@ mod tests {
     }
 
     #[test]
+    fn resize_terminal_grid_drops_selection_only_on_size_change() {
+        let mut term = test_term(8, 2);
+        term.set_selection(Some((0, 0, 2, 0)));
+
+        assert!(!resize_terminal_grid(&mut term, 8, 2));
+        assert_eq!(term.selection(), Some((0, 0, 2, 0)));
+
+        assert!(resize_terminal_grid(&mut term, 4, 2));
+        assert_eq!(term.selection(), None);
+        assert_eq!((term.cols(), term.rows()), (4, 2));
+
+        term.set_selection(Some((0, 0, 1, 0)));
+        assert!(resize_terminal_grid(&mut term, 4, 3));
+        assert_eq!(term.selection(), None);
+        assert_eq!(term.rows(), 3);
+    }
+
+    #[test]
     fn selection_text_in_alt_screen() {
         let mut term = test_term(20, 3);
         let mut sink = RriterTermSink::new(None, None);
+        // Five newlines on three rows push lines into scrollback before the alt screen.
+        term.advance(b"a\r\nb\r\nc\r\nd\r\ne\r\n", Instant::now(), &mut sink);
+        assert!(term.scrollback_len() > 0);
         term.advance(b"\x1b[?1049hhello world", Instant::now(), &mut sink);
+        assert!(term.is_alt_screen());
         term.set_selection(Some((0, 0, 4, 0)));
         assert_eq!(terminal_selection_text(&term).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn selection_text_skips_wide_spacers_and_keeps_zero_width() {
+        let mut term = test_term(20, 3);
+        let mut sink = RriterTermSink::new(None, None);
+        // Wide CJK glyphs occupy two cells each; the spacer cell must not add a space.
+        term.advance("日本e\u{301}".as_bytes(), Instant::now(), &mut sink);
+        term.set_selection(Some((0, 0, 4, 0)));
+        assert_eq!(terminal_selection_text(&term).as_deref(), Some("日本e\u{301}"));
     }
 }
