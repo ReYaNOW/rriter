@@ -101,8 +101,9 @@ pub(crate) fn terminal_mouse_report(
 
 impl App {
     /// Active terminal index when the pointer is over its body, the panel is focused,
-    /// and the application enabled mouse tracking. Tracking takes every pointer event (no modifier bypass).
-    fn terminal_tracking_target(&self, mx: f32, my: f32) -> Option<usize> {
+    /// and the application enabled mouse tracking. Tracking takes every pointer event, except
+    /// the link modifier over a link: that stays local (see `terminal_link_at_pointer`).
+    fn terminal_tracking_target(&mut self, mx: f32, my: f32) -> Option<usize> {
         if !self.is_ide_mode
             || !self.ide_panel.is_open(PanelId::Terminal)
             || !self.ide_panel.terminal_focused
@@ -112,10 +113,68 @@ impl App {
         }
         let active = self.ide_panel.active_terminal;
         let term = self.ide_panel.terminals.get(active)?;
-        lock_terminal_grid(&term.grid)
-            .mouse_tracking()
-            .enabled()
-            .then_some(active)
+        let tracking = lock_terminal_grid(&term.grid).mouse_tracking().enabled();
+        if !tracking || self.terminal_link_at_pointer(mx, my).is_some() {
+            return None;
+        }
+        Some(active)
+    }
+
+    /// Whether the link modifier (Ctrl, or Command on macOS) is held.
+    fn terminal_link_modifier_held(&self) -> bool {
+        crate::platform::primary_modifier_for_platform(
+            crate::platform::CURRENT_PLATFORM,
+            self.modifiers.control_key(),
+            self.modifiers.super_key(),
+        )
+    }
+
+    /// URI of the link under the pointer on the active terminal body; `None` without the link modifier.
+    fn terminal_link_at_pointer(&mut self, mx: f32, my: f32) -> Option<String> {
+        if !self.terminal_link_modifier_held()
+            || self.ui_registry.find_at(mx, my) != Some(UiId::TerminalBody)
+        {
+            return None;
+        }
+        let cell = self.terminal_mouse_cell(mx, my)?;
+        let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
+        term.resolve_link(cell).map(|(link, _)| link.uri.to_string())
+    }
+
+    /// Re-resolves the hovered link of the active terminal for the pointer. The link is cleared
+    /// without the link modifier or off the body. Returns `true` when the stored link changed.
+    pub(crate) fn refresh_terminal_link_hover(&mut self, mx: f32, my: f32) -> bool {
+        let cell = if self.terminal_link_modifier_held()
+            && self.ui_registry.find_at(mx, my) == Some(UiId::TerminalBody)
+        {
+            self.terminal_mouse_cell(mx, my)
+        } else {
+            None
+        };
+        let active = self.ide_panel.active_terminal;
+        self.ide_panel
+            .terminals
+            .get_mut(active)
+            .is_some_and(|term| term.update_hovered_link(cell))
+    }
+
+    /// Refreshes the hover from the last known pointer position, once per frame, so that a
+    /// Ctrl change is shown without waiting for a pointer motion. Returns `true` when the link changed.
+    pub(crate) fn refresh_terminal_link_hover_at_pointer(&mut self) -> bool {
+        let (mx, my) = self.renderer.as_ref().map_or((-1.0, -1.0), |renderer| {
+            (renderer.last_mouse_x, renderer.last_mouse_y)
+        });
+        self.refresh_terminal_link_hover(mx, my)
+    }
+
+    /// Whether the pointer shows the link cursor: the link modifier is held over a hovered link of the active terminal.
+    pub(crate) fn terminal_link_cursor_active(&self) -> bool {
+        self.terminal_link_modifier_held()
+            && self
+                .ide_panel
+                .terminals
+                .get(self.ide_panel.active_terminal)
+                .is_some_and(|term| term.hovered_link.is_some())
     }
 
     /// Whether the active terminal has mouse tracking on; a pointer drag then belongs to the PTY, not to a local selection.
@@ -145,6 +204,16 @@ impl App {
         my: f32,
     ) -> bool {
         let pressed = state == ElementState::Pressed;
+        // Ctrl+click on a link opens it and is never forwarded, even under tracking; no selection starts.
+        let link = if pressed && button == winit::event::MouseButton::Left {
+            self.terminal_link_at_pointer(mx, my)
+        } else {
+            None
+        };
+        if let Some(uri) = link {
+            crate::platform::open_terminal_uri(self.external_requests.sink(), &uri);
+            return true;
+        }
         let target = if pressed {
             self.terminal_tracking_target(mx, my)
         } else {

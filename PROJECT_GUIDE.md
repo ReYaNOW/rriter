@@ -376,7 +376,9 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
-* `src/platform/desktop_request.rs` -> native pickers, `reveal_path`, `open_url`; headless intercepts them into the caller's `ExternalRequestSink`, drained per `App` by `ExternalRequestLog` (`dump.external_request`).
+* `src/platform/desktop_request.rs` -> native pickers, `reveal_path`, `open_path`, `open_url`; headless intercepts them into the caller's `ExternalRequestSink`, drained per `App` by `ExternalRequestLog` (`dump.external_request`).
+* `src/platform/terminal_link.rs` -> terminal hyperlink routing (`open_terminal_uri`): http/https to `open_url`; local `file://` links decoded (`percent_decode_uri_path`), resolved to a canonical path, and either opened or revealed when launchable (`launchable_for_platform`, Windows verbatim-prefix stripping, macOS reveal arguments). Resolution and the opener wait run on one named thread outside headless.
+* `src/platform/terminal_cwd.rs` -> OSC 7 working-directory mapping (`osc7_path`: local host check, Unix bytes, Windows drive form) and the cached local machine name (`local_host_name`).
 * `src/platform/text_file.rs` -> centralized UTF/legacy decoding, `TextFileFormat` preservation, conservative charset detection, strict re-encoding, and atomic text saves.
 * `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, Dart SDK discovery priority (custom, project Flutter, environment, managed, PATH, other Flutter), native trust/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
@@ -1469,6 +1471,7 @@ Root:
 * `src/headless/ui_tests_git_blame_graph.rs` -> headless UI test for revealing a blame commit beyond the first Git graph page.
 * `src/headless/ui_tests_git_blame_column.rs` -> headless UI tests for blame column labels, modified lines, gutter width, popup, graph reveal, tab state, and external reload.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
+* `src/headless/ui_tests_terminal_links.rs` -> headless UI tests for terminal hyperlinks: Ctrl+hover cursor and hover state, Ctrl+click routing (not to the PTY under tracking), and the URI scheme matrix.
 * `src/headless/ui_tests_terminal_mouse.rs` -> headless UI tests for terminal mouse reports (SGR press/release/drag, wheel, scrollback cell) and DECSET 1004 focus reports across window, panel and tab changes.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
@@ -1513,6 +1516,8 @@ Root:
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
 * `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
+* `src/platform/terminal_link.rs` -> terminal hyperlink routing: `open_terminal_uri`, file-link percent decoding, canonical resolution, launchable-file rules per platform, and the reveal/open split.
+* `src/platform/terminal_cwd.rs` -> OSC 7 working-directory mapping (`osc7_path`) and the local machine name.
 * `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
@@ -1703,7 +1708,8 @@ Input:
 * `src/app/mouse/cursor/cursor_helpers.rs` -> cursor geometry helpers and their tests.
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
 * `src/app/mouse/wheel_tests.rs` -> wheel routing and scroll state regressions included by `wheel.rs`.
-* `src/app/mouse/terminal_mouse.rs` -> terminal mouse reporting (press, release, motion, wheel under tracking), no-tracking wheel arrows, and the single DECSET 1004 focus reconciliation point.
+* `src/app/mouse/terminal_mouse.rs` -> terminal mouse reporting (press, release, motion, wheel under tracking), no-tracking wheel arrows, the single DECSET 1004 focus reconciliation point, and the Ctrl hover/click routing for terminal links.
+* `src/app/terminal_link_hover.rs` -> `Terminal` hyperlink resolution (`link_at` with the grid generation) and hovered-link storage that reports whether the link changed.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
 * `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.

@@ -56,6 +56,8 @@ impl App {
     }
 
     pub(crate) fn render_main_frame(&mut self) -> FrameOutcome {
+        // A Ctrl press or release changes the hovered link without a pointer motion; this frame draws and sets the cursor from the result.
+        self.refresh_terminal_link_hover_at_pointer();
                 // The first content frame after `enter_ide_mode_deferred` is being drawn; a
                 // frame with the editor area held back is not it (the code is).
                 if self.ide_deferred == crate::app::IdeDeferred::AwaitFrame
@@ -682,6 +684,8 @@ impl App {
                     winit::window::CursorIcon::EwResize
                 } else if self.ide_panel.is_resizing_bottom || self.ide_panel.git.graph_resizing {
                     winit::window::CursorIcon::NsResize
+                } else if self.terminal_link_cursor_active() {
+                    winit::window::CursorIcon::Pointer
                 } else if self
                     .ui_registry
                     .find_at(

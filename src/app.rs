@@ -52,6 +52,7 @@ mod project_search_app;
 mod python_completion;
 pub(crate) mod single_line_input;
 pub mod terminal;
+mod terminal_link_hover;
 mod terminal_process;
 pub(crate) mod tool_installer;
 pub mod ui_handlers;
