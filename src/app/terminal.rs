@@ -96,6 +96,9 @@ pub struct Terminal {
     pub scroll_y: crate::scroll::ScrollState,
     pub(crate) presentation_intent: TerminalPresentationIntent,
     pub(crate) reveal_right_tail_when_presented: bool,
+    /// Hovered link and the grid generation it was resolved against; the underline is drawn only
+    /// while the generation matches. Always `None` until hover tracking fills it.
+    pub(crate) hovered_link: Option<(ronsole_term::LinkTarget, u64)>,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
 }
 
@@ -154,6 +157,7 @@ impl Terminal {
             scroll_y: crate::scroll::ScrollState::new(7.0),
             presentation_intent: TerminalPresentationIntent::None,
             reveal_right_tail_when_presented: false,
+            hovered_link: None,
             title_cache,
         }
     }

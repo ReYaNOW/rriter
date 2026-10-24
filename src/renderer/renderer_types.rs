@@ -23,6 +23,8 @@ pub(crate) const COLOR_ATLAS_MAX_SIZE: i32 = 2048;
 pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;
 pub(crate) const PRIMARY_ATLAS_UPLOAD_FORMAT: u32 = glow::RED;
 pub(crate) const COLOR_ATLAS_MODE: f32 = 10.0;
+/// Shader mode of terminal text decorations: wave, dot and dash patterns sampled per period.
+pub(crate) const DECORATION_MODE: f32 = 11.0;
 const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
 const POPUP_SCROLL_CHANGE_EPS: f32 = 0.1;
 

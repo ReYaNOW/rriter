@@ -405,6 +405,16 @@ impl Renderer {
                         out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a * alpha);
                     } else if (v_mode == 10.0) {
                         out_color = texture(color_tex, v_uv) * v_col;
+                    } else if (v_mode == 11.0) {
+                        float p = fract(v_uv.x);
+                        if (v_sdf_params.x == 1.0) {
+                            if (abs(v_uv.y - 0.5 - sin(p * 6.28318530718) / 3.0) > 1.0 / 6.0) discard;
+                        } else {
+                            if (abs(v_uv.y - 0.5) > 1.0 / 6.0) discard;
+                            if (v_sdf_params.x == 2.0) { if (p >= 0.5) discard; }
+                            else { if (p >= 0.6) discard; }
+                        }
+                        out_color = v_col;
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
