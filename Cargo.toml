@@ -88,8 +88,12 @@ zeroize = "1.9.0"
 
 memmap2 = "0.9.11"
 alacritty_terminal = "0.26.0"
+ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "6d6980dd805e369dcc4c979b457fe97a0f6676b5" }
 portable-pty = "0.9.0"
 git2 = "0.20"
+
+[dev-dependencies]
+ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "6d6980dd805e369dcc4c979b457fe97a0f6676b5", features = ["test-support"] }
 
 
 [dependencies.tokio]

@@ -3811,6 +3811,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ronsole-term"
+version = "0.1.0"
+source = "git+https://github.com/ReYaNOW/ronsole?rev=6d6980dd805e369dcc4c979b457fe97a0f6676b5#6d6980dd805e369dcc4c979b457fe97a0f6676b5"
+dependencies = [
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
 name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3862,6 +3871,7 @@ dependencies = [
  "reqwest",
  "resvg",
  "rfd",
+ "ronsole-term",
  "russh",
  "rustc-hash",
  "rustls",
