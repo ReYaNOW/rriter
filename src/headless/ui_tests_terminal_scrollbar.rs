@@ -27,7 +27,7 @@ fn headless_terminal_scrollbar_track_click_returns_toward_bottom() {
         let renderer = session.app.renderer.as_ref().expect("headless renderer");
         let terminal = &session.app.ide_panel.terminals[0];
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        let total_lines = grid.scrollback.len() + grid.lines.len();
+        let total_lines = grid.total_rows();
         let char_h = renderer.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
         crate::render_view::terminal_ui::terminal_max_scroll(
             total_lines,

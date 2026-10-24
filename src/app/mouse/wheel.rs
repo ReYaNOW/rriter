@@ -564,36 +564,34 @@ impl App {
                     return;
                 }
                 if self.ide_panel.terminal_focused {
+                    let cell = self.terminal_report_cell(mx, my).unwrap_or((0, 0));
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                        let is_alt = grid.is_alt;
-                        let app_cursor = grid.app_cursor_keys;
-                        let mouse_tracking = grid.mouse_tracking;
-                        let total_lines = grid.scrollback.len() + grid.lines.len();
+                        let is_alt = grid.is_alt_screen();
+                        let app_cursor = grid.app_cursor_keys();
+                        let tracked = grid.mouse_tracking().enabled();
+                        let kind = if dy < 0.0 {
+                            ronsole_term::MouseEventKind::WheelUp
+                        } else {
+                            ronsole_term::MouseEventKind::WheelDown
+                        };
+                        let report = super::terminal_mouse::terminal_mouse_report(&grid, kind, cell);
+                        let total_lines = grid.total_rows();
                         drop(grid);
 
+                        let steps = super::terminal_mouse::terminal_wheel_steps(dy);
+                        if tracked {
+                            let input = report.unwrap_or_default().repeat(steps);
+                            let _ = term.write_input(&input);
+                            return;
+                        }
                         if is_alt {
-                            let steps = (dy.abs() / 20.0).max(1.0) as usize;
-                            let mut input = Vec::new();
-                            if mouse_tracking {
-                                let button = if dy < 0.0 { 64 } else { 65 };
-                                let sequence = format!("\x1b[<{button};1;1M");
-                                for _ in 0..steps.min(3) {
-                                    input.extend_from_slice(sequence.as_bytes());
-                                }
-                            } else {
-                                let sequence = if dy < 0.0 {
-                                    if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
-                                } else if app_cursor {
-                                    b"\x1BOB"
-                                } else {
-                                    b"\x1B[B"
-                                };
-                                for _ in 0..steps.min(3) {
-                                    input.extend_from_slice(sequence);
-                                }
-                            }
+                            let input = super::terminal_mouse::terminal_wheel_arrow_bytes(
+                                dy < 0.0,
+                                app_cursor,
+                                steps,
+                            );
                             let _ = term.write_input(&input);
                             return;
                         }

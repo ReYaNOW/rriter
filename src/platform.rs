@@ -22,6 +22,8 @@ pub mod offscreen_gl;
 mod macos;
 mod process;
 mod secret_store;
+mod terminal_cwd;
+mod terminal_link;
 mod text_file;
 pub mod window_host;
 #[cfg(windows)]
@@ -42,6 +44,8 @@ pub(crate) use integration::app_paths_for_root;
 pub(crate) use integration::app_root_override;
 pub(crate) type AppPaths = integration::AppPaths;
 pub use window_host::{HeadlessWindow, WindowHost};
+pub use terminal_cwd::{local_host_name, osc7_path};
+pub use terminal_link::open_terminal_uri;
 
 pub(crate) fn configure_allocator() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]

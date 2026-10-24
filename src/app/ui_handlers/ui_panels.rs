@@ -40,10 +40,10 @@ impl App {
                     .renderer
                     .as_ref()
                     .map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
-                let cell = mouse.and_then(|(mx, my)| self.terminal_selection_cell(mx, my));
+                let cell = mouse.and_then(|(mx, my)| self.terminal_mouse_cell(mx, my));
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                    grid.selection = cell.map(|(x, y)| (x, y, x, y));
+                    grid.set_selection(cell.map(|(x, y)| (x, y, x, y)));
                 }
             }
             // Terminal scrollbar drag state is initialized in mouse/input.rs, where
@@ -68,7 +68,7 @@ impl App {
                     .terminals
                     .get_mut(self.ide_panel.active_terminal)
                 {
-                    crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
+                    crate::app::terminal::lock_terminal_grid(&term.grid).set_selection(None);
                 }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

@@ -41,7 +41,7 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
             }
-            if crate::app::terminal::lock_terminal_grid(&t.grid).dirty {
+            if crate::app::terminal::lock_terminal_grid(&t.grid).dirty() {
                 needs_redraw = true;
             }
         }
@@ -154,8 +154,8 @@ fn about_to_wait_selection_drag_autoscroll(app: &mut App, dt: f32) -> bool {
                     let active = app.ide_panel.active_terminal;
                     if let Some(term) = app.ide_panel.terminals.get_mut(active) {
                         let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                        if !grid.is_alt {
-                            let total_lines = grid.scrollback.len() + grid.lines.len();
+                        if !grid.is_alt_screen() {
+                            let total_lines = grid.total_rows();
                             let max_scroll = crate::render_view::terminal_ui::terminal_max_scroll(
                                 total_lines,
                                 char_h,
@@ -179,13 +179,13 @@ fn about_to_wait_selection_drag_autoscroll(app: &mut App, dt: f32) -> bool {
                                     char_w,
                                     char_h,
                                     s,
-                                    grid.cols,
+                                    grid.cols(),
                                     total_lines,
                                 );
-                                if let Some((sx, sy, _, _)) = grid.selection {
-                                    grid.selection = Some((sx, sy, cell_x, cell_y));
+                                if let Some((sx, sy, _, _)) = grid.selection() {
+                                    grid.set_selection(Some((sx, sy, cell_x, cell_y)));
                                 } else {
-                                    grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                                    grid.set_selection(Some((cell_x, cell_y, cell_x, cell_y)));
                                 }
                                 needs_redraw = true;
                             }

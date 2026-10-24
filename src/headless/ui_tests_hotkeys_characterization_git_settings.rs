@@ -50,10 +50,9 @@ fn seed_git_log_selection(session: &mut HeadlessSession) {
 fn terminal_grid_text(session: &HeadlessSession) -> String {
     let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
     let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-    grid.scrollback
-        .iter()
-        .chain(grid.lines.iter())
-        .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+    (0..grid.total_rows())
+        .filter_map(|index| grid.row(index))
+        .map(|row| row.iter().map(|cell| cell.ch()).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -157,7 +156,7 @@ fn headless_hotkeys_dialog_over_terminal_owns_the_input_matrix() {
         terminal_grid_text(session).contains("matrix-input")
     });
     let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
-    let cursor_before = crate::app::terminal::lock_terminal_grid(&terminal.grid).cur_x;
+    let cursor_before = crate::app::terminal::lock_terminal_grid(&terminal.grid).cursor().0;
     session.app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::CloseAllTabs);
     assert!(session.app.modal_dialog_open());
     session.app.set_clipboard_text("dialog clipboard sentinel");
@@ -179,7 +178,7 @@ fn headless_hotkeys_dialog_over_terminal_owns_the_input_matrix() {
     assert!(terminal_grid_text(&session).contains("matrix-input"));
     assert!(!terminal_grid_text(&session).contains("dialog clipboard sentinel"));
     let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
-    assert_eq!(crate::app::terminal::lock_terminal_grid(&terminal.grid).cur_x, cursor_before);
+    assert_eq!(crate::app::terminal::lock_terminal_grid(&terminal.grid).cursor().0, cursor_before);
     drop(session);
     let _ = std::fs::remove_dir_all(dir);
 }

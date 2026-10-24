@@ -271,7 +271,7 @@ src/app/terminal_process.rs
 src/render_view/terminal_ui.rs
 ```
 
-Integrated terminal uses PTY and Alacritty terminal grid.
+Integrated terminal uses PTY and the `ronsole-term` crate for the terminal core (protocol parsing, grid, key/mouse encoders); RRiter keeps the host side (process, rendering, input, hyperlinks, platform).
 
 Important ideas:
 
@@ -279,7 +279,7 @@ Important ideas:
 * Shell selection is platform-aware: PowerShell/cmd on Windows, the configured shell with zsh fallback on macOS, and the configured shell with bash/sh fallback on Linux.
 * PTY spawn errors are rendered in the terminal instead of panicking.
 * I/O thread reads terminal output in batches.
-* Grid is shared with renderer.
+* Grid (`ronsole-term` type) is shared with renderer.
 * Render path reads visible cells and reserves symmetric top/bottom text padding so a full grid never clips the first row.
 * Terminal scroll geometry is shared by rendering, wheel clamping, selection hit-testing, track clicks, and thumb dragging; the thumb stays inset from the focus frame.
 * Terminal focused state captures keyboard input.
@@ -331,7 +331,7 @@ Important constraints:
 * Graphics stack: `winit`, `glutin`, `glow`.
 * Text/render support: `swash`, `image`, `resvg`, `tiny-skia`.
 * Syntax: Tree-sitter crates.
-* Terminal: `alacritty_terminal`, `portable-pty`.
+* Terminal: `ronsole-term` (terminal core crate), `portable-pty`.
 * Async/background helpers: channels/std threads where used.
 
 #### `Makefile`
@@ -376,7 +376,9 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
-* `src/platform/desktop_request.rs` -> native pickers, `reveal_path`, `open_url`; headless intercepts them into the caller's `ExternalRequestSink`, drained per `App` by `ExternalRequestLog` (`dump.external_request`).
+* `src/platform/desktop_request.rs` -> native pickers, `reveal_path`, `open_path`, `open_url`; headless intercepts them into the caller's `ExternalRequestSink`, drained per `App` by `ExternalRequestLog` (`dump.external_request`).
+* `src/platform/terminal_link.rs` -> terminal hyperlink routing (`open_terminal_uri`): http/https to `open_url`; local `file://` links decoded (`percent_decode_uri_path`), resolved to a canonical path, and either opened or revealed when launchable (`launchable_for_platform`, Windows verbatim-prefix stripping, macOS reveal arguments). Resolution and the opener wait run on one named thread outside headless.
+* `src/platform/terminal_cwd.rs` -> OSC 7 working-directory mapping (`osc7_path`: local host check, Unix bytes, Windows drive form) and the cached local machine name (`local_host_name`).
 * `src/platform/text_file.rs` -> centralized UTF/legacy decoding, `TextFileFormat` preservation, conservative charset detection, strict re-encoding, and atomic text saves.
 * `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, Dart SDK discovery priority (custom, project Flutter, environment, managed, PATH, other Flutter), native trust/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
@@ -1469,6 +1471,8 @@ Root:
 * `src/headless/ui_tests_git_blame_graph.rs` -> headless UI test for revealing a blame commit beyond the first Git graph page.
 * `src/headless/ui_tests_git_blame_column.rs` -> headless UI tests for blame column labels, modified lines, gutter width, popup, graph reveal, tab state, and external reload.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
+* `src/headless/ui_tests_terminal_links.rs` -> headless UI tests for terminal hyperlinks: Ctrl+hover cursor and hover state, Ctrl+click routing (not to the PTY under tracking), and the URI scheme matrix.
+* `src/headless/ui_tests_terminal_mouse.rs` -> headless UI tests for terminal mouse reports (SGR press/release/drag, wheel, scrollback cell) and DECSET 1004 focus reports across window, panel and tab changes.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
 * `src/headless/ui_tests_api_client_navigation.rs` -> headless UI tests for API spec refresh/remove, route filter, and tag group collapse.
@@ -1500,6 +1504,7 @@ Root:
 * `src/headless/ui_tests_pickers.rs` -> headless UI tests for API Client OpenAPI import, Welcome Open File/cancel, Settings IDE workspace picker, and Save As.
 * `src/headless/ui_tests_scrollbars_panels.rs` -> headless UI tests for Git workspace and API Mock combined editor scrollbar wheel/drag behavior.
 * `src/headless/ui_tests_terminal_scrollbar.rs` -> headless UI test for clicking the terminal scrollbar track to return toward the bottom.
+* `src/headless/ui_tests_terminal_sync.rs` -> headless UI tests for the mode 2026 hold deadline: event-loop wait, merged tab deadlines, replay while render is suspended, and the redraw request at the deadline.
 * `src/headless/ui_tests_problem_url.rs` -> headless UI test for opening a diagnostic URL through the external request log.
 * `src/headless/ui_tests_deleted_tab.rs` -> headless UI tests for deleting/recreating files while their clean or dirty tabs remain open.
 * `src/headless/ui_tests_editor_search_center.rs` -> headless UI tests for keeping editor search matches centered at 2560×1440 and 1280×720.
@@ -1512,6 +1517,8 @@ Root:
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
 * `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
+* `src/platform/terminal_link.rs` -> terminal hyperlink routing: `open_terminal_uri`, file-link percent decoding, canonical resolution, launchable-file rules per platform, and the reveal/open split.
+* `src/platform/terminal_cwd.rs` -> OSC 7 working-directory mapping (`osc7_path`) and the local machine name.
 * `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
@@ -1649,6 +1656,7 @@ Entrypoints/state:
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
 * `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.
+* `src/app/git_panel/git_ansi_sgr.rs` -> SGR parser for the Git commit console; u8 palette colours, independent of `ronsole_term::Term`.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_baseline.rs` -> HEAD snapshots, baseline loading, and open-tab HEAD refresh.
@@ -1681,6 +1689,7 @@ Input:
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
+* `src/app/keyboard/terminal_key_tests.rs` -> terminal key routing tests (kitty encoder bytes, host chords, IME commit), child module of `keyboard.rs`.
 * `src/keymap.rs` -> physical-key chords, parsing, validation, overrides, and resolved keymaps.
 * `src/keymap/defaults.rs` -> command metadata and default key bindings.
 * `src/app/mouse.rs` -> mouse module shell.
@@ -1701,6 +1710,8 @@ Input:
 * `src/app/mouse/cursor/cursor_helpers.rs` -> cursor geometry helpers and their tests.
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
 * `src/app/mouse/wheel_tests.rs` -> wheel routing and scroll state regressions included by `wheel.rs`.
+* `src/app/mouse/terminal_mouse.rs` -> terminal mouse reporting (press, release, motion, wheel under tracking), no-tracking wheel arrows, the single DECSET 1004 focus reconciliation point, and the Ctrl hover/click routing for terminal links.
+* `src/app/terminal_link_hover.rs` -> `Terminal` hyperlink resolution (`link_at` with the grid generation) and hovered-link storage that reports whether the link changed.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
 * `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.
@@ -1779,6 +1790,7 @@ Rendering:
 * `src/render_view/scrollbar_widget.rs` -> the one scrollbar widget: `Scrollbar` (style preset + axis + lane + extent) -> `geometry` (pixel-rounded, shared by render and input), `Renderer::draw_scrollbar` (paint + optional hitbox, returns geometry), `ScrollbarGeometry::{press_target, drag_target}`; App-side wrappers `app::mouse::{press_scrollbar, drag_scrollbar}`. New or changed scrollbars go through it. Hot path.
 * `src/render_view/sticky.rs` -> sticky headers.
 * `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.
+* `src/render_view/terminal_decoration.rs` -> terminal text decorations: underline/strike/hovered-link geometry, per-row decoration pass, styled face selection. Hot path.
 * `src/render_view/lsp_ui.rs` -> LSP server panel/action menu visuals.
 * `src/render_view/hover_overlays.rs` -> squiggles + hover popup routing.
 * `src/render_view/ui/hover_widget.rs` -> hover popup layout/render/selection/scroll.
@@ -1848,7 +1860,11 @@ Terminal:
 
 * `src/app/terminal.rs` -> terminal grid facade, input/output access, resize, dirty redraw, and shutdown ownership.
 * `src/app/terminal_process.rs` -> platform shell selection, PTY spawn, batched reader, process-tree ownership, and bounded terminal shutdown.
+* `src/app/terminal_host_events.rs` -> per-tab pending OSC 52 clipboard and OSC 7 cwd events from the parser thread, woken through `UiWaker`; new-tab start directory.
+* `src/app/terminal_sync_output.rs` -> mode 2026 hold deadlines on the parser thread: timed receive, expired flush, and draining a hold after the reader closes.
+* `src/app/terminal_sink.rs` -> parser-side `TermSink` host: non-blocking reply and report queue, titles and host events, and publishing the hold deadline for lock-free UI reads.
 * `src/render_view/terminal_ui.rs` -> terminal visuals only.
+* `src/render_view/terminal_colors.rs` -> theme-to-terminal palette and per-cell render colours; the default background resolves to `None` and is never painted.
 
 Assets:
 

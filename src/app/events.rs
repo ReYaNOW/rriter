@@ -516,6 +516,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
             }
             WindowEvent::ModifiersChanged(mod_state) => {
                 self.modifiers = mod_state.state();
+                self.sync_terminal_held_modifiers();
                 if !self.modifiers.control_key() {
                     self.clear_ctrl_definition();
                 }
@@ -621,6 +622,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
             }
             _ => (),
         }
+        self.sync_terminal_focus_reports();
     }
 
     /// A background task delivered a result. Nothing to do here: winit runs
@@ -630,6 +632,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         about::about_to_wait(self, &HostLoop::Native(event_loop));
+        self.sync_terminal_focus_reports();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

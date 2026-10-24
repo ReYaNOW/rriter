@@ -76,6 +76,41 @@ fn glyph_size_key(pixel_size: f32) -> u32 {
     pixel_size.to_bits()
 }
 
+/// Bit offset of the terminal face inside the presentation byte of a glyph key. The
+/// presentation values use the two low bits, the face the two bits above them.
+const TERMINAL_FACE_KEY_SHIFT: u8 = 2;
+
+#[inline(always)]
+fn terminal_cache_presentation(c: char, prefer_color: Option<bool>) -> u8 {
+    if terminal_force_text_presentation(c) {
+        return GLYPH_PRESENTATION_TEXT;
+    }
+    match prefer_color {
+        Some(false) => GLYPH_PRESENTATION_TEXT,
+        Some(true) => GLYPH_PRESENTATION_EMOJI,
+        None => GLYPH_PRESENTATION_TERMINAL,
+    }
+}
+
+/// Whether a styled terminal face may draw `c`. Colour glyphs and the custom-drawn glyphs stay on
+/// the Regular chain, which owns their rasterization.
+#[inline(always)]
+fn terminal_styled_face_applies(c: char, prefer_color: Option<bool>) -> bool {
+    let colour = !terminal_force_text_presentation(c)
+        && prefer_color.unwrap_or_else(|| default_emoji_presentation(c));
+    !colour && custom_svg_glyph_source(c).is_none() && braille_dot_mask(c).is_none()
+}
+
+/// x-height of a bundled terminal face in em units, from the font metrics (`OS/2` table).
+fn terminal_regular_x_height_em(font_data: &'static [u8]) -> f32 {
+    FontRef::from_index(font_data, 0)
+        .map(|font| {
+            let metrics = font.metrics(&[]);
+            metrics.x_height / f32::from(metrics.units_per_em.max(1))
+        })
+        .unwrap_or(0.0)
+}
+
 fn rasterize_font_data_glyph(
     font_data: &mut FontData,
     scale_context: &mut ScaleContext,
@@ -479,26 +514,74 @@ impl Renderer {
         &mut self,
         c: char,
         prefer_color: Option<bool>,
+        face: u8,
     ) -> Option<GlyphInfo> {
-        self.get_terminal_glyph_at_size(c, prefer_color, self.font_size)
+        self.get_terminal_glyph_at_size(c, prefer_color, self.font_size, face)
+    }
+
+    /// x-height of the Regular terminal face at `pixel_size`, used to place strikethrough.
+    #[inline(always)]
+    pub(crate) fn terminal_regular_x_height_at_size(&self, pixel_size: f32) -> f32 {
+        self.terminal_x_height_em * pixel_size
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    /// Glyph of a terminal cell in styled face `face`. A character the styled face maps is rasterized
+    /// from that face; colour glyphs and unmapped characters take the Regular chain, and their Regular
+    /// entry is aliased under the face key so both keys share one atlas slot.
     pub(crate) fn get_terminal_glyph_at_size(
         &mut self,
         c: char,
         prefer_color: Option<bool>,
         pixel_size: f32,
+        face: u8,
     ) -> Option<GlyphInfo> {
-        let cache_presentation = if terminal_force_text_presentation(c) {
-            GLYPH_PRESENTATION_TEXT
-        } else {
-            match prefer_color {
-                Some(false) => GLYPH_PRESENTATION_TEXT,
-                Some(true) => GLYPH_PRESENTATION_EMOJI,
-                None => GLYPH_PRESENTATION_TERMINAL,
-            }
-        };
+        if face == TERMINAL_FACE_REGULAR {
+            return self.get_terminal_regular_glyph_at_size(c, prefer_color, pixel_size);
+        }
+        let presentation = terminal_cache_presentation(c, prefer_color) | (face << TERMINAL_FACE_KEY_SHIFT);
+        let face_key = (c, presentation, glyph_size_key(pixel_size));
+        if let Some(g) = self.glyphs.get(&face_key) {
+            return Some(*g);
+        }
+        if c == '\n' || c == '\t' || c == '\r' {
+            return None;
+        }
+        if terminal_styled_face_applies(c, prefer_color)
+            && let Some(info) = self.get_terminal_styled_glyph(c, face, pixel_size)
+        {
+            self.glyphs.insert(face_key, info);
+            return Some(info);
+        }
+        let info = self.get_terminal_regular_glyph_at_size(c, prefer_color, pixel_size)?;
+        self.glyphs.insert(face_key, info);
+        Some(info)
+    }
+
+    /// Glyph of `c` from the bundled font of styled `face`; `None` when that face does not map `c`.
+    fn get_terminal_styled_glyph(&mut self, c: char, face: u8, pixel_size: f32) -> Option<GlyphInfo> {
+        let font = self
+            .terminal_styled_fonts
+            .get_mut(usize::from(face).checked_sub(1)?)?;
+        let (image, advance) = rasterize_font_data_glyph(
+            font,
+            &mut self.scale_context,
+            c,
+            pixel_size,
+            false,
+            false,
+        )?;
+        self.upload_rasterized_glyph(image, advance, 0.0, c.is_whitespace())
+    }
+
+    /// Regular-chain glyph of a terminal cell, cached under its Regular key.
+    fn get_terminal_regular_glyph_at_size(
+        &mut self,
+        c: char,
+        prefer_color: Option<bool>,
+        pixel_size: f32,
+    ) -> Option<GlyphInfo> {
+        let cache_presentation = terminal_cache_presentation(c, prefer_color);
         let cache_key = (c, cache_presentation, glyph_size_key(pixel_size));
         if let Some(g) = self.glyphs.get(&cache_key) {
             return Some(*g);
@@ -601,4 +684,132 @@ impl Renderer {
         Some(info)
     }
 
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod terminal_face_tests {
+    use super::*;
+    use crate::platform::offscreen_gl::OffscreenContext;
+    use crate::render_view::terminal_decoration::{TERMINAL_FACE_BOLD, TERMINAL_FACE_REGULAR};
+
+    const TEST_PIXEL_SIZE: f32 = 16.0;
+    const SYSTEM_MONO: &str = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
+    /// CJK ideograph that the bundled JetBrains Mono faces do not map.
+    const UNMAPPED: char = '中';
+    /// Colour emoji: drawn by the Regular chain only.
+    const EMOJI: char = '😀';
+
+    fn test_renderer() -> (OffscreenContext, Renderer) {
+        let context = OffscreenContext::new(64, 64)
+            .unwrap_or_else(|error| panic!("offscreen EGL context: {error:?}"));
+        let app = crate::app::reviewer_stage2_test_app()
+            .unwrap_or_else(|| panic!("headless App"));
+        let renderer = Renderer::new(
+            context.glow(),
+            1.0,
+            app.theme.clone(),
+            context.requested_context(),
+            &mut crate::startup_trace::StartupTrace::disabled(),
+        )
+        .unwrap_or_else(|error| panic!("production Renderer: {error:?}"));
+        (context, renderer)
+    }
+
+    #[test]
+    fn terminal_regular_face_is_editor_chain() {
+        if !std::path::Path::new(SYSTEM_MONO).exists() {
+            return;
+        }
+        let (_context, mut renderer) = test_renderer();
+        assert!(!matches!(renderer.fonts[0].source, FontSource::Static(_)));
+        let (first_image, first_advance) = rasterize_font_data_glyph(
+            &mut renderer.fonts[0],
+            &mut renderer.scale_context,
+            'a',
+            TEST_PIXEL_SIZE,
+            false,
+            false,
+        )
+        .expect("system monospace maps 'a'");
+        let (chain_image, chain_advance) = rasterize_font_glyph(
+            &mut renderer.fonts,
+            &mut renderer.scale_context,
+            'a',
+            TEST_PIXEL_SIZE,
+            false,
+        )
+        .expect("editor chain maps 'a'");
+        assert_eq!(chain_image.data, first_image.data);
+        assert_eq!(chain_advance, first_advance);
+        let glyph = renderer
+            .get_terminal_glyph_at_size('a', None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
+            .expect("terminal glyph for 'a'");
+        assert_eq!(glyph.advance, first_advance);
+    }
+
+    #[test]
+    fn bold_glyph_falls_back_to_regular() {
+        let (_context, mut renderer) = test_renderer();
+        let bold_maps = renderer.terminal_styled_fonts[0]
+            .font_ref()
+            .expect("bundled Bold parses")
+            .charmap()
+            .map(UNMAPPED);
+        assert_eq!(bold_maps, 0, "precondition: Bold does not map the test char");
+        let styled = renderer
+            .get_terminal_glyph_at_size(UNMAPPED, None, TEST_PIXEL_SIZE, TERMINAL_FACE_BOLD)
+            .expect("fallback glyph");
+        let regular = renderer
+            .get_terminal_glyph_at_size(UNMAPPED, None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
+            .expect("regular glyph");
+        assert_eq!((styled.u, styled.v, styled.advance), (regular.u, regular.v, regular.advance));
+    }
+
+    #[test]
+    fn bold_glyph_uses_bundled_bold_face() {
+        let (_context, mut renderer) = test_renderer();
+        let regular = renderer
+            .get_terminal_glyph_at_size('a', None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
+            .expect("regular 'a'");
+        let bold = renderer
+            .get_terminal_glyph_at_size('a', None, TEST_PIXEL_SIZE, TERMINAL_FACE_BOLD)
+            .expect("bold 'a'");
+        assert!(bold.u != regular.u || bold.v != regular.v, "bold 'a' gets its own atlas slot");
+    }
+
+    #[test]
+    fn color_and_unmapped_glyphs_share_regular_entry() {
+        let (_context, mut renderer) = test_renderer();
+        let size_key = glyph_size_key(TEST_PIXEL_SIZE);
+        let bold_presentation =
+            GLYPH_PRESENTATION_TERMINAL | (TERMINAL_FACE_BOLD << TERMINAL_FACE_KEY_SHIFT);
+        for c in [UNMAPPED, EMOJI] {
+            let styled = renderer
+                .get_terminal_glyph_at_size(c, None, TEST_PIXEL_SIZE, TERMINAL_FACE_BOLD)
+                .expect("glyph under Bold");
+            let regular = renderer
+                .get_terminal_glyph_at_size(c, None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
+                .expect("glyph under Regular");
+            assert_eq!((styled.u, styled.v, styled.uw, styled.vh), (regular.u, regular.v, regular.uw, regular.vh));
+            assert!(renderer.glyphs.contains_key(&(c, bold_presentation, size_key)));
+        }
+    }
+
+    #[test]
+    fn terminal_x_height_is_read_from_bundled_regular() {
+        let (_context, renderer) = test_renderer();
+        let x_height = renderer.terminal_regular_x_height_at_size(TEST_PIXEL_SIZE);
+        assert!(x_height > 0.0 && x_height < TEST_PIXEL_SIZE);
+    }
+
+    #[test]
+    fn terminal_styled_face_applies_only_to_plain_text_glyphs() {
+        // Plain text may use the styled face; colour glyphs and custom-drawn glyphs stay on
+        // the Regular chain. Characters the styled face does not map fall back at lookup time.
+        assert!(super::terminal_styled_face_applies('a', None));
+        assert!(!super::terminal_styled_face_applies('a', Some(true)));
+        assert!(!super::terminal_styled_face_applies('😀', None));
+        assert!(!super::terminal_styled_face_applies('▶', None));
+        assert!(!super::terminal_styled_face_applies('\u{2801}', None));
+    }
 }

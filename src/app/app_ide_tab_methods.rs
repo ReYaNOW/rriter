@@ -197,7 +197,7 @@ impl App {
             .terminals
             .get(self.ide_panel.active_terminal)
             .is_some_and(|terminal| {
-                crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready
+                crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready()
             })
     }
 
@@ -233,7 +233,7 @@ impl App {
                     let intent = terminal.presentation_intent;
                     (intent != crate::app::terminal::TerminalPresentationIntent::None).then(|| {
                         let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid)
-                            .presentation_ready;
+                            .presentation_ready();
                         (idx, intent, ready)
                     })
                 }),
@@ -278,7 +278,7 @@ impl App {
         }
         self.cancel_terminal_presentation_intents();
         let ready = crate::app::terminal::lock_terminal_grid(&self.ide_panel.terminals[idx].grid)
-            .presentation_ready;
+            .presentation_ready();
         if ready {
             self.ide_panel.active_terminal = idx;
             self.reveal_active_terminal_tab_now();
@@ -293,6 +293,7 @@ impl App {
             return;
         }
         let active = self.ide_panel.active_terminal;
+        self.send_terminal_focus_out(idx);
         self.ide_panel.terminals.remove(idx);
         if self.ide_panel.terminals.is_empty() {
             self.add_terminal();
@@ -316,13 +317,23 @@ impl App {
             });
         self.cancel_terminal_presentation_intents();
 
-        let cwd = self.terminal_working_directory();
+        let osc7_cwd = self
+            .ide_panel
+            .terminals
+            .get(self.ide_panel.active_terminal)
+            .and_then(|terminal| terminal.osc7_cwd.clone());
+        let cwd = crate::app::terminal_host_events::new_terminal_start_dir(
+            osc7_cwd.as_deref(),
+            self.terminal_working_directory(),
+        );
         let display_number =
             take_terminal_creation_number(&mut self.ide_panel.next_terminal_creation_number);
         let mut terminal = crate::app::terminal::Terminal::spawn(
             self.window.clone(),
             cwd.as_deref(),
             display_number,
+            crate::render_view::terminal_colors::terminal_palette(&self.theme),
+            &self.ui_waker,
         );
         terminal.presentation_intent = if reveal_panel_when_ready {
             crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
@@ -956,7 +967,7 @@ mod tests {
             .unwrap();
 
         let cancel = selection.find("self.cancel_terminal_presentation_intents();").unwrap();
-        let ready = selection.find(".presentation_ready;").unwrap();
+        let ready = selection.find(".presentation_ready();").unwrap();
         assert!(cancel < ready);
         assert!(selection.contains("self.ide_panel.active_terminal = idx;"));
         assert!(selection.contains("TerminalPresentationIntent::ActivateWhenReady"));

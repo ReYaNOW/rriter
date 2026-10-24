@@ -21,6 +21,12 @@ impl App {
             self.request_inline_blame_commit_message();
         }
         self.cancel_markdown_link_press_after_drag(px, py);
+        // Before the tracking check: a link under the pointer is hovered even when the PTY tracks the mouse.
+        if self.refresh_terminal_link_hover(px, py)
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
+        }
         if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_image())
             && self.tabs.get_mut(self.active_tab).and_then(|tab| tab.image.as_deref_mut()).is_some_and(|image| image.drag_to(px, py))
         {
@@ -101,6 +107,11 @@ impl App {
         }
 
         if self.cursor_moved_ide_panel_drags(position, s) {
+            return;
+        }
+
+        // Runs after the panel drags so that an active tab or resize drag keeps the pointer.
+        if self.forward_terminal_mouse_motion(px, py) {
             return;
         }
 

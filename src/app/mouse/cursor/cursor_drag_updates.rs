@@ -5,7 +5,21 @@ use crate::render_view::editor_scroll_content_height;
 use crate::render_view::minimap_ui::{minimap_thumb_height, minimap_view_metrics};
 
 impl App {
-    pub(crate) fn terminal_selection_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+    /// Grid cell under the pointer as `(column, absolute row)`; the row counts scrollback, used for selection.
+    pub(crate) fn terminal_mouse_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+        self.terminal_pointer_cells(px, py)
+            .map(|(col, abs_row, _)| (col, abs_row))
+    }
+
+    /// Grid cell under the pointer as `(column, row from the top of the visible area)`, the
+    /// coordinates a PTY mouse report uses; the row follows the same scroll offset as `terminal_mouse_cell`.
+    pub(crate) fn terminal_report_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+        self.terminal_pointer_cells(px, py)
+            .map(|(col, _, visible_row)| (col, visible_row))
+    }
+
+    /// `(column, absolute row, visible row)` under the pointer, computed once for both callers.
+    fn terminal_pointer_cells(&mut self, px: f32, py: f32) -> Option<(usize, usize, usize)> {
         let (s, line_height, char_w) = {
             let renderer = self.renderer.as_mut()?;
             (
@@ -23,13 +37,8 @@ impl App {
         let panel_x = terminal_panel_x + 10.0 * s;
         let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-        let scrollback_len = if grid.is_alt {
-            0
-        } else {
-            grid.scrollback.len()
-        };
-        let total_lines = scrollback_len + grid.lines.len();
-        let max_scroll = if grid.is_alt {
+        let total_lines = grid.total_rows();
+        let max_scroll = if grid.is_alt_screen() {
             0.0
         } else {
             crate::render_view::terminal_ui::terminal_max_scroll(
@@ -42,7 +51,7 @@ impl App {
         let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
             term.scroll_y.current,
             max_scroll,
-            grid.is_alt,
+            grid.is_alt_screen(),
         );
         let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(s);
         let offset_from_bottom =
@@ -51,9 +60,14 @@ impl App {
             .saturating_sub(1)
             .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
             .min(total_lines.saturating_sub(1));
+        // The viewport's bottom row is `rows - 1`. Scroll is not part of the pixel offset here,
+        // so this counts rows from the top of the visible area, clamped at 0.
+        let view_lines_from_bottom =
+            ((term_content_y + term_content_h - bottom_pad - py) / char_h).max(0.0).floor() as usize;
+        let visible_row = grid.rows().saturating_sub(1).saturating_sub(view_lines_from_bottom);
         let cell_x = (((px - panel_x) / char_w).floor() as usize)
-            .min(grid.cols.saturating_sub(1));
-        Some((cell_x, cell_y))
+            .min(grid.cols().saturating_sub(1));
+        Some((cell_x, cell_y, visible_row))
     }
 
     /// IDE panel DnD, tab drags, panel resize and git panel scrollbars; `true` = handled.
@@ -779,17 +793,21 @@ impl App {
                     self.scroll_y.anim_speed = 15.0;
                 }
             }
-        } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
+        } else if self.ide_panel.is_dragging_terminal
+            && self.is_dragging
+            && !self.show_settings
+            && !self.active_terminal_tracks_mouse()
+        {
             let active = self.ide_panel.active_terminal;
             if let Some((cell_x, cell_y)) =
-                self.terminal_selection_cell(position.x as f32, position.y as f32)
+                self.terminal_mouse_cell(position.x as f32, position.y as f32)
             {
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                    if let Some((sx, sy, _, _)) = grid.selection {
-                        grid.selection = Some((sx, sy, cell_x, cell_y));
+                    if let Some((sx, sy, _, _)) = grid.selection() {
+                        grid.set_selection(Some((sx, sy, cell_x, cell_y)));
                     } else {
-                        grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                        grid.set_selection(Some((cell_x, cell_y, cell_x, cell_y)));
                     }
                     self.window.as_ref().unwrap().request_redraw();
                 }

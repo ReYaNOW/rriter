@@ -2,6 +2,7 @@
 //! shared fixtures (`tests_support`) later headless tasks build on.
 
 pub(crate) mod tests_support {
+    use crate::app::terminal::feed_test_terminal_output;
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
     use crate::platform::{self, ToolKind};
@@ -12,6 +13,18 @@ pub(crate) mod tests_support {
     use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
+
+    /// Feeds bytes into tab `index` through the parser's batch path, without the PTY reader.
+    pub(crate) fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
+        let term = &session.app.ide_panel.terminals[index];
+        feed_test_terminal_output(term, bytes);
+    }
+
+    /// Takes the bytes written to the PTY of tab `index` since the previous call.
+    pub(crate) fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
+        let term = &session.app.ide_panel.terminals[index];
+        std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
+    }
 
     pub(crate) fn install_fake_ty(
         session: &mut HeadlessSession,
@@ -644,10 +657,9 @@ pub(crate) mod tests_support {
         let terminal = session.app.ide_panel.terminals.get(index)?;
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
         Some(
-            grid.scrollback
-                .iter()
-                .chain(grid.lines.iter())
-                .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+            (0..grid.total_rows())
+                .filter_map(|index| grid.row(index))
+                .map(|row| row.iter().map(|cell| cell.ch()).collect::<String>())
                 .collect(),
         )
     }

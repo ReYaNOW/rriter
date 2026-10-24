@@ -147,6 +147,7 @@ impl App {
         event_loop: &HostLoop,
         key_event: KeyInput,
     ) {
+        self.note_terminal_modifier_key(&key_event);
         let chord = crate::keymap::Chord::from_event(
             crate::platform::CURRENT_PLATFORM,
             &key_event,

@@ -223,8 +223,11 @@ what `bench` measures.
 - Opened files, file-tree mutations and Git are not written without
   `--allow-writes`; a blocked save shows the usual read-only notice. Saving a
   protected file never asks for elevation (`pkexec`) in headless mode.
-- File pickers, `open_url` and "reveal in file manager" do nothing; the last
-  such request appears in `dump` as `external_request`.
+- File pickers, `open_url`, `open_path` and "reveal in file manager" do nothing;
+  the last such request appears in `dump` as `external_request` (`open_path` or
+  `reveal_path`, with the canonical path). A terminal `file://` link records one
+  of them only after its path resolves; a launchable file is recorded as
+  `reveal_path`. `mailto:` and other schemes record nothing.
 - Headless uses an in-process clipboard; no system clipboard or keyring is
   accessed. Saved database passwords are not found, and remembering one fails.
   No cursor blink; an idle app draws no frames.

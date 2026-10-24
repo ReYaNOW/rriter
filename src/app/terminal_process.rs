@@ -1,6 +1,5 @@
-use super::terminal::TermGrid;
 use crate::platform::{self, PlatformKind, ProcessTree};
-use alacritty_terminal::vte::Parser;
+use ronsole_term::Term;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -12,11 +11,21 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::app::terminal_host_events::HostEventsSink;
+pub(crate) use crate::app::terminal_sink::RriterTermSink;
+use crate::app::terminal_sink::try_queue_report;
+use crate::app::terminal_sync_output::{
+    advance_terminal_output_batch, receive_terminal_chunk, wait_out_sync_deadline,
+};
+
 const INITIAL_COLS: u16 = 200;
 const INITIAL_ROWS: u16 = 60;
 const TERMINAL_SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 const TERMINAL_TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const TERMINAL_EXIT_BEFORE_OUTPUT: &[u8] = b"RRiter terminal exited before producing output\r\n";
+
+/// Bounded queue for PTY replies (DA, DSR, and similar); a full queue drops the reply.
+pub(crate) const TERMINAL_REPLY_QUEUE_CAPACITY: usize = 32;
 pub(crate) const TERMINAL_TITLE_MAX_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,14 +144,17 @@ pub(crate) struct TerminalProcess {
     title_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     title_worker: Option<JoinHandle<()>>,
     finished: bool,
+    /// Clone of the PTY reply queue sender, so a replay on the UI thread queues replies in order.
+    reply_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
 }
 
 impl TerminalProcess {
     pub(crate) fn spawn(
-        grid: Arc<Mutex<TermGrid>>,
+        grid: Arc<Mutex<Term>>,
         title_cache: TerminalTitleCache,
         window: Option<Arc<crate::platform::WindowHost>>,
         cwd: Option<&Path>,
+        host_events: HostEventsSink,
     ) -> io::Result<(Self, TerminalShellSpec)> {
         let shell = resolve_terminal_shell()?;
         let fallback = terminal_fallback_title(cwd, &shell.title);
@@ -198,7 +210,7 @@ impl TerminalProcess {
         let master_pty = Arc::new(Mutex::new(pair.master));
         let (title_stop_tx, title_worker) = match install_terminal_title_refresh(
             master_pty.clone(),
-            title_cache,
+            title_cache.clone(),
             shell.title.clone(),
             cwd.map(Path::to_path_buf),
             window.clone(),
@@ -212,7 +224,18 @@ impl TerminalProcess {
                 return Err(error);
             }
         };
-        if let Err(error) = install_terminal_io_threads(&grid, reader, writer.clone(), window) {
+        let reply_channel =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let reply_tx = reply_channel.0.clone();
+        if let Err(error) = install_terminal_io_threads(
+            &grid,
+            reader,
+            writer.clone(),
+            window,
+            title_cache,
+            host_events,
+            reply_channel,
+        ) {
             if let Some(stop_tx) = title_stop_tx {
                 let _ = stop_tx.send(());
             }
@@ -235,9 +258,15 @@ impl TerminalProcess {
                 title_stop_tx,
                 title_worker,
                 finished: false,
+                reply_tx,
             },
             shell,
         ))
+    }
+
+    /// Sender of the PTY reply queue that the writer thread drains.
+    pub(crate) fn reply_sender(&self) -> std::sync::mpsc::SyncSender<Vec<u8>> {
+        self.reply_tx.clone()
     }
 
     pub(crate) fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
@@ -247,6 +276,12 @@ impl TerminalProcess {
             .map_err(|_| io::Error::other("terminal writer lock is poisoned"))?;
         writer.write_all(bytes)?;
         writer.flush()
+    }
+
+    /// Queues a terminal report behind the parser replies without taking the writer lock, so a
+    /// stalled child cannot block the caller. Returns `false` when the report was dropped.
+    pub(crate) fn queue_report(&self, bytes: &[u8]) -> bool {
+        try_queue_report(&self.reply_tx, bytes)
     }
 
     pub(crate) fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -320,45 +355,6 @@ impl Drop for TerminalProcess {
     fn drop(&mut self) {
         self.shutdown();
     }
-}
-
-pub(crate) fn terminal_programmed_title(parts: &[&[u8]]) -> Option<String> {
-    let capacity = parts
-        .iter()
-        .fold(parts.len().saturating_sub(1), |total, part| {
-            total.saturating_add(part.len())
-        })
-        .min(TERMINAL_TITLE_MAX_BYTES);
-    let mut title = String::with_capacity(capacity);
-
-    'parts: for (index, part) in parts.iter().enumerate() {
-        if index != 0 {
-            if title.len() == TERMINAL_TITLE_MAX_BYTES {
-                break;
-            }
-            title.push(';');
-        }
-        let part = std::str::from_utf8(part).ok()?;
-        for ch in part.chars() {
-            if ch.is_control() {
-                continue;
-            }
-            if title.len() + ch.len_utf8() > TERMINAL_TITLE_MAX_BYTES {
-                break 'parts;
-            }
-            title.push(ch);
-        }
-    }
-
-    let first_non_whitespace = title
-        .char_indices()
-        .find_map(|(index, ch)| (!ch.is_whitespace()).then_some(index))?;
-    let trimmed_len = title.trim_end().len();
-    title.truncate(trimmed_len);
-    if first_non_whitespace != 0 {
-        title.drain(..first_non_whitespace);
-    }
-    (!title.is_empty()).then_some(title)
 }
 
 fn bounded_terminal_title(text: &str) -> String {
@@ -591,6 +587,9 @@ fn refresh_terminal_title_cache(
     false
 }
 
+/// Stop sender and join handle of the session title worker; both are `None` where it is not started.
+type TitleRefreshHandles = (Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>);
+
 #[cfg(target_os = "linux")]
 fn install_terminal_title_refresh(
     master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
@@ -598,7 +597,7 @@ fn install_terminal_title_refresh(
     shell_title: String,
     initial_cwd: Option<PathBuf>,
     window: Option<Arc<crate::platform::WindowHost>>,
-) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
+) -> io::Result<TitleRefreshHandles> {
     let (stop_tx, stop_rx) = std::sync::mpsc::channel();
     let worker = crate::platform::spawn_named("rriter-session-title", move || {
         let home = platform::user_home_dir();
@@ -634,46 +633,46 @@ fn install_terminal_title_refresh(
     _shell_title: String,
     _initial_cwd: Option<PathBuf>,
     _window: Option<Arc<crate::platform::WindowHost>>,
-) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
+) -> io::Result<TitleRefreshHandles> {
     Ok((None, None))
 }
 
-fn advance_terminal_output_batch(parser: &mut Parser, grid: &mut TermGrid, chunks: &[Vec<u8>]) {
-    for chunk in chunks {
-        parser.advance(grid, chunk);
-    }
-    grid.dirty = true;
-}
-
-fn finish_terminal_output_stream(parser: &mut Parser, grid: &mut TermGrid) -> bool {
-    if grid.presentation_ready {
+fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> bool {
+    if grid.presentation_ready() {
         return false;
     }
 
-    parser.advance(grid, TERMINAL_EXIT_BEFORE_OUTPUT);
+    grid.advance(TERMINAL_EXIT_BEFORE_OUTPUT, Instant::now(), sink);
+    sink.publish_sync_deadline(grid);
     true
 }
 
-fn install_terminal_io_threads(
-    grid: &Arc<Mutex<TermGrid>>,
+pub(crate) fn install_terminal_io_threads(
+    grid: &Arc<Mutex<Term>>,
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     window: Option<Arc<crate::platform::WindowHost>>,
+    title_cache: TerminalTitleCache,
+    host_events: HostEventsSink,
+    (reply_tx, reply_rx): (
+        std::sync::mpsc::SyncSender<Vec<u8>>,
+        std::sync::mpsc::Receiver<Vec<u8>>,
+    ),
 ) -> io::Result<()> {
-    let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let reader_finished = Arc::new(AtomicBool::new(false));
 
     let parser_grid = grid.clone();
     let parser_reader_finished = reader_finished.clone();
+    let mut sink = RriterTermSink::new(Some(title_cache), Some(reply_tx))
+        .with_host_events(host_events.clone());
     crate::platform::spawn_named("rriter-terminal-parser", move || {
-        let mut parser = Parser::new();
         let request_redraw = || {
             if let Some(window) = window.as_ref() {
                 window.request_redraw();
             }
         };
-        let mut first = rx.recv().ok();
+        let mut first = receive_terminal_chunk(&rx, &parser_grid, &mut sink, &request_redraw);
 
         while let Some(first_chunk) = first {
             let mut chunks = vec![first_chunk];
@@ -693,17 +692,26 @@ fn install_terminal_io_threads(
             let Ok(mut grid) = parser_grid.lock() else {
                 break;
             };
-            advance_terminal_output_batch(&mut parser, &mut grid, &chunks);
+            let outcome = advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
             drop(grid);
-            request_redraw();
-            first = rx.recv().ok();
+            if outcome.new_deadline {
+                // The UI thread re-arms its wait for the mode 2026 hold deadline; no frame is needed.
+                host_events.wake();
+            }
+            if outcome.grid_changed {
+                // A batch held entirely by mode 2026 leaves the screen as it was: no frame.
+                request_redraw();
+            }
+            first = receive_terminal_chunk(&rx, &parser_grid, &mut sink, &request_redraw);
         }
 
+        // The reader is gone, but a mode 2026 hold may still owe its bytes to the grid.
+        wait_out_sync_deadline(&parser_grid, &mut sink, &request_redraw);
         if parser_reader_finished.load(Ordering::Acquire) {
             let Ok(mut grid) = parser_grid.lock() else {
                 return;
             };
-            if finish_terminal_output_stream(&mut parser, &mut grid) {
+            if finish_terminal_output_stream(&mut grid, &mut sink) {
                 drop(grid);
                 request_redraw();
             }
@@ -756,7 +764,6 @@ fn install_terminal_io_threads(
         )
     })?;
 
-    crate::platform::lock_recover(&grid).reply_tx = Some(reply_tx);
     Ok(())
 }
 
@@ -934,6 +941,7 @@ fn terminal_fallback_title_with_home(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ronsole_term::TerminalColor;
 
     fn process_snapshot(program: &str, cwd: &str, args: &[&str]) -> platform::ProcessSnapshot {
         platform::ProcessSnapshot {
@@ -1025,90 +1033,165 @@ mod tests {
         assert!(!title_path.contains("format!("));
     }
 
-    fn parser_grid() -> (TermGrid, TerminalTitleCache) {
+    fn parser_grid() -> (Term, TerminalTitleCache) {
         let cache = Arc::new(Mutex::new(TerminalTitleState::new("fallback".to_string())));
-        (TermGrid::new_with_title_cache(8, 2, cache.clone()), cache)
+        (crate::app::terminal::test_term(8, 2), cache)
+    }
+
+    /// Feeds bytes through the sink the parser thread uses, so titles reach `cache`.
+    fn feed(grid: &mut Term, cache: &TerminalTitleCache, bytes: &[u8]) {
+        let mut sink = RriterTermSink::new(Some(cache.clone()), None);
+        grid.advance(bytes, Instant::now(), &mut sink);
+    }
+
+    /// Text, colours and cursor of the whole buffer, for comparing two grids.
+    fn grid_snapshot(
+        grid: &Term,
+    ) -> (
+        Vec<Vec<(char, TerminalColor, TerminalColor)>>,
+        (usize, usize),
+    ) {
+        let rows = (0..grid.total_rows())
+            .map(|y| {
+                grid.row(y)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|cell| (cell.ch(), cell.fg(), cell.bg()))
+                    .collect()
+            })
+            .collect();
+        (rows, grid.cursor())
+    }
+
+    /// Write target that copies every byte into a shared buffer the test can inspect.
+    struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut bytes = self
+                .0
+                .lock()
+                .map_err(|_| io::Error::other("recording buffer poisoned"))?;
+            bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn terminal_io_threads_write_device_attributes_reply_to_writer() {
+        let grid = Arc::new(Mutex::new(crate::app::terminal::test_term(8, 2)));
+        let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(RecordingWriter(recorded.clone()))));
+        let title_cache: TerminalTitleCache =
+            Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
+
+        let reply_channel =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let host_events = crate::app::terminal_host_events::HostEventsSink::new(
+            crate::ui_waker::UiWaker::counting(),
+        );
+        // The reader yields one DA1 query; the reply must travel parser -> channel -> writer.
+        install_terminal_io_threads(
+            &grid,
+            Box::new(std::io::Cursor::new(b"\x1b[c".to_vec())),
+            writer,
+            None,
+            title_cache,
+            host_events,
+            reply_channel,
+        )
+        .expect("terminal io threads spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let written = recorded.lock().expect("recorded buffer").clone();
+            if written.windows(b"\x1b[?62c".len()).any(|w| w == b"\x1b[?62c") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "DA1 reply not written, got {written:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
     fn terminal_presentation_waits_for_displayable_output_without_timeout_fallback() {
-        let mut grid = TermGrid::new(24, 3);
-        let mut parser = Parser::new();
+        let mut grid = crate::app::terminal::test_term(24, 3);
+        let mut sink = RriterTermSink::new(None, None);
 
-        assert!(!grid.presentation_ready);
+        assert!(!grid.presentation_ready());
         advance_terminal_output_batch(
-            &mut parser,
             &mut grid,
+            &mut sink,
             &[b"\x1b[?25l\x1b[2J\r\n\t   \x1b[?25h".to_vec()],
         );
-        assert!(!grid.presentation_ready);
+        assert!(!grid.presentation_ready());
 
         advance_terminal_output_batch(
-            &mut parser,
             &mut grid,
+            &mut sink,
             &[b"\x1b[32muser@host> \x1b[0m".to_vec()],
         );
-        assert!(grid.presentation_ready);
+        assert!(grid.presentation_ready());
 
         let source = include_str!("terminal_process.rs");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
         assert!(!production.contains("TERMINAL_PRESENTATION_FALLBACK"));
         assert!(!production.contains("terminal_presentation_wait_remaining"));
         assert!(!production.contains("grid.mark_presentation_ready();"));
-        assert!(production.contains("let mut first = rx.recv().ok();"));
+        assert!(production.contains("receive_terminal_chunk(&rx, &parser_grid"));
     }
 
     #[test]
     fn parsed_terminal_output_reveals_once_without_changing_grid_bytes() {
         let chunks = vec![b"\x1b[31mready\x1b[0m".to_vec()];
-        let mut expected = TermGrid::new(12, 2);
-        let mut expected_parser = Parser::new();
+        let mut expected = crate::app::terminal::test_term(12, 2);
+        let mut expected_sink = RriterTermSink::new(None, None);
         for chunk in &chunks {
-            expected_parser.advance(&mut expected, chunk);
+            expected.advance(chunk, Instant::now(), &mut expected_sink);
         }
 
-        let mut actual = TermGrid::new(12, 2);
-        assert!(!actual.presentation_ready);
-        assert!(!actual.presentation_layout_ready);
-        let mut parser = Parser::new();
-        advance_terminal_output_batch(&mut parser, &mut actual, &chunks);
+        let mut actual = crate::app::terminal::test_term(12, 2);
+        assert!(!actual.presentation_ready());
+        assert!(!actual.presentation_visible());
+        let mut sink = RriterTermSink::new(None, None);
+        advance_terminal_output_batch(&mut actual, &mut sink, &chunks);
 
-        assert!(actual.presentation_ready);
-        assert!(actual.lines == expected.lines);
-        assert_eq!(
-            (actual.cur_x, actual.cur_y),
-            (expected.cur_x, expected.cur_y)
-        );
-        assert_eq!(
-            (actual.cur_fg, actual.cur_bg),
-            (expected.cur_fg, expected.cur_bg)
-        );
+        assert!(actual.presentation_ready());
+        assert_eq!(grid_snapshot(&actual), grid_snapshot(&expected));
 
-        actual.dirty = false;
-        advance_terminal_output_batch(&mut parser, &mut actual, &[b"!".to_vec()]);
-        assert!(actual.presentation_ready);
-        assert!(actual.dirty);
+        actual.set_dirty(false);
+        advance_terminal_output_batch(&mut actual, &mut sink, &[b"!".to_vec()]);
+        assert!(actual.presentation_ready());
+        assert!(actual.dirty());
     }
 
     #[test]
     fn terminal_stream_end_before_displayable_output_shows_explicit_state_once() {
-        let mut grid = TermGrid::new(64, 3);
-        let mut parser = Parser::new();
-        advance_terminal_output_batch(&mut parser, &mut grid, &[b"\x1b[?25l\x1b[2J\r\n".to_vec()]);
-        assert!(!grid.presentation_ready);
+        let mut grid = crate::app::terminal::test_term(64, 3);
+        let mut sink = RriterTermSink::new(None, None);
+        advance_terminal_output_batch(
+            &mut grid,
+            &mut sink,
+            &[b"\x1b[?25l\x1b[2J\r\n".to_vec()],
+        );
+        assert!(!grid.presentation_ready());
 
-        assert!(finish_terminal_output_stream(&mut parser, &mut grid));
-        assert!(grid.presentation_ready);
-        let text = grid
-            .lines
-            .iter()
-            .flat_map(|line| line.iter().map(|cell| cell.c))
+        assert!(finish_terminal_output_stream(&mut grid, &mut sink));
+        assert!(grid.presentation_ready());
+        let text = (0..grid.total_rows())
+            .filter_map(|y| grid.row(y))
+            .flat_map(|line| line.iter().map(|cell| cell.ch()))
             .collect::<String>();
         assert!(text.contains("RRiter terminal exited before producing output"));
 
-        let lines = grid.lines.clone();
-        assert!(!finish_terminal_output_stream(&mut parser, &mut grid));
-        assert!(grid.lines == lines);
+        let snapshot = grid_snapshot(&grid);
+        assert!(!finish_terminal_output_stream(&mut grid, &mut sink));
+        assert!(grid_snapshot(&grid) == snapshot);
     }
 
     #[test]
@@ -1311,14 +1394,13 @@ mod tests {
     #[test]
     fn osc_zero_bel_and_osc_two_st_update_the_shared_title_cache() {
         let (mut grid, cache) = parser_grid();
-        let mut parser = Parser::new();
-        parser.advance(&mut grid, b"\x1b]0;~ : htop\x07");
+        feed(&mut grid, &cache,b"\x1b]0;~ : htop\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "~ : htop"
         );
 
-        parser.advance(&mut grid, b"\x1b]2;bin : sleep\x1b\\");
+        feed(&mut grid, &cache,b"\x1b]2;bin : sleep\x1b\\");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "bin : sleep"
@@ -1328,27 +1410,21 @@ mod tests {
     #[test]
     fn programmed_title_is_utf8_control_safe_bounded_and_sequential() {
         let (mut grid, cache) = parser_grid();
-        let mut parser = Parser::new();
-        parser.advance(&mut grid, b"\x1b]0;\x07");
+        feed(&mut grid, &cache,b"\x1b]0;\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "fallback"
         );
-        parser.advance(&mut grid, "\x1b]0;~ : компилятор\x07".as_bytes());
-        parser.advance(&mut grid, b"\x1b]0;(reyan) 89.169.37.107\x07");
+        feed(&mut grid, &cache,"\x1b]0;~ : компилятор\x07".as_bytes());
+        feed(&mut grid, &cache,b"\x1b]0;(reyan) 89.169.37.107\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "(reyan) 89.169.37.107"
         );
 
-        assert_eq!(terminal_programmed_title(&[b"\xff"]), None);
-        assert_eq!(
-            terminal_programmed_title(&[b"  safe\n\0title  "]).as_deref(),
-            Some("safetitle")
-        );
         let huge = "x".repeat(TERMINAL_TITLE_MAX_BYTES * 8);
         let sequence = format!("\x1b]2;{huge}\x07");
-        parser.advance(&mut grid, sequence.as_bytes());
+        feed(&mut grid, &cache,sequence.as_bytes());
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)).len(),
             TERMINAL_TITLE_MAX_BYTES

@@ -292,12 +292,14 @@ end run"#;
     Ok(output.status.code().unwrap_or(1))
 }
 
-pub fn reveal_path(path: &Path) -> io::Result<Child> {
+pub fn open_path(path: &Path) -> io::Result<Child> {
+    Command::new("/usr/bin/open").arg(path).spawn()
+}
+
+pub fn reveal_path(path: &Path, always_select: bool) -> io::Result<Child> {
     let mut command = Command::new("/usr/bin/open");
-    if path.is_file() {
-        command.arg("-R");
-    }
-    command.arg(path).spawn()
+    command.args(super::terminal_link::macos_reveal_args(path, always_select));
+    command.spawn()
 }
 
 pub fn system_proxy_config() -> Option<SystemProxyConfig> {

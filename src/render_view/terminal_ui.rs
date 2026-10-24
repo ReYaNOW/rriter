@@ -1,6 +1,8 @@
 use crate::app::IdePanelState;
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
+use super::terminal_colors::{terminal_cell_render_colors, terminal_palette};
+use super::terminal_decoration::{terminal_cell_face_from_flags, terminal_cell_is_hidden};
 use glow::HasContext;
 
 pub(crate) const TERMINAL_TEXT_SCALE: f32 = 1.05;
@@ -252,16 +254,20 @@ pub(crate) fn terminal_scrollbar(
 enum TerminalBodyLayer {
     Background,
     Glyph,
+    Decoration,
 }
 
-const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 2] =
-    [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph];
+const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 3] = [
+    TerminalBodyLayer::Background,
+    TerminalBodyLayer::Glyph,
+    TerminalBodyLayer::Decoration,
+];
 
 #[inline(always)]
 fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize, usize)) -> bool {
     let (sx, sy, ex, ey) = bounds;
     let (start_x, start_y, end_x, end_y) =
-        crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
+        ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
     if row > start_y && row < end_y {
         true
     } else if row == start_y && row == end_y {
@@ -275,10 +281,11 @@ fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize,
     }
 }
 
+/// `cell_bg` is `None` for the default background, which is never painted, so the
+/// translucent panel shows through.
 #[inline(always)]
 fn terminal_cell_background(
-    cell_bg: u8,
-    ansi: &[[f32; 4]],
+    cell_bg: Option<[f32; 4]>,
     search_match: [f32; 4],
     search_match_active: [f32; 4],
     in_selection: bool,
@@ -292,16 +299,17 @@ fn terminal_cell_background(
         Some(selection)
     } else if is_search_result {
         Some(search_match)
-    } else if cell_bg != 0 && cell_bg < 16 {
-        ansi.get(cell_bg as usize).copied()
     } else {
-        None
+        cell_bg
     }
 }
 
-#[inline(always)]
-fn terminal_cell_foreground(cell_fg: u8, ansi: &[[f32; 4]], default: [f32; 4]) -> [f32; 4] {
-    ansi.get(cell_fg as usize).copied().unwrap_or(default)
+/// Zero-width marks of a cell that the renderer draws over its base glyph, in cell order.
+fn terminal_cell_mark_chars(cell: &ronsole_term::Cell) -> impl Iterator<Item = char> + '_ {
+    cell.zero_width()
+        .iter()
+        .copied()
+        .filter(|&mark| ronsole_term::terminal_should_render_zero_width(mark))
 }
 
 fn terminal_glyph_anchor(
@@ -575,8 +583,7 @@ impl Renderer {
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
             let new_rows = terminal_visible_rows(term_content_h, char_h, s);
 
-            if grid.cols != new_cols || grid.visible_rows != new_rows {
-                grid.resize(new_cols, new_rows);
+            if crate::app::terminal::resize_terminal_grid(&mut grid, new_cols, new_rows) {
                 term.resize_pty(
                     clamp_terminal_pty_dimension(new_cols),
                     clamp_terminal_pty_dimension(new_rows),
@@ -584,17 +591,12 @@ impl Renderer {
             }
             grid.mark_presentation_layout_ready();
             let presentation_visible = grid.presentation_visible();
-            grid.dirty = false;
+            grid.set_dirty(false);
 
-            let ansi_colors = self.theme.terminal;
-
-            let scrollback_len = if grid.is_alt {
-                0
-            } else {
-                grid.scrollback.len()
-            };
-            let total_lines = scrollback_len + grid.lines.len();
-            let max_scroll = if grid.is_alt {
+            let palette = terminal_palette(&self.theme);
+            let is_alt = grid.is_alt_screen();
+            let total_lines = grid.total_rows();
+            let max_scroll = if is_alt {
                 0.0
             } else {
                 terminal_max_scroll(total_lines, char_h, term_content_h, s)
@@ -603,7 +605,7 @@ impl Renderer {
             let scroll_offset = terminal_render_scroll_offset(
                 term.scroll_y.current,
                 max_scroll,
-                grid.is_alt,
+                is_alt,
             );
             let draw_x = panel_x + 10.0 * s;
             let (_, term_pad_bottom) = terminal_text_padding(s);
@@ -643,10 +645,8 @@ impl Renderer {
                         self.flush();
                     }
 
-                    let row = if i < scrollback_len {
-                        &grid.scrollback[i]
-                    } else {
-                        &grid.lines[i - scrollback_len]
+                    let Some(row) = grid.row(i) else {
+                        continue;
                     };
 
                     match layer {
@@ -668,7 +668,7 @@ impl Renderer {
                             }
 
                             for (c_idx, cell) in row.iter().enumerate() {
-                                if c_idx >= grid.cols {
+                                if c_idx >= grid.cols() {
                                     break;
                                 }
                                 let cx = (draw_x + c_idx as f32 * char_w).round();
@@ -676,7 +676,7 @@ impl Renderer {
                                 let cell_w = next_cx - cx;
 
                                 let in_sel = grid
-                                    .selection
+                                    .selection()
                                     .is_some_and(|sel| terminal_range_contains(i, c_idx, sel));
 
                                 let mut is_search_res = false;
@@ -690,9 +690,9 @@ impl Renderer {
                                     }
                                 }
 
+                                let (_, cell_bg) = terminal_cell_render_colors(cell, &palette);
                                 if let Some(bg) = terminal_cell_background(
-                                    cell.bg,
-                                    &ansi_colors,
+                                    cell_bg,
                                     self.theme.search_match,
                                     self.theme.search_match_active,
                                     in_sel,
@@ -706,28 +706,30 @@ impl Renderer {
                         }
                         TerminalBodyLayer::Glyph => {
                             for (c_idx, cell) in row.iter().enumerate() {
-                                if c_idx >= grid.cols {
+                                if c_idx >= grid.cols() {
                                     break;
                                 }
-                                if cell.c == ' ' {
+                                let ch = cell.ch();
+                                if ch == ' ' || terminal_cell_is_hidden(cell) {
                                     continue;
                                 }
+                                let face = terminal_cell_face_from_flags(cell.flags());
                                 let cx = (draw_x + c_idx as f32 * char_w).round();
                                 let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
                                 let cell_w = next_cx - cx;
-                                let fg_color = terminal_cell_foreground(cell.fg, &ansi_colors, self.theme.fg);
-                                let prefer_color = match cell.presentation {
-                                    crate::app::terminal::CELL_PRESENTATION_TEXT => Some(false),
-                                    crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
+                                let (fg_color, _) = terminal_cell_render_colors(cell, &palette);
+                                let prefer_color = match cell.presentation() {
+                                    ronsole_term::CELL_PRESENTATION_TEXT => Some(false),
+                                    ronsole_term::CELL_PRESENTATION_EMOJI => Some(true),
                                     _ => None,
                                 };
                                 let baseline_y = draw_y + self.baseline_offset * term_scale;
-                                if crate::renderer::terminal_force_text_presentation(cell.c)
-                                    && let Some(g) = self.get_terminal_glyph(cell.c, prefer_color)
+                                if crate::renderer::terminal_force_text_presentation(ch)
+                                    && let Some(g) = self.get_terminal_glyph(ch, prefer_color, face)
                                     && g.is_emoji == 0.0
                                 {
                                     let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
-                                        cell.c, g, cx, draw_y, cell_w, char_h, baseline_y,
+                                        ch, g, cx, draw_y, cell_w, char_h, baseline_y,
                                         term_scale,
                                     );
                                     // lint: subpixel-glyph-ok check marks are shrunk by a computed fit scale.
@@ -742,14 +744,15 @@ impl Renderer {
                                         g.is_emoji,
                                     );
                                 } else if let Some(g) =
-                                    self.terminal_glyph_at_scale(cell.c, prefer_color, term_scale)
+                                    self.terminal_glyph_at_scale(ch, prefer_color, term_scale, face)
                                 {
                                     if let Some((x, y, w, h)) = terminal_block_glyph_rect(
-                                        cell.c, cx, next_cx, draw_y, char_h,
+                                        ch, cx, next_cx, draw_y, char_h,
                                     ) && let Some(block_glyph) = self.get_terminal_glyph_at_size(
-                                        cell.c,
+                                        ch,
                                         prefer_color,
                                         self.final_text_pixel_size(term_scale),
+                                        face,
                                     ) {
                                         // lint: subpixel-glyph-ok block elements fill the cell
                                         self.push_quad(
@@ -763,7 +766,32 @@ impl Renderer {
                                         self.push_scaled_glyph(g, cx, baseline_y, fg_color, false);
                                     }
                                 }
+                                // Combining marks reuse the base glyph's face, colour and baseline,
+                                // anchored at the cell origin.
+                                for mark in terminal_cell_mark_chars(cell) {
+                                    if let Some(g) =
+                                        self.terminal_glyph_at_scale(mark, prefer_color, term_scale, face)
+                                    {
+                                        self.push_scaled_glyph(g, cx, baseline_y, fg_color, false);
+                                    }
+                                }
                             }
+                        }
+                        TerminalBodyLayer::Decoration => {
+                            self.push_terminal_row_decorations(
+                                row,
+                                i,
+                                draw_x,
+                                draw_y,
+                                char_w,
+                                char_h,
+                                term_scale,
+                                s,
+                                grid.cols(),
+                                &palette,
+                                term.hovered_link.as_ref(),
+                                grid.content_generation(),
+                            );
                         }
                     }
                 }
@@ -772,23 +800,23 @@ impl Renderer {
             self.terminal_row_search_results = row_search_results;
 
             if ide_panel.terminal_focused {
+                let (cur_x, cur_y) = grid.cursor();
                 let cursor_offset_from_bottom = grid
-                    .lines
-                    .len()
+                    .rows()
                     .saturating_sub(1)
-                    .saturating_sub(grid.cur_y);
+                    .saturating_sub(cur_y);
                 let cursor_px_y = term_content_y + term_content_h
                     - term_pad_bottom
                     - char_h
                     - (cursor_offset_from_bottom as f32 * char_h)
                     + scroll_offset;
                 if presentation_visible
-                    && grid.cursor_visible
+                    && grid.cursor_visible()
                     && cursor_px_y + char_h >= term_content_y
                     && cursor_px_y <= term_content_y + term_content_h
                 {
-                    let cursor_px_x = (draw_x + grid.cur_x as f32 * char_w).round();
-                    let cursor_next_x = (draw_x + (grid.cur_x + 1) as f32 * char_w).round();
+                    let cursor_px_x = (draw_x + cur_x as f32 * char_w).round();
+                    let cursor_next_x = (draw_x + (cur_x + 1) as f32 * char_w).round();
                     self.push_rect(
                         cursor_px_x,
                         cursor_px_y,
@@ -1088,15 +1116,35 @@ mod tests {
         }
     }
 
+    /// Sink that drops replies, titles and clipboard text; the cell test needs only the grid.
+    struct NullSink;
+
+    impl ronsole_term::TermSink for NullSink {
+        fn reply(&mut self, _bytes: &[u8]) {}
+        fn title(&mut self, _title: &str) {}
+        fn clipboard_set(&mut self, _text: String) {}
+        fn working_directory(&mut self, _host: &str, _path: &[u8]) {}
+    }
+
+    #[test]
+    fn terminal_cell_mark_chars_keeps_renderable_marks_only() {
+        let mut term = crate::app::terminal::test_term(4, 1);
+        // U+0301 is drawn over its base cell; U+200D is a format character that the
+        // ronsole_term predicate (cell.rs, terminal_should_render_zero_width) filters out.
+        term.advance("e\u{301}\u{200d}".as_bytes(), std::time::Instant::now(), &mut NullSink);
+        let row = term.row(0).expect("row");
+        assert_eq!(terminal_cell_mark_chars(&row[0]).collect::<Vec<_>>(), vec!['\u{301}']);
+    }
+
     #[test]
     fn terminal_content_gate_waits_for_output_and_first_layout() {
-        let mut output_first = crate::app::terminal::TermGrid::new(200, 60);
+        let mut output_first = crate::app::terminal::test_term(200, 60);
         output_first.mark_presentation_ready();
         assert!(!output_first.presentation_visible());
         output_first.mark_presentation_layout_ready();
         assert!(output_first.presentation_visible());
 
-        let mut layout_first = crate::app::terminal::TermGrid::new(200, 60);
+        let mut layout_first = crate::app::terminal::test_term(200, 60);
         layout_first.mark_presentation_layout_ready();
         assert!(!layout_first.presentation_visible());
         layout_first.mark_presentation_ready();
@@ -1439,7 +1487,11 @@ mod tests {
         assert!(qx + qw > next_cell_left, "fixture icon must overhang into next cell");
         assert_eq!(
             TERMINAL_BODY_LAYERS,
-            [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph]
+            [
+                TerminalBodyLayer::Background,
+                TerminalBodyLayer::Glyph,
+                TerminalBodyLayer::Decoration,
+            ]
         );
     }
 
@@ -1456,27 +1508,21 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cell_background_priority_is_active_search_selection_match_ansi() {
-        let ansi = [[0.1, 0.1, 0.1, 1.0]; 16];
+    fn terminal_cell_background_priority_is_active_search_selection_match_cell() {
+        let cell_bg = Some([0.1, 0.1, 0.1, 1.0]);
         let sel = [0.2, 0.3, 0.4, 1.0];
         let search_match = [0.6, 0.6, 0.6, 0.35];
         let search_match_active = [1.0, 0.6, 0.0, 0.5];
-        assert_eq!(terminal_cell_background(0, &ansi, search_match, search_match_active, false, false, false, sel), None);
-        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, false, false, false, sel), Some(ansi[3]));
-        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, false, sel), Some(sel));
+        assert_eq!(terminal_cell_background(None, search_match, search_match_active, false, false, false, sel), None);
+        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, false, false, false, sel), cell_bg);
+        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, true, true, false, sel), Some(sel));
         assert_eq!(
-            terminal_cell_background(3, &ansi, search_match, search_match_active, false, true, false, sel),
+            terminal_cell_background(cell_bg, search_match, search_match_active, false, true, false, sel),
             Some(search_match)
         );
         assert_eq!(
-            terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, true, sel),
+            terminal_cell_background(cell_bg, search_match, search_match_active, true, true, true, sel),
             Some(search_match_active)
         );
-    }
-
-    #[test]
-    fn terminal_default_cell_text_uses_theme_ansi_seven() {
-        let theme = crate::renderer::Theme::for_id(crate::theme::ThemeId::OneLight, [0.0; 4]);
-        assert_eq!(terminal_cell_foreground(7, &theme.terminal, theme.fg), theme.terminal[7]);
     }
 }

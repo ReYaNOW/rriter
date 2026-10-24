@@ -28,6 +28,7 @@ mod api_client_keymap_tests {
         let event = crate::app::keyboard::KeyInput {
             physical_key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyG),
             logical_text: None,
+            unshifted: None,
             text: None,
             state: winit::event::ElementState::Pressed,
             repeat: false,

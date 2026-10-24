@@ -524,9 +524,15 @@
         assert_eq!(step_progress, 1);
     }
 
+    /// Feeds raw PTY bytes through the production parser, as the reader thread does.
+    fn feed(grid: &mut ronsole_term::Term, bytes: &[u8]) {
+        let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None);
+        grid.advance(bytes, std::time::Instant::now(), &mut sink);
+    }
+
     #[test]
     fn terminal_tui_state_requires_alt_screen_and_visible_content() {
-        let mut grid = crate::app::terminal::TermGrid::new(12, 3);
+        let mut grid = crate::app::terminal::test_term(12, 3);
         assert_eq!(
             terminal_grid_tui_state(&grid),
             TerminalTuiState {
@@ -534,11 +540,7 @@
                 non_blank_cells: 0,
             }
         );
-        grid.is_alt = true;
-        grid.lines[0][0].c = 'h';
-        grid.lines[0][1].c = 't';
-        grid.lines[0][2].c = 'o';
-        grid.lines[0][3].c = 'p';
+        feed(&mut grid, b"\x1b[?1049hhtop");
         assert_eq!(
             terminal_grid_tui_state(&grid),
             TerminalTuiState {
@@ -550,15 +552,14 @@
 
     #[test]
     fn terminal_basic_output_is_detected_in_visible_or_scrollback_lines() {
-        let mut grid = crate::app::terminal::TermGrid::new(16, 2);
+        let mut grid = crate::app::terminal::test_term(16, 2);
         assert!(!terminal_grid_contains(&grid, TERMINAL_BASIC_OUTPUT));
-        for (index, ch) in TERMINAL_BASIC_OUTPUT.chars().enumerate() {
-            grid.lines[0][index].c = ch;
-        }
+        feed(&mut grid, TERMINAL_BASIC_OUTPUT.as_bytes());
         assert!(terminal_grid_contains(&grid, TERMINAL_BASIC_OUTPUT));
 
-        grid.scrollback.push_back(grid.lines[0].clone());
-        grid.lines[0].fill(crate::app::terminal::Cell::default());
+        // Two line feeds on a 2-row grid push the first row into scrollback.
+        feed(&mut grid, b"\r\n\r\n");
+        assert!(grid.scrollback_len() > 0);
         assert!(terminal_grid_contains(&grid, TERMINAL_BASIC_OUTPUT));
     }
 

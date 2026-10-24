@@ -202,7 +202,7 @@
         ));
         assert!(terminal.contains("term.scroll_y.target ="));
         assert!(terminal.contains("terminal_drag_cell("));
-        assert!(terminal.contains("grid.selection = Some"));
+        assert!(terminal.contains("grid.set_selection(Some("));
         assert!(!terminal.contains("DRAG_AUTOSCROLL_EDGE_PX"));
         assert!(!terminal.contains("terminal_body_rect("));
 

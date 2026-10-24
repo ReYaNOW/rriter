@@ -292,10 +292,10 @@ fn active_terminal_scrollbar_geometry(
     let renderer = app.renderer.as_ref()?;
     let terminal = app.ide_panel.terminals.get(app.ide_panel.active_terminal)?;
     let grid = crate::platform::lock_recover(&terminal.grid);
-    if grid.is_alt {
+    if grid.is_alt_screen() {
         return None;
     }
-    let total_lines = grid.scrollback.len() + grid.lines.len();
+    let total_lines = grid.total_rows();
     drop(grid);
 
     let scale = renderer.scale_factor;
@@ -324,6 +324,8 @@ mod hover_mouse_tests;
 mod hover_state_core;
 mod input;
 mod wheel;
+mod terminal_mouse;
+pub(crate) use terminal_mouse::TerminalMouseState;
 
 #[cfg(test)]
 pub(crate) use input::stop_click_scroll_anims;
