@@ -17,6 +17,7 @@ fn press_key(app: &mut App, physical_key: KeyCode) {
         KeyInput {
             physical_key: PhysicalKey::Code(physical_key),
             logical_text: None,
+            unshifted: None,
             text: None,
             state: ElementState::Pressed,
             repeat: false,

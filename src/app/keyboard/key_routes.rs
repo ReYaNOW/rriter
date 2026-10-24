@@ -909,5 +909,20 @@ fn route_final_route(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
         }
         return true;
     }
+    // Release goes to the terminal only while it owns the keyboard, so Kitty flag 2 can report it.
+    if ctx.key_event.state == ElementState::Released
+        && app.ide_panel.terminal_focused
+        && super::input_owner::terminal_keyboard_owner(
+            app.is_ide_mode,
+            app.show_settings,
+            app.show_search,
+            app.search_focused,
+            &app.ide_panel,
+        )
+        && (!app.ide_panel.term_show_search || !app.ide_panel.term_search_focused)
+    {
+        app.handle_terminal_keyboard_input(ctx.key_event.clone());
+        return true;
+    }
     false
 }

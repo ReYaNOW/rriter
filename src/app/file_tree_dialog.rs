@@ -447,6 +447,7 @@ impl App {
             &crate::app::keyboard::KeyInput {
                 physical_key,
                 logical_text: None,
+                unshifted: None,
                 text: None,
                 state: winit::event::ElementState::Pressed,
                 repeat: false,

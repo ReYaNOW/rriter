@@ -49,6 +49,7 @@
         let event = KeyInput {
             physical_key: PhysicalKey::Code(KeyCode::KeyG),
             logical_text: None,
+            unshifted: None,
             text: None,
             state: ElementState::Pressed,
             repeat: false,
@@ -121,6 +122,7 @@
             KeyInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyG),
                 logical_text: None,
+                unshifted: None,
                 text: None,
                 state: ElementState::Pressed,
                 repeat: false,
@@ -229,6 +231,7 @@
             KeyInput {
                 physical_key: PhysicalKey::Code(KeyCode::Enter),
                 logical_text: None,
+                unshifted: None,
                 text: None,
                 state: ElementState::Pressed,
                 repeat: false,
@@ -716,6 +719,7 @@
             KeyInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyG),
                 logical_text: None,
+                unshifted: None,
                 text: None,
                 state: ElementState::Pressed,
                 repeat: false,
@@ -778,6 +782,7 @@
             KeyInput {
                 physical_key: PhysicalKey::Code(KeyCode::KeyG),
                 logical_text: None,
+                unshifted: None,
                 text: None,
                 state: ElementState::Pressed,
                 repeat: false,
