@@ -1469,6 +1469,7 @@ Root:
 * `src/headless/ui_tests_git_blame_graph.rs` -> headless UI test for revealing a blame commit beyond the first Git graph page.
 * `src/headless/ui_tests_git_blame_column.rs` -> headless UI tests for blame column labels, modified lines, gutter width, popup, graph reveal, tab state, and external reload.
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
+* `src/headless/ui_tests_terminal_mouse.rs` -> headless UI tests for terminal mouse reports (SGR press/release/drag, wheel, scrollback cell) and DECSET 1004 focus reports across window, panel and tab changes.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
 * `src/headless/ui_tests_api_client_navigation.rs` -> headless UI tests for API spec refresh/remove, route filter, and tag group collapse.

@@ -51,24 +51,14 @@ pub(crate) fn terminal_wheel_arrow_bytes(up: bool, app_cursor: bool, steps: usiz
     sequence.repeat(steps)
 }
 
-/// Converts an absolute grid row (as returned by `App::terminal_mouse_cell`)
-/// into the 0-based row of the visible area that the PTY expects.
-fn visible_report_cell(grid: &Term, cell: (usize, usize)) -> (usize, usize) {
-    let row = cell
-        .1
-        .saturating_sub(grid.scrollback_len())
-        .min(grid.rows().saturating_sub(1));
-    (cell.0, row)
-}
-
 /// Encodes one pointer event for the grid's tracking mode; `None` when the application did not request it.
+/// `cell` is `(column, row from the top of the visible area)`, as returned by `App::terminal_report_cell`.
 pub(crate) fn terminal_mouse_report(
     grid: &Term,
     kind: MouseEventKind,
     cell: (usize, usize),
 ) -> Option<Vec<u8>> {
-    let (col, row) = visible_report_cell(grid, cell);
-    mouse_report(grid.mouse_tracking(), grid.mouse_sgr(), kind, col, row)
+    mouse_report(grid.mouse_tracking(), grid.mouse_sgr(), kind, cell.0, cell.1)
 }
 
 impl App {
@@ -90,6 +80,25 @@ impl App {
             .then_some(active)
     }
 
+    /// Terminal that takes a release: the tracking terminal under the pointer, or the active
+    /// one when it still holds this button's press, so a drag that left the body ends in the PTY.
+    fn terminal_release_target(
+        &self,
+        button: winit::event::MouseButton,
+        mx: f32,
+        my: f32,
+    ) -> Option<usize> {
+        if let Some(active) = self.terminal_tracking_target(mx, my) {
+            return Some(active);
+        }
+        let btn = terminal_mouse_button(button)?;
+        let active = self.ide_panel.active_terminal;
+        let term = self.ide_panel.terminals.get(active)?;
+        (term.mouse.held == Some(btn)
+            && lock_terminal_grid(&term.grid).mouse_tracking().enabled())
+        .then_some(active)
+    }
+
     /// Forwards a press or release over a tracking terminal to the PTY. Returns `true`
     /// when the event belongs to the terminal and must not start a local selection.
     pub(super) fn forward_terminal_mouse_button(
@@ -99,10 +108,16 @@ impl App {
         mx: f32,
         my: f32,
     ) -> bool {
-        let Some(active) = self.terminal_tracking_target(mx, my) else {
+        let pressed = state == ElementState::Pressed;
+        let target = if pressed {
+            self.terminal_tracking_target(mx, my)
+        } else {
+            self.terminal_release_target(button, mx, my)
+        };
+        let Some(active) = target else {
             return false;
         };
-        let Some(cell) = self.terminal_mouse_cell(mx, my) else {
+        let Some(cell) = self.terminal_report_cell(mx, my) else {
             return true;
         };
         let Some(btn) = terminal_mouse_button(button) else {
@@ -111,7 +126,6 @@ impl App {
         let Some(term) = self.ide_panel.terminals.get_mut(active) else {
             return true;
         };
-        let pressed = state == ElementState::Pressed;
         let kind = if pressed {
             MouseEventKind::Press(btn)
         } else {
@@ -132,7 +146,7 @@ impl App {
         let Some(active) = self.terminal_tracking_target(mx, my) else {
             return false;
         };
-        let Some(cell) = self.terminal_mouse_cell(mx, my) else {
+        let Some(cell) = self.terminal_report_cell(mx, my) else {
             return true;
         };
         let Some(term) = self.ide_panel.terminals.get_mut(active) else {

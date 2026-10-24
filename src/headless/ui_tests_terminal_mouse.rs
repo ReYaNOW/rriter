@@ -1,0 +1,252 @@
+//! Headless coverage for terminal mouse reports and DECSET 1004 focus reports.
+//! Expected bytes come from the protocol spec (SGR `ESC[<b;x;yM/m`, motion code +32,
+//! focus `ESC[I`/`ESC[O`), not from the encoder; the test reads what the app writes to the PTY.
+
+use crate::app::terminal::{advance_test_output, lock_terminal_grid};
+use crate::headless::HeadlessSession;
+use crate::headless::tests_support::{
+    click_ui, dump, run_script, shell_failed, terminal_session, ui_rect, wait_until,
+};
+use crate::render_view::terminal_ui::{TERMINAL_TEXT_SCALE, terminal_text_padding};
+use winit::keyboard::ModifiersState;
+
+fn run(session: &mut HeadlessSession, script: &str) {
+    let lines = run_script(session, script.as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+/// Wheel up into scrollback (positive dy, as in the terminal scrollbar test), then wait until the scroll settles.
+fn scroll_back_into_history(session: &mut HeadlessSession, x: f64, y: f64) {
+    run(session, &format!("mouse_move {x} {y}\nwheel 0 3\n"));
+    wait_until(session, 5000, "terminal scrolled into history", |session| {
+        let scroll = &session.app.ide_panel.terminals[0].scroll_y;
+        scroll.is_settled() && scroll.current > 0.0
+    });
+}
+
+/// Feeds DECSET or other bytes straight into the grid of tab `index`.
+fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
+    let term = &session.app.ide_panel.terminals[index];
+    let mut grid = lock_terminal_grid(&term.grid);
+    advance_test_output(&mut grid, bytes);
+}
+
+/// Takes the bytes written to the PTY of tab `index` since the previous call.
+fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
+    let term = &session.app.ide_panel.terminals[index];
+    std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
+}
+
+fn char_metrics(session: &HeadlessSession) -> (f32, f32, f32) {
+    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    let char_w = renderer.ascii_advances['A' as usize].max(1.0) * TERMINAL_TEXT_SCALE;
+    let char_h = renderer.line_height * TERMINAL_TEXT_SCALE;
+    (renderer.scale_factor, char_w, char_h)
+}
+
+/// Pointer position at the centre of visible cell `(col, row)` on a grid that is not scrolled back.
+/// The position is found through the app's own cell mapping, so the test checks the same geometry.
+fn point_for_visible_cell(session: &mut HeadlessSession, col: usize, row: usize) -> (f64, f64) {
+    let body = ui_rect(&dump(session), "TerminalBody");
+    let (scale, char_w, _) = char_metrics(session);
+    let x = body[0] as f32 + 10.0 * scale + (col as f32 + 0.5) * char_w;
+    let index = session.app.ide_panel.active_terminal;
+    let scrollback = lock_terminal_grid(&session.app.ide_panel.terminals[index].grid).scrollback_len();
+    let target = Some((col, scrollback + row));
+    let mut y = body[1] as f32;
+    let bottom = (body[1] + body[3]) as f32;
+    while y < bottom {
+        if session.app.terminal_mouse_cell(x, y) == target {
+            return (x as f64, y as f64);
+        }
+        y += 0.5;
+    }
+    panic!("no pointer position maps to visible cell {col},{row}");
+}
+
+/// Pointer position at the centre of the bottom visible row, whatever the scroll offset.
+fn point_for_bottom_row(session: &mut HeadlessSession, col: usize) -> (f64, f64) {
+    let body = ui_rect(&dump(session), "TerminalBody");
+    let (scale, char_w, char_h) = char_metrics(session);
+    let (_, bottom_pad) = terminal_text_padding(scale);
+    let x = body[0] as f32 + 10.0 * scale + (col as f32 + 0.5) * char_w;
+    let y = (body[1] + body[3]) as f32 - bottom_pad - char_h * 0.5;
+    (x as f64, y as f64)
+}
+
+fn open_shell_terminal(name: &str) -> Option<(std::path::PathBuf, HeadlessSession)> {
+    let (dir, session) = terminal_session(name);
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return None;
+    }
+    Some((dir, session))
+}
+
+#[test]
+fn mouse_press_reports_real_cell_sgr() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-press") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\n"));
+    assert_eq!(written(&session, 0), b"\x1b[<0;5;3M\x1b[<0;5;3m");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn shift_press_with_tracking_goes_to_pty() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-shift") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    session.app.modifiers = ModifiersState::SHIFT;
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\n"));
+    session.app.modifiers = ModifiersState::empty();
+    assert_eq!(written(&session, 0), b"\x1b[<0;5;3M\x1b[<0;5;3m");
+    let grid = lock_terminal_grid(&session.app.ide_panel.terminals[0].grid);
+    assert!(grid.selection().is_none(), "tracking must not start a local selection");
+    drop(grid);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_without_tracking_main_screen_scrolls() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-main") else {
+        return;
+    };
+    let lines: Vec<u8> = b"line\r\n".repeat(120);
+    feed(&session, 0, &lines);
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    scroll_back_into_history(&mut session, x, y);
+    assert!(written(&session, 0).is_empty(), "no PTY input without tracking on the main screen");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn focus_report_on_window_and_panel_focus() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-focus-panel") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1004h");
+    written(&session, 0);
+    session.app.is_focused = false;
+    run(&mut session, "wait 10\n");
+    session.app.is_focused = true;
+    run(&mut session, "wait 10\n");
+    // The editor is not laid out in this session, so panel focus moves through the field;
+    // the frame step after each change runs the focus reconciliation.
+    session.app.ide_panel.terminal_focused = false;
+    run(&mut session, "wait 10\n");
+    session.app.ide_panel.terminal_focused = true;
+    run(&mut session, "wait 10\n");
+    assert_eq!(written(&session, 0), b"\x1b[O\x1b[I\x1b[O\x1b[I");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn focus_report_on_tab_switch_and_close() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-focus-tabs") else {
+        return;
+    };
+    click_ui(&mut session, "TerminalAdd");
+    wait_until(&mut session, 5000, "second terminal tab", |session| {
+        session.app.ide_panel.terminals.len() == 2 && crate::headless::tests_support::has_ui(&dump(session), "TerminalTab(1)")
+    });
+    if shell_failed(&session, 1) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    feed(&session, 0, b"\x1b[?1004h");
+    feed(&session, 1, b"\x1b[?1004h");
+    run(&mut session, "wait 10\n");
+    written(&session, 0);
+    written(&session, 1);
+
+    click_ui(&mut session, "TerminalTab(0)");
+    run(&mut session, "wait 10\n");
+    assert_eq!(session.app.ide_panel.active_terminal, 0);
+    assert_eq!(written(&session, 1), b"\x1b[O", "old tab gets focus-out");
+    assert_eq!(written(&session, 0), b"\x1b[I", "new tab gets focus-in");
+
+    click_ui(&mut session, "TerminalTab(1)");
+    run(&mut session, "wait 10\n");
+    written(&session, 0);
+    written(&session, 1);
+
+    click_ui(&mut session, "TerminalTabClose(1)");
+    wait_until(&mut session, 5000, "terminal tab close", |session| session.app.ide_panel.terminals.len() == 1);
+    run(&mut session, "wait 10\n");
+    assert_eq!(session.app.ide_panel.active_terminal, 0);
+    assert_eq!(written(&session, 0), b"\x1b[I", "tab that becomes active gets focus-in");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn drag_with_tracking_1002_reports_release() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-drag") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x1, y1) = point_for_visible_cell(&mut session, 4, 2);
+    let (x2, y2) = point_for_visible_cell(&mut session, 6, 2);
+    written(&session, 0);
+    run(
+        &mut session,
+        &format!("mouse_move {x1} {y1}\nclick left down\nmouse_move {x2} {y2}\nclick left up\n"),
+    );
+    assert_eq!(
+        written(&session, 0),
+        b"\x1b[<0;5;3M\x1b[<32;7;3M\x1b[<0;7;3m"
+    );
+    let grid = lock_terminal_grid(&session.app.ide_panel.terminals[0].grid);
+    assert!(grid.selection().is_none(), "tracking must not start a local selection");
+    drop(grid);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn release_after_drag_out_of_body_reaches_pty_clamped() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-release-out") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x1, y1) = point_for_visible_cell(&mut session, 4, 2);
+    let (x2, _) = point_for_visible_cell(&mut session, 6, 2);
+    let body = ui_rect(&dump(&mut session), "TerminalBody");
+    let y_above = body[1] - 40.0;
+    written(&session, 0);
+    run(
+        &mut session,
+        &format!("mouse_move {x1} {y1}\nclick left down\nmouse_move {x2} {y_above}\nclick left up\n"),
+    );
+    // Release is clamped into the visible area: column 7, top row 1 (SGR is 1-based).
+    let bytes = written(&session, 0);
+    assert!(bytes.starts_with(b"\x1b[<0;5;3M"), "{bytes:?}");
+    assert!(bytes.ends_with(b"\x1b[<0;7;1m"), "{bytes:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn tracking_reports_visible_row_while_scrolled_back() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-scrollback") else {
+        return;
+    };
+    let lines: Vec<u8> = b"line\r\n".repeat(120);
+    feed(&session, 0, &lines);
+    let (x, y) = point_for_bottom_row(&mut session, 4);
+    scroll_back_into_history(&mut session, x, y);
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_bottom_row(&mut session, 4);
+    let rows = lock_terminal_grid(&session.app.ide_panel.terminals[0].grid).rows();
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\n"));
+    let expected = format!("\x1b[<0;5;{rows}M\x1b[<0;5;{rows}m");
+    assert_eq!(written(&session, 0), expected.as_bytes());
+    let _ = std::fs::remove_dir_all(dir);
+}

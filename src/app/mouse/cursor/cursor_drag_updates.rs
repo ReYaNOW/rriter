@@ -5,8 +5,21 @@ use crate::render_view::editor_scroll_content_height;
 use crate::render_view::minimap_ui::{minimap_thumb_height, minimap_view_metrics};
 
 impl App {
-    /// Grid cell under the pointer as `(column, absolute row)`; the row counts scrollback, so selection and mouse reports share one calculation.
+    /// Grid cell under the pointer as `(column, absolute row)`; the row counts scrollback, used for selection.
     pub(crate) fn terminal_mouse_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+        self.terminal_pointer_cells(px, py)
+            .map(|(col, abs_row, _)| (col, abs_row))
+    }
+
+    /// Grid cell under the pointer as `(column, row from the top of the visible area)`, the
+    /// coordinates a PTY mouse report uses; the row follows the same scroll offset as `terminal_mouse_cell`.
+    pub(crate) fn terminal_report_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+        self.terminal_pointer_cells(px, py)
+            .map(|(col, _, visible_row)| (col, visible_row))
+    }
+
+    /// `(column, absolute row, visible row)` under the pointer, computed once for both callers.
+    fn terminal_pointer_cells(&mut self, px: f32, py: f32) -> Option<(usize, usize, usize)> {
         let (s, line_height, char_w) = {
             let renderer = self.renderer.as_mut()?;
             (
@@ -47,9 +60,14 @@ impl App {
             .saturating_sub(1)
             .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
             .min(total_lines.saturating_sub(1));
+        // The viewport's bottom row is `rows - 1`. Scroll is not part of the pixel offset here,
+        // so this counts rows from the top of the visible area, clamped at 0.
+        let view_lines_from_bottom =
+            ((term_content_y + term_content_h - bottom_pad - py) / char_h).max(0.0).floor() as usize;
+        let visible_row = grid.rows().saturating_sub(1).saturating_sub(view_lines_from_bottom);
         let cell_x = (((px - panel_x) / char_w).floor() as usize)
             .min(grid.cols().saturating_sub(1));
-        Some((cell_x, cell_y))
+        Some((cell_x, cell_y, visible_row))
     }
 
     /// IDE panel DnD, tab drags, panel resize and git panel scrollbars; `true` = handled.

@@ -564,7 +564,7 @@ impl App {
                     return;
                 }
                 if self.ide_panel.terminal_focused {
-                    let cell = self.terminal_mouse_cell(mx, my).unwrap_or((0, 0));
+                    let cell = self.terminal_report_cell(mx, my).unwrap_or((0, 0));
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
                         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);

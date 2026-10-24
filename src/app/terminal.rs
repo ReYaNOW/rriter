@@ -57,6 +57,13 @@ pub(crate) fn test_term(cols: usize, rows: usize) -> Term {
     })
 }
 
+/// Feeds raw output bytes into a grid the way the PTY reader does, for tests that set DECSET modes.
+#[cfg(test)]
+pub(crate) fn advance_test_output(grid: &mut Term, bytes: &[u8]) {
+    let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None);
+    grid.advance(bytes, Instant::now(), &mut sink);
+}
+
 pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
     let (sx, sy, ex, ey) = term.selection()?;
     let (start_x, start_y, end_x, end_y) = ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
@@ -99,6 +106,9 @@ pub struct Terminal {
     pub(crate) mouse: crate::app::mouse::TerminalMouseState,
     /// Focus state last reported to the PTY (DECSET 1004); reconciled by `sync_terminal_focus_reports`.
     pub(crate) focus_sent: bool,
+    /// Bytes passed to `write_input`, kept so headless tests can check the PTY stream.
+    #[cfg(test)]
+    pub(crate) written_input: Mutex<Vec<u8>>,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
 }
 
@@ -159,6 +169,8 @@ impl Terminal {
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
             focus_sent: false,
+            #[cfg(test)]
+            written_input: Mutex::new(Vec::new()),
             title_cache,
         }
     }
@@ -168,6 +180,8 @@ impl Terminal {
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
+        #[cfg(test)]
+        crate::platform::lock_recover(&self.written_input).extend_from_slice(bytes);
         self.process
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "terminal is not running"))?

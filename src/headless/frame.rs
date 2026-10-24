@@ -117,6 +117,8 @@ pub(crate) fn step_frame(
     force: bool,
 ) -> bool {
     about::about_to_wait(app, &HostLoop::headless(loop_state));
+    // Mirrors the native `about_to_wait`, which reconciles terminal focus reports after each pass.
+    app.sync_terminal_focus_reports();
     // An automation tick may have asked for another window size; the frame is drawn at it.
     sync_surface_to_window(app, gl);
     // Always consume the request, also on forced frames, so it does not trigger a second frame.
