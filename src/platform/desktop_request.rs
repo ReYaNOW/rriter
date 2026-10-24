@@ -238,36 +238,8 @@ pub fn open_path(requests: &ExternalRequestSink, path: &Path) -> io::Result<()> 
 pub(crate) fn spawn_open_path(path: &Path) -> io::Result<Option<Child>> {
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-        let operation = OsStr::new("open")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let target = path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                target.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        if result as isize > 32 {
-            return Ok(None);
-        }
-        return Err(io::Error::other(format!(
-            "ShellExecuteW failed with code {}",
-            result as isize
-        )));
+        shell_execute_open(path.as_os_str())?;
+        return Ok(None);
     }
     #[cfg(target_os = "macos")]
     {
@@ -282,6 +254,41 @@ pub(crate) fn spawn_open_path(path: &Path) -> io::Result<Option<Child>> {
         io::ErrorKind::Unsupported,
         "opening files is not supported on this platform",
     ))
+}
+
+/// Runs ShellExecute with the "open" verb on `target`, a file path or a URL. The API reports
+/// failure with a return code of 32 or less.
+#[cfg(windows)]
+fn shell_execute_open(target: &OsStr) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let operation = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result as isize > 32 {
+        return Ok(());
+    }
+    Err(io::Error::other(format!(
+        "ShellExecuteW failed with code {}",
+        result as isize
+    )))
 }
 
 /// Waits for one started handler on its own named thread so the child is reaped.
@@ -308,35 +315,7 @@ pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
 
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-        let operation = OsStr::new("open")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let target = OsStr::new(parsed.as_str())
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                target.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        if result as isize > 32 {
-            return Ok(());
-        }
-        return Err(io::Error::other(format!(
-            "ShellExecuteW failed with code {}",
-            result as isize
-        )));
+        return shell_execute_open(OsStr::new(parsed.as_str()));
     }
     #[cfg(target_os = "macos")]
     {
@@ -347,7 +326,7 @@ pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
         return Command::new("xdg-open")
             .arg(parsed.as_str())
             .spawn()
-            .map(|_| ());
+            .and_then(reap_child);
     }
     #[allow(unreachable_code)]
     Err(io::Error::new(

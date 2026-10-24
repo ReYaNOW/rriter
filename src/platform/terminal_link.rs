@@ -38,10 +38,17 @@ pub fn open_terminal_uri(requests: &ExternalRequestSink, uri: &str) -> bool {
         return false;
     };
     match parsed.scheme() {
-        "http" | "https" => open_url(requests, uri).is_ok(),
+        "http" | "https" => ascii_authority(uri) && open_url(requests, uri).is_ok(),
         "file" => open_file_uri(requests, &parsed),
         _ => false,
     }
+}
+
+/// Whether the authority of `uri` is spelled in ASCII. Checked on the text as printed,
+/// because `url` turns an internationalized host into punycode and would hide it.
+fn ascii_authority(uri: &str) -> bool {
+    let rest = uri.split_once("//").map_or("", |(_, rest)| rest);
+    rest.split(['/', '?', '#']).next().unwrap_or_default().is_ascii()
 }
 
 /// Decodes the percent-encoded path of a URI into raw bytes. Malformed escapes,
@@ -71,6 +78,10 @@ fn open_file_uri(requests: &ExternalRequestSink, uri: &url::Url) -> bool {
     let Some(bytes) = percent_decode_uri_path(uri.path()) else {
         return false;
     };
+    // An empty path or a bare "/" names only the root, which is never opened.
+    if bytes.len() <= 1 {
+        return false;
+    }
     let Some(path) = osc7_path(uri.host_str().unwrap_or(""), &bytes, local_host_name()) else {
         return false;
     };
@@ -453,5 +464,15 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn root_and_non_ascii_host_are_rejected() {
+        // The root names nothing to open, whether spelled empty or as "/".
+        assert_eq!(intercepted("file:///"), (false, None));
+        assert_eq!(intercepted("file://localhost/"), (false, None));
+        // A non-ASCII host is refused as printed, although `url` would punycode it.
+        assert_eq!(intercepted("https://ß"), (false, None));
+        assert_eq!(intercepted("http://a.ß/x"), (false, None));
     }
 }

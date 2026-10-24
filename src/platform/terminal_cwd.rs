@@ -44,6 +44,10 @@ fn osc7_windows_path(path: &str) -> Option<PathBuf> {
     if bytes.len() > 2 && bytes[2] != b'/' {
         return None;
     }
+    // A colon after the drive letter names an NTFS alternate stream, not a path.
+    if rest[2..].contains(':') {
+        return None;
+    }
     let mut native = rest.replace('/', "\\");
     if native.len() == 2 {
         native.push('\\');
@@ -108,5 +112,9 @@ mod tests {
         assert_eq!(osc7_windows_path("/1:/x"), None);
         assert_eq!(osc7_windows_path("/"), None);
         assert_eq!(osc7_windows_path(""), None);
+        // Alternate stream names (NTFS "file:stream") are not paths.
+        assert_eq!(osc7_windows_path("/C:/x.exe:s"), None);
+        assert_eq!(osc7_windows_path("/C:/a:b/c"), None);
+        assert_eq!(osc7_windows_path("/C::x"), None);
     }
 }

@@ -2,10 +2,10 @@
 //! Expected bytes come from the protocol spec (SGR `ESC[<b;x;yM/m`, motion code +32,
 //! focus `ESC[I`/`ESC[O`), not from the encoder; the test reads what the app writes to the PTY.
 
-use crate::app::terminal::{advance_test_output, lock_terminal_grid};
+use crate::app::terminal::lock_terminal_grid;
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
-    click_ui, dump, run_script, shell_failed, terminal_session, ui_rect, wait_until,
+    click_ui, dump, feed, run_script, shell_failed, terminal_session, ui_rect, wait_until, written,
 };
 use crate::render_view::terminal_ui::{TERMINAL_TEXT_SCALE, terminal_text_padding};
 use winit::keyboard::ModifiersState;
@@ -22,19 +22,6 @@ fn scroll_back_into_history(session: &mut HeadlessSession, x: f64, y: f64) {
         let scroll = &session.app.ide_panel.terminals[0].scroll_y;
         scroll.is_settled() && scroll.current > 0.0
     });
-}
-
-/// Feeds DECSET or other bytes straight into the grid of tab `index`.
-fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
-    let term = &session.app.ide_panel.terminals[index];
-    let mut grid = lock_terminal_grid(&term.grid);
-    advance_test_output(&mut grid, bytes);
-}
-
-/// Takes the bytes written to the PTY of tab `index` since the previous call.
-fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
-    let term = &session.app.ide_panel.terminals[index];
-    std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
 }
 
 /// Clicks tab `index` and waits until it is the active terminal, so tracking set on it is the one the pointer reaches.
