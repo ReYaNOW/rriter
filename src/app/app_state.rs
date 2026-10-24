@@ -506,6 +506,9 @@ pub struct IdePanelState {
     pub active_terminal: usize,
     pub(crate) next_terminal_creation_number: u64,
     pub terminal_focused: bool,
+    /// Physical key whose Press a host chord consumed (Ctrl+C with a selection); its Repeat and
+    /// Release stay away from the terminal encoder until that key is released.
+    pub(crate) terminal_host_held_key: Option<winit::keyboard::PhysicalKey>,
     pub is_dragging_terminal: bool,
     pub tab_drag: Option<TabDragState>,
     pub(crate) terminal_tab_drag: Option<TabDragState>,
@@ -623,6 +626,7 @@ impl Default for IdePanelState {
             active_terminal: 0,
             next_terminal_creation_number: 1,
             terminal_focused: false,
+            terminal_host_held_key: None,
             is_dragging_terminal: false,
             tab_drag: None,
             terminal_tab_drag: None,

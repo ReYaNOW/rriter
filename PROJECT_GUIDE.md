@@ -1683,6 +1683,7 @@ Input:
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
+* `src/app/keyboard/terminal_key_tests.rs` -> terminal key routing tests (kitty encoder bytes, host chords, IME commit), child module of `keyboard.rs`.
 * `src/keymap.rs` -> physical-key chords, parsing, validation, overrides, and resolved keymaps.
 * `src/keymap/defaults.rs` -> command metadata and default key bindings.
 * `src/app/mouse.rs` -> mouse module shell.

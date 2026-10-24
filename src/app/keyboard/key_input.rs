@@ -94,7 +94,12 @@ impl KeyInput {
         } else {
             logical_text.clone()
         };
-        Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, unshifted: None, text, state: ElementState::Pressed, repeat: false }, modifiers))
+        // Combos have no layout: the unshifted character is the logical text without Shift.
+        let unshifted = logical_text
+            .as_deref()
+            .and_then(|text| text.chars().next())
+            .and_then(|c| c.to_lowercase().next());
+        Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, unshifted, text, state: ElementState::Pressed, repeat: false }, modifiers))
     }
 
 }

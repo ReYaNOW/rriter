@@ -812,8 +812,7 @@ fn route_api_client(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 
 fn route_terminal_gate(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
     let terminal_owns_chord = terminal_owns_chord(app, ctx.chord);
-    // Release of a chord the terminal owns reaches it too; the terminal encoder decides whether it is sent.
-    if terminal_owns_chord && (ctx.key_event.state == ElementState::Pressed || app.ide_panel.terminal_focused) {
+    if ctx.key_event.state == ElementState::Pressed && terminal_owns_chord {
         app.handle_terminal_keyboard_input(ctx.key_event.clone());
         true
     } else { false }

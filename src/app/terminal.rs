@@ -179,6 +179,25 @@ impl Terminal {
         }
     }
 
+    /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
+    #[cfg(test)]
+    pub(crate) fn test_without_process(cols: usize, rows: usize) -> Self {
+        Self {
+            grid: Arc::new(Mutex::new(test_term(cols, rows))),
+            process: None,
+            scroll_y: crate::scroll::ScrollState::new(7.0),
+            presentation_intent: TerminalPresentationIntent::None,
+            reveal_right_tail_when_presented: false,
+            mouse: crate::app::mouse::TerminalMouseState::default(),
+            focus_sent: false,
+            written_input: Mutex::new(Vec::new()),
+            hovered_link: None,
+            title_cache: Arc::new(Mutex::new(
+                crate::app::terminal_process::TerminalTitleState::new_numbered("terminal".to_string(), 1),
+            )),
+        }
+    }
+
     pub(crate) fn write_display_title(&self, output: &mut String) {
         crate::platform::lock_recover(&self.title_cache).write_resolved(output);
     }

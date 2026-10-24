@@ -26,6 +26,8 @@ mod key_route_char_a;
 mod key_route_char_b;
 #[cfg(test)]
 mod key_route_char_c;
+#[cfg(test)]
+mod terminal_key_tests;
 pub(crate) use editor_keys::paired_editor_insert_text;
 pub(crate) use key_input::{KeyComboHold, KeyInput};
 
@@ -107,12 +109,18 @@ fn terminal_key_mods(platform: crate::platform::PlatformKind, modifiers: Modifie
     }
 }
 
-/// Named or character key for the encoder. Unnamed keys use the unshifted character.
-fn terminal_key(input: &KeyInput) -> TermKey {
+/// Named or character key for the encoder. Keys without a name use the unshifted character;
+/// `None` when neither exists, so no placeholder character reaches the encoder.
+fn terminal_key(input: &KeyInput) -> Option<TermKey> {
     let PhysicalKey::Code(code) = input.physical_key else {
-        return TermKey::Char(input.unshifted.unwrap_or('\0'));
+        return input.unshifted.map(TermKey::Char);
     };
-    match code {
+    named_terminal_key(code).or_else(|| input.unshifted.map(TermKey::Char))
+}
+
+/// Encoder name of a physical key; `None` for keys the encoder does not name.
+fn named_terminal_key(code: KeyCode) -> Option<TermKey> {
+    Some(match code {
         KeyCode::Enter => TermKey::Enter,
         KeyCode::Tab => TermKey::Tab,
         KeyCode::Backspace => TermKey::Backspace,
@@ -167,8 +175,8 @@ fn terminal_key(input: &KeyInput) -> TermKey {
         KeyCode::SuperRight => TermKey::Modifier(ModKey::RightSuper),
         KeyCode::CapsLock => TermKey::Modifier(ModKey::CapsLock),
         KeyCode::NumLock => TermKey::Modifier(ModKey::NumLock),
-        _ => TermKey::Char(input.unshifted.unwrap_or('\0')),
-    }
+        _ => return None,
+    })
 }
 
 /// Base character of a key on a US layout, used by the encoder for non-ASCII layouts.
@@ -237,26 +245,32 @@ fn terminal_key_kind(input: &KeyInput) -> KeyKind {
     }
 }
 
-/// Builds the encoder event for one host key event.
-fn terminal_key_event(input: &KeyInput, modifiers: ModifiersState) -> KeyEvent<'_> {
-    KeyEvent {
+/// Builds the encoder event for one host key event under `platform`'s modifier rules.
+/// `None` when the key has no encoder identity.
+fn terminal_key_event(
+    platform: crate::platform::PlatformKind,
+    input: &KeyInput,
+    modifiers: ModifiersState,
+) -> Option<KeyEvent<'_>> {
+    Some(KeyEvent {
         physical: terminal_physical_id(input.physical_key),
-        key: terminal_key(input),
+        key: terminal_key(input)?,
         base: us_base_char(input.physical_key),
-        mods: terminal_key_mods(crate::platform::CURRENT_PLATFORM, modifiers),
+        mods: terminal_key_mods(platform, modifiers),
         kind: terminal_key_kind(input),
         text: input.logical_text.as_deref(),
-    }
+    })
 }
 
 /// Encodes one host key event with the terminal's current DECCKM and Kitty flags.
 /// Returns the bytes to write to the PTY, or `None` when nothing is sent.
 fn terminal_key_bytes(
+    platform: crate::platform::PlatformKind,
     grid: &mut ronsole_term::Term,
     input: &KeyInput,
     modifiers: ModifiersState,
 ) -> Option<Vec<u8>> {
-    let event = terminal_key_event(input, modifiers);
+    let event = terminal_key_event(platform, input, modifiers)?;
     let mut out = Vec::new();
     match grid.encode_key(&event, &mut out) {
         KeyOutcome::Sent => Some(out),
@@ -569,14 +583,21 @@ impl App {
             return;
         }
 
+        let physical = key_event.physical_key;
         let pressed = key_event.state == winit::event::ElementState::Pressed;
-        // Host chords (Ctrl+V and Ctrl+C) act on Press only: their Repeat and Release never
-        // reach the encoder.
-        let host_chord = primary
-            && matches!(
-                key_event.physical_key,
-                PhysicalKey::Code(KeyCode::KeyC | KeyCode::KeyV)
-            );
+        // A Press consumed by a host chord (Ctrl+C with a selection, Ctrl+V) acts once: its
+        // Repeat and Release never reach the encoder, until that key is released.
+        if self.ide_panel.terminal_host_held_key == Some(physical) {
+            if !pressed {
+                self.ide_panel.terminal_host_held_key = None;
+            }
+            if !pressed || key_event.repeat {
+                return;
+            }
+        }
+        if pressed && !key_event.repeat {
+            self.ide_panel.terminal_host_held_key = None;
+        }
         let paste = if pressed && primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV) {
             #[cfg(target_os = "linux")]
             {
@@ -595,36 +616,48 @@ impl App {
         };
         let active = self.ide_panel.active_terminal;
         let mut clipboard_text = None;
+        let mut host_consumed = false;
+        let mut redraw = false;
         if let Some(term) = self.ide_panel.terminals.get_mut(active) {
             let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-            let input = match key_event.physical_key {
-                _ if host_chord && !pressed => None,
-                PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
+            let input = match physical {
+                PhysicalKey::Code(KeyCode::KeyC) if pressed && (primary || terminal_ctrl) => {
                     if primary && grid.selection().is_some() {
                         clipboard_text = crate::app::terminal::terminal_selection_text(&grid);
                         grid.set_selection(None);
+                        host_consumed = true;
+                        redraw = true;
                         None
                     } else if terminal_ctrl {
-                        terminal_key_bytes(&mut grid, &key_event, self.modifiers)
+                        terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, self.modifiers)
                     } else {
                         None
                     }
                 }
-                PhysicalKey::Code(KeyCode::KeyV) if primary => paste.map(|payload| {
-                    ronsole_term::bracketed_paste_bytes(payload, grid.bracketed_paste())
-                }),
-                _ => terminal_key_bytes(&mut grid, &key_event, self.modifiers),
+                PhysicalKey::Code(KeyCode::KeyV) if pressed && primary => {
+                    host_consumed = true;
+                    paste.map(|payload| {
+                        ronsole_term::bracketed_paste_bytes(payload, grid.bracketed_paste())
+                    })
+                }
+                _ => terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, self.modifiers),
             };
             drop(grid);
             if let Some(input) = input {
                 let _ = term.write_input(&input);
+                redraw = true;
             }
+        }
+        if host_consumed {
+            self.ide_panel.terminal_host_held_key = Some(physical);
         }
         if let Some(text) = clipboard_text {
             self.set_clipboard_text(text);
         }
-        self.last_action = std::time::Instant::now();
-        self.request_redraw();
+        if redraw {
+            self.last_action = std::time::Instant::now();
+            self.request_redraw();
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1270,36 +1303,12 @@ mod tests {
         term
     }
 
-    /// Host bytes for one key event, with the modifier rules of `platform` instead of the
-    /// current one. Mirrors `terminal_key_bytes`, which uses the current platform.
-    fn encode_on(
-        platform: crate::platform::PlatformKind,
-        term: &mut ronsole_term::Term,
-        input: &KeyInput,
-        modifiers: ModifiersState,
-    ) -> Option<Vec<u8>> {
-        let event = KeyEvent {
-            physical: terminal_physical_id(input.physical_key),
-            key: terminal_key(input),
-            base: us_base_char(input.physical_key),
-            mods: terminal_key_mods(platform, modifiers),
-            kind: terminal_key_kind(input),
-            text: input.logical_text.as_deref(),
-        };
-        let mut out = Vec::new();
-        match term.encode_key(&event, &mut out) {
-            KeyOutcome::Sent => Some(out),
-            KeyOutcome::Text => input.logical_text.as_ref().map(|text| text.as_bytes().to_vec()),
-            KeyOutcome::Ignore => None,
-        }
-    }
-
     #[test]
     fn shift_enter_legacy_is_esc_cr() {
         let mut term = term_with_kitty_flags(0);
         let input = host_key(KeyCode::Enter, None, Some("\r"), ElementState::Pressed, false);
         assert_eq!(
-            terminal_key_bytes(&mut term, &input, ModifiersState::SHIFT),
+            terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut term, &input, ModifiersState::SHIFT),
             Some(b"\x1b\r".to_vec())
         );
     }
@@ -1309,7 +1318,7 @@ mod tests {
         let mut term = term_with_kitty_flags(1);
         let input = host_key(KeyCode::Enter, None, Some("\r"), ElementState::Pressed, false);
         assert_eq!(
-            terminal_key_bytes(&mut term, &input, ModifiersState::SHIFT),
+            terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut term, &input, ModifiersState::SHIFT),
             Some(b"\x1b[13;2u".to_vec())
         );
     }
@@ -1319,7 +1328,7 @@ mod tests {
         let mut term = term_with_kitty_flags(0);
         let input = host_key(KeyCode::KeyC, Some('c'), Some("c"), ElementState::Pressed, false);
         assert_eq!(
-            terminal_key_bytes(&mut term, &input, ModifiersState::CONTROL),
+            terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut term, &input, ModifiersState::CONTROL),
             Some(vec![0x03])
         );
     }
@@ -1330,7 +1339,7 @@ mod tests {
         let input = host_key(KeyCode::KeyQ, Some('q'), Some("@"), ElementState::Pressed, false);
         let altgr = ModifiersState::CONTROL | ModifiersState::ALT;
         assert_eq!(
-            encode_on(crate::platform::PlatformKind::Windows, &mut term, &input, altgr),
+            terminal_key_bytes(crate::platform::PlatformKind::Windows, &mut term, &input, altgr),
             Some(b"@".to_vec())
         );
     }
@@ -1341,29 +1350,8 @@ mod tests {
         let input = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
         let ctrl_alt = ModifiersState::CONTROL | ModifiersState::ALT;
         assert_eq!(
-            encode_on(crate::platform::PlatformKind::Linux, &mut term, &input, ctrl_alt),
+            terminal_key_bytes(crate::platform::PlatformKind::Linux, &mut term, &input, ctrl_alt),
             Some(b"\x1b[97;7u".to_vec())
-        );
-    }
-
-    #[test]
-    fn release_and_repeat_encode_flag11() {
-        let mut term = term_with_kitty_flags(11);
-        let press = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
-        let repeat = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, true);
-        let release = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Released, false);
-        let platform = crate::platform::PlatformKind::Linux;
-        assert_eq!(
-            encode_on(platform, &mut term, &press, ModifiersState::empty()),
-            Some(b"\x1b[97u".to_vec())
-        );
-        assert_eq!(
-            encode_on(platform, &mut term, &repeat, ModifiersState::empty()),
-            Some(b"\x1b[97;1:2u".to_vec())
-        );
-        assert_eq!(
-            encode_on(platform, &mut term, &release, ModifiersState::empty()),
-            Some(b"\x1b[97;1:3u".to_vec())
         );
     }
 
