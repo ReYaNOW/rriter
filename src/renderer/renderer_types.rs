@@ -2,11 +2,13 @@ use glow::HasContext;
 use std::collections::HashMap;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith, image::Content};
 use swash::{CacheKey, FontRef};
+use crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR;
 
 mod geometry;
 pub use geometry::Vertex;
 pub(crate) use geometry::{
-    glyph_quad_rect, quad_vertices, rounded_rect_gradient_vertices, squiggle_vertices,
+    glyph_quad_rect, quad_vertices, quad_vertices_sdf, rounded_rect_gradient_vertices,
+    squiggle_vertices,
 };
 
 pub const MAX_VERTICES: usize = 32_768;
@@ -23,6 +25,8 @@ pub(crate) const COLOR_ATLAS_MAX_SIZE: i32 = 2048;
 pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;
 pub(crate) const PRIMARY_ATLAS_UPLOAD_FORMAT: u32 = glow::RED;
 pub(crate) const COLOR_ATLAS_MODE: f32 = 10.0;
+/// Shader mode of terminal text decorations: wave, dot and dash patterns sampled per period.
+pub(crate) const DECORATION_MODE: f32 = 11.0;
 const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
 const POPUP_SCROLL_CHANGE_EPS: f32 = 0.1;
 
@@ -444,6 +448,11 @@ pub struct Renderer {
     pub scale_context: ScaleContext,
     pub glyphs: HashMap<(char, u8, u32), GlyphInfo>,
     pub ui_glyphs: HashMap<(char, u32), GlyphInfo>,
+    /// Bold, Italic and Bold Italic bundled terminal faces, indexed by face - 1. Static data:
+    /// the font is parsed on the first glyph of its style, not copied.
+    pub terminal_styled_fonts: [FontData; 3],
+    /// x-height of the bundled Regular terminal face in em, read once from the font at init.
+    pub terminal_x_height_em: f32,
 
     pub ascii_advances: [f32; 128],
 

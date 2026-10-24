@@ -109,6 +109,9 @@ pub struct Terminal {
     /// Bytes passed to `write_input`, kept so headless tests can check the PTY stream.
     #[cfg(test)]
     pub(crate) written_input: Mutex<Vec<u8>>,
+    /// Hovered link and the grid generation it was resolved against; the underline is drawn only
+    /// while the generation matches. Always `None` until hover tracking fills it.
+    pub(crate) hovered_link: Option<(ronsole_term::LinkTarget, u64)>,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
 }
 
@@ -171,6 +174,7 @@ impl Terminal {
             focus_sent: false,
             #[cfg(test)]
             written_input: Mutex::new(Vec::new()),
+            hovered_link: None,
             title_cache,
         }
     }
