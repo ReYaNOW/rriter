@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn windows_altgr_event_is_not_an_application_chord() {
-        let mut event = KeyInput { physical_key: PhysicalKey::Code(KeyCode::KeyQ), logical_text: None, text: Some("@".into()), state: ElementState::Pressed, repeat: false };
+        let mut event = KeyInput { physical_key: PhysicalKey::Code(KeyCode::KeyQ), logical_text: None, unshifted: None, text: Some("@".into()), state: ElementState::Pressed, repeat: false };
         let altgr = ModifiersState::CONTROL | ModifiersState::ALT;
         assert_eq!(Chord::from_event(PlatformKind::Windows, &event, altgr), None);
         event.text = None;

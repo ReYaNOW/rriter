@@ -3,11 +3,15 @@ use crate::app::events::host_loop::HostLoop;
 use crate::keymap::parse_key_token;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey, SmolStr};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyInput {
     pub physical_key: PhysicalKey,
     pub logical_text: Option<SmolStr>,
+    /// First character of the key without modifiers (layout-dependent), used as the
+    /// unshifted key by the terminal key encoder.
+    pub unshifted: Option<char>,
     pub text: Option<SmolStr>,
     pub state: ElementState,
     pub repeat: bool,
@@ -18,6 +22,7 @@ impl From<&KeyEvent> for KeyInput {
         Self {
             physical_key: event.physical_key,
             logical_text: event.logical_key.to_text().map(SmolStr::new),
+            unshifted: event.key_without_modifiers().to_text().and_then(|text| text.chars().next()),
             text: event.text.clone(),
             state: event.state,
             repeat: event.repeat,
@@ -89,7 +94,7 @@ impl KeyInput {
         } else {
             logical_text.clone()
         };
-        Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, text, state: ElementState::Pressed, repeat: false }, modifiers))
+        Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, unshifted: None, text, state: ElementState::Pressed, repeat: false }, modifiers))
     }
 
 }

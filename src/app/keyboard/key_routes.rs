@@ -812,7 +812,8 @@ fn route_api_client(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
 
 fn route_terminal_gate(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
     let terminal_owns_chord = terminal_owns_chord(app, ctx.chord);
-    if ctx.key_event.state == ElementState::Pressed && terminal_owns_chord {
+    // Release of a chord the terminal owns reaches it too; the terminal encoder decides whether it is sent.
+    if terminal_owns_chord && (ctx.key_event.state == ElementState::Pressed || app.ide_panel.terminal_focused) {
         app.handle_terminal_keyboard_input(ctx.key_event.clone());
         true
     } else { false }
@@ -907,6 +908,21 @@ fn route_final_route(app: &mut App, ctx: &KeyCtx<'_>) -> bool {
         } else {
             app.handle_editor_keyboard_input(ctx.event_loop, ctx.key_event.clone(), ctx.chord);
         }
+        return true;
+    }
+    // Release goes to the terminal only while it owns the keyboard, so Kitty flag 2 can report it.
+    if ctx.key_event.state == ElementState::Released
+        && app.ide_panel.terminal_focused
+        && super::input_owner::terminal_keyboard_owner(
+            app.is_ide_mode,
+            app.show_settings,
+            app.show_search,
+            app.search_focused,
+            &app.ide_panel,
+        )
+        && (!app.ide_panel.term_show_search || !app.ide_panel.term_search_focused)
+    {
+        app.handle_terminal_keyboard_input(ctx.key_event.clone());
         return true;
     }
     false

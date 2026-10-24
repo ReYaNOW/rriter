@@ -8,6 +8,7 @@ fn press(app: &mut App, key: KeyCode, modifiers: winit::keyboard::ModifiersState
         KeyInput {
             physical_key: PhysicalKey::Code(key),
             logical_text: None,
+            unshifted: None,
             text: None,
             state: ElementState::Pressed,
             repeat: false,

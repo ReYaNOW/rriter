@@ -6,10 +6,13 @@ use crate::editor::Editor;
 use std::borrow::Cow;
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::Instant;
+use ronsole_term::{KeyEvent, KeyKind, KeyMods, KeyOutcome, KpKey, ModKey, TermKey};
 use winit::event::ElementState;
 use crate::app::events::host_loop::HostLoop;
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{KeyCode, ModifiersState, NativeKeyCode, PhysicalKey};
 
 mod editor_keys;
 mod key_input;
@@ -68,190 +71,198 @@ fn terminal_shell_escape_path(path: &Path, out: &mut Vec<u8>) {
     }
 }
 
-fn terminal_key_sequence(
-    physical_key: PhysicalKey,
-    logical_text: Option<&str>,
-    shift: bool,
-    ctrl: bool,
-    alt: bool,
-    super_key: bool,
-    app_cursor_keys: bool,
-) -> Option<Vec<u8>> {
-    let seq = match physical_key {
-        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-            terminal_alt_prefixed(b"\r", alt)
+/// Stable opaque id of a physical key, the same for its press, repeat and release.
+/// Keys identified by `KeyCode` set the top bit; native codes use tags 1..=5 in bits 32..35.
+fn terminal_physical_id(key: PhysicalKey) -> u64 {
+    const HIGH_BIT: u64 = 1 << 63;
+    match key {
+        PhysicalKey::Code(code) => {
+            let mut hasher = DefaultHasher::new();
+            code.hash(&mut hasher);
+            HIGH_BIT | (hasher.finish() & !HIGH_BIT)
         }
-        PhysicalKey::Code(KeyCode::Backspace) if ctrl => terminal_alt_prefixed(b"\x17", alt),
-        PhysicalKey::Code(KeyCode::Backspace) if shift => terminal_alt_prefixed(b"\x08", alt),
-        PhysicalKey::Code(KeyCode::Backspace) => terminal_alt_prefixed(b"\x7f", alt),
-        PhysicalKey::Code(KeyCode::Tab) if shift => b"\x1b[Z".to_vec(),
-        PhysicalKey::Code(KeyCode::Tab) => terminal_alt_prefixed(b"\t", alt),
-        PhysicalKey::Code(KeyCode::Escape) => b"\x1b".to_vec(),
-        PhysicalKey::Code(KeyCode::Insert) => terminal_tilde_key(2, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::Delete) => terminal_tilde_key(3, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::PageUp) => terminal_tilde_key(5, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::PageDown) => terminal_tilde_key(6, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::Home) => {
-            terminal_cursor_key(b'H', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::End) => {
-            terminal_cursor_key(b'F', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::ArrowUp) => {
-            terminal_cursor_key(b'A', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::ArrowDown) => {
-            terminal_cursor_key(b'B', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::ArrowRight) => {
-            terminal_cursor_key(b'C', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::ArrowLeft) => {
-            terminal_cursor_key(b'D', app_cursor_keys, shift, alt, ctrl)
-        }
-        PhysicalKey::Code(KeyCode::F1) => terminal_function_key(11, b'P', shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F2) => terminal_function_key(12, b'Q', shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F3) => terminal_function_key(13, b'R', shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F4) => terminal_function_key(14, b'S', shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F5) => terminal_function_key(15, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F6) => terminal_function_key(17, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F7) => terminal_function_key(18, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F8) => terminal_function_key(19, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F9) => terminal_function_key(20, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F10) => terminal_function_key(21, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F11) => terminal_function_key(23, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::F12) => terminal_function_key(24, 0, shift, alt, ctrl),
-        PhysicalKey::Code(KeyCode::Space) if ctrl => terminal_alt_prefixed(b"\x00", alt),
-        PhysicalKey::Code(KeyCode::Digit2) if ctrl => terminal_alt_prefixed(b"\x00", alt),
-        PhysicalKey::Code(KeyCode::Digit6) if ctrl => terminal_alt_prefixed(b"\x1e", alt),
-        PhysicalKey::Code(KeyCode::Minus) if ctrl => terminal_alt_prefixed(b"\x1f", alt),
-        PhysicalKey::Code(KeyCode::Slash) if ctrl => terminal_alt_prefixed(b"\x1f", alt),
-        PhysicalKey::Code(KeyCode::BracketLeft) if ctrl => terminal_alt_prefixed(b"\x1b", alt),
-        PhysicalKey::Code(KeyCode::Backslash) if ctrl => terminal_alt_prefixed(b"\x1c", alt),
-        PhysicalKey::Code(KeyCode::BracketRight) if ctrl => terminal_alt_prefixed(b"\x1d", alt),
-        PhysicalKey::Code(KeyCode::KeyA) if ctrl => terminal_alt_prefixed(b"\x01", alt),
-        PhysicalKey::Code(KeyCode::KeyB) if ctrl => terminal_alt_prefixed(b"\x02", alt),
-        PhysicalKey::Code(KeyCode::KeyC) if ctrl => terminal_alt_prefixed(b"\x03", alt),
-        PhysicalKey::Code(KeyCode::KeyD) if ctrl => terminal_alt_prefixed(b"\x04", alt),
-        PhysicalKey::Code(KeyCode::KeyE) if ctrl => terminal_alt_prefixed(b"\x05", alt),
-        PhysicalKey::Code(KeyCode::KeyG) if ctrl => terminal_alt_prefixed(b"\x07", alt),
-        PhysicalKey::Code(KeyCode::KeyH) if ctrl => terminal_alt_prefixed(b"\x08", alt),
-        PhysicalKey::Code(KeyCode::KeyI) if ctrl => terminal_alt_prefixed(b"\x09", alt),
-        PhysicalKey::Code(KeyCode::KeyJ) if ctrl => terminal_alt_prefixed(b"\x0a", alt),
-        PhysicalKey::Code(KeyCode::KeyK) if ctrl => terminal_alt_prefixed(b"\x0b", alt),
-        PhysicalKey::Code(KeyCode::KeyL) if ctrl => terminal_alt_prefixed(b"\x0c", alt),
-        PhysicalKey::Code(KeyCode::KeyM) if ctrl => terminal_alt_prefixed(b"\x0d", alt),
-        PhysicalKey::Code(KeyCode::KeyN) if ctrl => terminal_alt_prefixed(b"\x0e", alt),
-        PhysicalKey::Code(KeyCode::KeyO) if ctrl => terminal_alt_prefixed(b"\x0f", alt),
-        PhysicalKey::Code(KeyCode::KeyP) if ctrl => terminal_alt_prefixed(b"\x10", alt),
-        PhysicalKey::Code(KeyCode::KeyQ) if ctrl => terminal_alt_prefixed(b"\x11", alt),
-        PhysicalKey::Code(KeyCode::KeyR) if ctrl => terminal_alt_prefixed(b"\x12", alt),
-        PhysicalKey::Code(KeyCode::KeyS) if ctrl => terminal_alt_prefixed(b"\x13", alt),
-        PhysicalKey::Code(KeyCode::KeyT) if ctrl => terminal_alt_prefixed(b"\x14", alt),
-        PhysicalKey::Code(KeyCode::KeyU) if ctrl => terminal_alt_prefixed(b"\x15", alt),
-        PhysicalKey::Code(KeyCode::KeyW) if ctrl => terminal_alt_prefixed(b"\x17", alt),
-        PhysicalKey::Code(KeyCode::KeyX) if ctrl => terminal_alt_prefixed(b"\x18", alt),
-        PhysicalKey::Code(KeyCode::KeyY) if ctrl => terminal_alt_prefixed(b"\x19", alt),
-        PhysicalKey::Code(KeyCode::KeyZ) if ctrl => terminal_alt_prefixed(b"\x1a", alt),
-        _ => {
-            if !ctrl && !super_key {
-                if let Some(txt) = logical_text {
-                    if alt {
-                        let mut out = Vec::with_capacity(txt.len() + 1);
-                        out.push(0x1b);
-                        out.extend_from_slice(txt.as_bytes());
-                        out
-                    } else {
-                        txt.as_bytes().to_vec()
-                    }
-                } else {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
+        PhysicalKey::Unidentified(native) => match native {
+            NativeKeyCode::Android(code) => (1_u64 << 32) | u64::from(code),
+            NativeKeyCode::MacOS(code) => (2_u64 << 32) | u64::from(code),
+            NativeKeyCode::Windows(code) => (3_u64 << 32) | u64::from(code),
+            NativeKeyCode::Xkb(code) => (4_u64 << 32) | u64::from(code),
+            NativeKeyCode::Unidentified => 5_u64 << 32,
+        },
+    }
+}
+
+/// Host modifiers as the terminal encoder sees them. Ctrl+Alt is dropped on Windows
+/// (AltGr), so a composed character reaches the encoder as plain text.
+fn terminal_key_mods(platform: crate::platform::PlatformKind, modifiers: ModifiersState) -> KeyMods {
+    let (ctrl, alt) = crate::platform::terminal_modifiers_for_platform(
+        platform,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+    );
+    KeyMods {
+        shift: modifiers.shift_key(),
+        ctrl,
+        alt,
+        super_key: modifiers.super_key(),
+    }
+}
+
+/// Named or character key for the encoder. Unnamed keys use the unshifted character.
+fn terminal_key(input: &KeyInput) -> TermKey {
+    let PhysicalKey::Code(code) = input.physical_key else {
+        return TermKey::Char(input.unshifted.unwrap_or('\0'));
     };
-
-    Some(seq)
-}
-
-fn terminal_modifier(shift: bool, alt: bool, ctrl: bool) -> Option<u8> {
-    let value = 1 + u8::from(shift) + u8::from(alt) * 2 + u8::from(ctrl) * 4;
-    (value != 1).then_some(value)
-}
-
-fn terminal_alt_prefixed(bytes: &[u8], alt: bool) -> Vec<u8> {
-    if alt {
-        let mut out = Vec::with_capacity(bytes.len() + 1);
-        out.push(0x1b);
-        out.extend_from_slice(bytes);
-        out
-    } else {
-        bytes.to_vec()
+    match code {
+        KeyCode::Enter => TermKey::Enter,
+        KeyCode::Tab => TermKey::Tab,
+        KeyCode::Backspace => TermKey::Backspace,
+        KeyCode::Escape => TermKey::Escape,
+        KeyCode::Insert => TermKey::Insert,
+        KeyCode::Delete => TermKey::Delete,
+        KeyCode::Home => TermKey::Home,
+        KeyCode::End => TermKey::End,
+        KeyCode::PageUp => TermKey::PageUp,
+        KeyCode::PageDown => TermKey::PageDown,
+        KeyCode::ArrowUp => TermKey::Up,
+        KeyCode::ArrowDown => TermKey::Down,
+        KeyCode::ArrowLeft => TermKey::Left,
+        KeyCode::ArrowRight => TermKey::Right,
+        KeyCode::F1 => TermKey::F(1),
+        KeyCode::F2 => TermKey::F(2),
+        KeyCode::F3 => TermKey::F(3),
+        KeyCode::F4 => TermKey::F(4),
+        KeyCode::F5 => TermKey::F(5),
+        KeyCode::F6 => TermKey::F(6),
+        KeyCode::F7 => TermKey::F(7),
+        KeyCode::F8 => TermKey::F(8),
+        KeyCode::F9 => TermKey::F(9),
+        KeyCode::F10 => TermKey::F(10),
+        KeyCode::F11 => TermKey::F(11),
+        KeyCode::F12 => TermKey::F(12),
+        KeyCode::Numpad0 => TermKey::Kp(KpKey::Kp0),
+        KeyCode::Numpad1 => TermKey::Kp(KpKey::Kp1),
+        KeyCode::Numpad2 => TermKey::Kp(KpKey::Kp2),
+        KeyCode::Numpad3 => TermKey::Kp(KpKey::Kp3),
+        KeyCode::Numpad4 => TermKey::Kp(KpKey::Kp4),
+        KeyCode::Numpad5 => TermKey::Kp(KpKey::Kp5),
+        KeyCode::Numpad6 => TermKey::Kp(KpKey::Kp6),
+        KeyCode::Numpad7 => TermKey::Kp(KpKey::Kp7),
+        KeyCode::Numpad8 => TermKey::Kp(KpKey::Kp8),
+        KeyCode::Numpad9 => TermKey::Kp(KpKey::Kp9),
+        KeyCode::NumpadDecimal => TermKey::Kp(KpKey::Decimal),
+        KeyCode::NumpadDivide => TermKey::Kp(KpKey::Divide),
+        KeyCode::NumpadMultiply => TermKey::Kp(KpKey::Multiply),
+        KeyCode::NumpadSubtract => TermKey::Kp(KpKey::Subtract),
+        KeyCode::NumpadAdd => TermKey::Kp(KpKey::Add),
+        KeyCode::NumpadEnter => TermKey::Kp(KpKey::Enter),
+        KeyCode::NumpadEqual => TermKey::Kp(KpKey::Equal),
+        KeyCode::NumpadComma => TermKey::Kp(KpKey::Separator),
+        KeyCode::ShiftLeft => TermKey::Modifier(ModKey::LeftShift),
+        KeyCode::ShiftRight => TermKey::Modifier(ModKey::RightShift),
+        KeyCode::ControlLeft => TermKey::Modifier(ModKey::LeftCtrl),
+        KeyCode::ControlRight => TermKey::Modifier(ModKey::RightCtrl),
+        KeyCode::AltLeft => TermKey::Modifier(ModKey::LeftAlt),
+        KeyCode::AltRight => TermKey::Modifier(ModKey::RightAlt),
+        KeyCode::SuperLeft => TermKey::Modifier(ModKey::LeftSuper),
+        KeyCode::SuperRight => TermKey::Modifier(ModKey::RightSuper),
+        KeyCode::CapsLock => TermKey::Modifier(ModKey::CapsLock),
+        KeyCode::NumLock => TermKey::Modifier(ModKey::NumLock),
+        _ => TermKey::Char(input.unshifted.unwrap_or('\0')),
     }
 }
 
-fn terminal_cursor_key(
-    final_byte: u8,
-    app_cursor_keys: bool,
-    shift: bool,
-    alt: bool,
-    ctrl: bool,
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8);
-    out.push(0x1b);
-    if let Some(modifier) = terminal_modifier(shift, alt, ctrl) {
-        out.extend_from_slice(b"[1;");
-        out.push(b'0' + modifier);
-        out.push(final_byte);
-    } else if app_cursor_keys {
-        out.push(b'O');
-        out.push(final_byte);
-    } else {
-        out.push(b'[');
-        out.push(final_byte);
-    }
-    out
+/// Base character of a key on a US layout, used by the encoder for non-ASCII layouts.
+fn us_base_char(key: PhysicalKey) -> Option<char> {
+    let PhysicalKey::Code(code) = key else {
+        return None;
+    };
+    Some(match code {
+        KeyCode::KeyA => 'a',
+        KeyCode::KeyB => 'b',
+        KeyCode::KeyC => 'c',
+        KeyCode::KeyD => 'd',
+        KeyCode::KeyE => 'e',
+        KeyCode::KeyF => 'f',
+        KeyCode::KeyG => 'g',
+        KeyCode::KeyH => 'h',
+        KeyCode::KeyI => 'i',
+        KeyCode::KeyJ => 'j',
+        KeyCode::KeyK => 'k',
+        KeyCode::KeyL => 'l',
+        KeyCode::KeyM => 'm',
+        KeyCode::KeyN => 'n',
+        KeyCode::KeyO => 'o',
+        KeyCode::KeyP => 'p',
+        KeyCode::KeyQ => 'q',
+        KeyCode::KeyR => 'r',
+        KeyCode::KeyS => 's',
+        KeyCode::KeyT => 't',
+        KeyCode::KeyU => 'u',
+        KeyCode::KeyV => 'v',
+        KeyCode::KeyW => 'w',
+        KeyCode::KeyX => 'x',
+        KeyCode::KeyY => 'y',
+        KeyCode::KeyZ => 'z',
+        KeyCode::Digit0 => '0',
+        KeyCode::Digit1 => '1',
+        KeyCode::Digit2 => '2',
+        KeyCode::Digit3 => '3',
+        KeyCode::Digit4 => '4',
+        KeyCode::Digit5 => '5',
+        KeyCode::Digit6 => '6',
+        KeyCode::Digit7 => '7',
+        KeyCode::Digit8 => '8',
+        KeyCode::Digit9 => '9',
+        KeyCode::Backquote => '`',
+        KeyCode::Minus => '-',
+        KeyCode::Equal => '=',
+        KeyCode::BracketLeft => '[',
+        KeyCode::BracketRight => ']',
+        KeyCode::Backslash => '\\',
+        KeyCode::Semicolon => ';',
+        KeyCode::Quote => '\'',
+        KeyCode::Comma => ',',
+        KeyCode::Period => '.',
+        KeyCode::Slash => '/',
+        KeyCode::Space => ' ',
+        _ => return None,
+    })
 }
 
-fn terminal_tilde_key(code: u8, shift: bool, alt: bool, ctrl: bool) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8);
-    out.extend_from_slice(b"\x1b[");
-    out.push(b'0' + code);
-    if let Some(modifier) = terminal_modifier(shift, alt, ctrl) {
-        out.push(b';');
-        out.push(b'0' + modifier);
+fn terminal_key_kind(input: &KeyInput) -> KeyKind {
+    match input.state {
+        ElementState::Released => KeyKind::Release,
+        ElementState::Pressed if input.repeat => KeyKind::Repeat,
+        ElementState::Pressed => KeyKind::Press,
     }
-    out.push(b'~');
-    out
 }
 
-fn terminal_function_key(code: u8, ss3_final: u8, shift: bool, alt: bool, ctrl: bool) -> Vec<u8> {
-    if ss3_final != 0 && terminal_modifier(shift, alt, ctrl).is_none() {
-        return vec![0x1b, b'O', ss3_final];
+/// Builds the encoder event for one host key event.
+fn terminal_key_event(input: &KeyInput, modifiers: ModifiersState) -> KeyEvent<'_> {
+    KeyEvent {
+        physical: terminal_physical_id(input.physical_key),
+        key: terminal_key(input),
+        base: us_base_char(input.physical_key),
+        mods: terminal_key_mods(crate::platform::CURRENT_PLATFORM, modifiers),
+        kind: terminal_key_kind(input),
+        text: input.logical_text.as_deref(),
     }
+}
 
-    let mut out = Vec::with_capacity(9);
-    out.extend_from_slice(b"\x1b[");
-    if ss3_final != 0 {
-        out.push(b'1');
-    } else {
-        if code >= 10 {
-            out.push(b'0' + code / 10);
-        }
-        out.push(b'0' + code % 10);
+/// Encodes one host key event with the terminal's current DECCKM and Kitty flags.
+/// Returns the bytes to write to the PTY, or `None` when nothing is sent.
+fn terminal_key_bytes(
+    grid: &mut ronsole_term::Term,
+    input: &KeyInput,
+    modifiers: ModifiersState,
+) -> Option<Vec<u8>> {
+    let event = terminal_key_event(input, modifiers);
+    let mut out = Vec::new();
+    match grid.encode_key(&event, &mut out) {
+        KeyOutcome::Sent => Some(out),
+        KeyOutcome::Text => input.logical_text.as_ref().map(|text| text.as_bytes().to_vec()),
+        KeyOutcome::Ignore => None,
     }
-    if let Some(modifier) = terminal_modifier(shift, alt, ctrl) {
-        out.push(b';');
-        out.push(b'0' + modifier);
-    }
-    if ss3_final != 0 {
-        out.push(ss3_final);
-    } else {
-        out.push(b'~');
-    }
-    out
 }
 
 fn single_line_ime_text(text: &str) -> Cow<'_, str> {
@@ -542,7 +553,6 @@ impl App {
     pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyInput) {
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
         let terminal_ctrl = crate::platform::terminal_control_modifier(self.modifiers);
-        let terminal_alt = crate::platform::terminal_alt_modifier(self.modifiers);
 
         if key_event.state == winit::event::ElementState::Pressed
             && primary
@@ -559,58 +569,59 @@ impl App {
             return;
         }
 
-        if key_event.state == winit::event::ElementState::Pressed {
-            let paste = if primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV) {
-                #[cfg(target_os = "linux")]
-                {
-                    let file_list = self.get_clipboard_file_list();
-                    terminal_clipboard_paste_bytes(file_list.as_deref(), None).or_else(|| {
-                        let text = self.get_clipboard_text();
-                        terminal_clipboard_paste_bytes(None, text.as_deref())
-                    })
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    self.get_clipboard_text().map(String::into_bytes)
-                }
-            } else {
-                None
-            };
-            let active = self.ide_panel.active_terminal;
-            let mut clipboard_text = None;
-            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                let input = match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
-                        if primary && grid.selection().is_some() {
-                            clipboard_text = crate::app::terminal::terminal_selection_text(&grid);
-                            grid.set_selection(None);
-                            None
-                        } else if terminal_ctrl {
-                            Some(vec![0x03])
-                        } else {
-                            None
-                        }
+        let pressed = key_event.state == winit::event::ElementState::Pressed;
+        // Host chords (Ctrl+V and Ctrl+C) act on Press only: their Repeat and Release never
+        // reach the encoder.
+        let host_chord = primary
+            && matches!(
+                key_event.physical_key,
+                PhysicalKey::Code(KeyCode::KeyC | KeyCode::KeyV)
+            );
+        let paste = if pressed && primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV) {
+            #[cfg(target_os = "linux")]
+            {
+                let file_list = self.get_clipboard_file_list();
+                terminal_clipboard_paste_bytes(file_list.as_deref(), None).or_else(|| {
+                    let text = self.get_clipboard_text();
+                    terminal_clipboard_paste_bytes(None, text.as_deref())
+                })
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                self.get_clipboard_text().map(String::into_bytes)
+            }
+        } else {
+            None
+        };
+        let active = self.ide_panel.active_terminal;
+        let mut clipboard_text = None;
+        if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+            let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+            let input = match key_event.physical_key {
+                _ if host_chord && !pressed => None,
+                PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
+                    if primary && grid.selection().is_some() {
+                        clipboard_text = crate::app::terminal::terminal_selection_text(&grid);
+                        grid.set_selection(None);
+                        None
+                    } else if terminal_ctrl {
+                        terminal_key_bytes(&mut grid, &key_event, self.modifiers)
+                    } else {
+                        None
                     }
-                    PhysicalKey::Code(KeyCode::KeyV) if primary => paste,
-                    _ => terminal_key_sequence(
-                        key_event.physical_key,
-                        key_event.logical_text.as_deref(),
-                        self.modifiers.shift_key(),
-                        terminal_ctrl,
-                        terminal_alt,
-                        self.modifiers.super_key(),
-                        grid.app_cursor_keys(),
-                    ),
-                };
-                drop(grid);
-                if let Some(input) = input {
-                    let _ = term.write_input(&input);
                 }
+                PhysicalKey::Code(KeyCode::KeyV) if primary => paste.map(|payload| {
+                    ronsole_term::bracketed_paste_bytes(payload, grid.bracketed_paste())
+                }),
+                _ => terminal_key_bytes(&mut grid, &key_event, self.modifiers),
+            };
+            drop(grid);
+            if let Some(input) = input {
+                let _ = term.write_input(&input);
             }
-            if let Some(text) = clipboard_text {
-                self.set_clipboard_text(text);
-            }
+        }
+        if let Some(text) = clipboard_text {
+            self.set_clipboard_text(text);
         }
         self.last_action = std::time::Instant::now();
         self.request_redraw();
@@ -1229,25 +1240,6 @@ mod tests {
         assert_eq!(terminal_clipboard_paste_bytes(None, None), None);
     }
 
-    fn seq(
-        code: KeyCode,
-        shift: bool,
-        ctrl: bool,
-        alt: bool,
-        super_key: bool,
-        app_cursor_keys: bool,
-    ) -> Option<Vec<u8>> {
-        terminal_key_sequence(
-            PhysicalKey::Code(code),
-            None,
-            shift,
-            ctrl,
-            alt,
-            super_key,
-            app_cursor_keys,
-        )
-    }
-
     #[test]
     fn ime_single_line_text_preserves_unicode_and_removes_line_breaks() {
         assert_eq!(single_line_ime_text("Привет 🌍"), "Привет 🌍");
@@ -1255,242 +1247,154 @@ mod tests {
         assert_eq!(single_line_ime_text("\r\n"), "");
     }
 
-    #[test]
-    fn terminal_key_sequence_covers_basic_control_and_text_input() {
-        assert_eq!(
-            seq(KeyCode::Enter, false, false, false, false, false),
-            Some(b"\r".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::NumpadEnter, false, false, false, false, false),
-            Some(b"\r".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Backspace, false, false, false, false, false),
-            Some(b"\x7f".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Backspace, true, false, false, false, false),
-            Some(b"\x08".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Backspace, false, true, false, false, false),
-            Some(b"\x17".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Tab, false, false, false, false, false),
-            Some(b"\t".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Tab, true, false, false, false, false),
-            Some(b"\x1b[Z".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Escape, false, false, false, false, false),
-            Some(b"\x1b".to_vec())
-        );
-
-        assert_eq!(
-            terminal_key_sequence(
-                PhysicalKey::Code(KeyCode::KeyA),
-                Some("a"),
-                false,
-                false,
-                false,
-                false,
-                false,
-            ),
-            Some(b"a".to_vec())
-        );
-        assert_eq!(
-            terminal_key_sequence(
-                PhysicalKey::Code(KeyCode::KeyA),
-                Some("a"),
-                false,
-                false,
-                true,
-                false,
-                false,
-            ),
-            Some(b"\x1ba".to_vec())
-        );
-        assert_eq!(
-            terminal_key_sequence(
-                PhysicalKey::Code(KeyCode::KeyA),
-                Some("a"),
-                false,
-                false,
-                false,
-                true,
-                false,
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn windows_altgr_composed_text_reaches_the_terminal_without_ctrl_or_escape() {
-        let (ctrl, alt) = crate::platform::terminal_modifiers_for_platform(
-            crate::platform::PlatformKind::Windows,
-            true,
-            true,
-        );
-        assert_eq!((ctrl, alt), (false, false));
-        assert_eq!(
-            terminal_key_sequence(
-                PhysicalKey::Code(KeyCode::KeyE),
-                Some("€"),
-                false,
-                ctrl,
-                alt,
-                false,
-                false,
-            ),
-            Some("€".as_bytes().to_vec())
-        );
-    }
-
-    #[test]
-    fn terminal_key_sequence_covers_function_keys() {
-        let cases = [
-            (KeyCode::F1, b"\x1bOP".as_slice()),
-            (KeyCode::F2, b"\x1bOQ".as_slice()),
-            (KeyCode::F3, b"\x1bOR".as_slice()),
-            (KeyCode::F4, b"\x1bOS".as_slice()),
-            (KeyCode::F5, b"\x1b[15~".as_slice()),
-            (KeyCode::F6, b"\x1b[17~".as_slice()),
-            (KeyCode::F7, b"\x1b[18~".as_slice()),
-            (KeyCode::F8, b"\x1b[19~".as_slice()),
-            (KeyCode::F9, b"\x1b[20~".as_slice()),
-            (KeyCode::F10, b"\x1b[21~".as_slice()),
-            (KeyCode::F11, b"\x1b[23~".as_slice()),
-            (KeyCode::F12, b"\x1b[24~".as_slice()),
-        ];
-
-        for (key, expected) in cases {
-            assert_eq!(
-                seq(key, false, false, false, false, false),
-                Some(expected.to_vec())
-            );
+    fn host_key(
+        code: KeyCode,
+        unshifted: Option<char>,
+        text: Option<&str>,
+        state: ElementState,
+        repeat: bool,
+    ) -> KeyInput {
+        KeyInput {
+            physical_key: PhysicalKey::Code(code),
+            logical_text: text.map(winit::keyboard::SmolStr::new),
+            unshifted,
+            text: None,
+            state,
+            repeat,
         }
-
-        assert_eq!(
-            seq(KeyCode::F1, false, true, false, false, false),
-            Some(b"\x1b[1;5P".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::F5, true, false, false, false, false),
-            Some(b"\x1b[15;2~".to_vec())
-        );
     }
 
-    #[test]
-    fn terminal_key_sequence_covers_navigation_and_modifiers() {
-        assert_eq!(
-            seq(KeyCode::ArrowUp, false, false, false, false, false),
-            Some(b"\x1b[A".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowDown, false, false, false, false, false),
-            Some(b"\x1b[B".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowLeft, false, false, false, false, false),
-            Some(b"\x1b[D".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowRight, false, false, false, false, false),
-            Some(b"\x1b[C".to_vec())
-        );
-
-        assert_eq!(
-            seq(KeyCode::ArrowUp, false, false, false, false, true),
-            Some(b"\x1bOA".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowDown, false, false, false, false, true),
-            Some(b"\x1bOB".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowLeft, false, false, false, false, true),
-            Some(b"\x1bOD".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowRight, false, false, false, false, true),
-            Some(b"\x1bOC".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowRight, false, true, false, false, false),
-            Some(b"\x1b[1;5C".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::ArrowLeft, true, true, false, false, false),
-            Some(b"\x1b[1;6D".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Home, false, false, false, false, false),
-            Some(b"\x1b[H".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::End, false, false, false, false, false),
-            Some(b"\x1b[F".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Delete, false, false, false, false, false),
-            Some(b"\x1b[3~".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::Delete, false, true, false, false, false),
-            Some(b"\x1b[3;5~".to_vec())
-        );
-        assert_eq!(
-            seq(KeyCode::PageUp, false, false, true, false, false),
-            Some(b"\x1b[5;3~".to_vec())
-        );
+    fn term_with_kitty_flags(flags: u8) -> ronsole_term::Term {
+        let mut term = crate::app::terminal::test_term(80, 24);
+        crate::app::terminal::advance_test_output(&mut term, format!("\x1b[>{flags}u").as_bytes());
+        term
     }
 
-    #[test]
-    fn terminal_key_sequence_covers_ctrl_letter_bytes() {
-        let cases = [
-            (KeyCode::KeyA, 0x01),
-            (KeyCode::KeyB, 0x02),
-            (KeyCode::KeyC, 0x03),
-            (KeyCode::KeyD, 0x04),
-            (KeyCode::KeyE, 0x05),
-            (KeyCode::KeyG, 0x07),
-            (KeyCode::KeyH, 0x08),
-            (KeyCode::KeyI, 0x09),
-            (KeyCode::KeyJ, 0x0a),
-            (KeyCode::KeyK, 0x0b),
-            (KeyCode::KeyL, 0x0c),
-            (KeyCode::KeyM, 0x0d),
-            (KeyCode::KeyN, 0x0e),
-            (KeyCode::KeyO, 0x0f),
-            (KeyCode::KeyP, 0x10),
-            (KeyCode::KeyQ, 0x11),
-            (KeyCode::KeyR, 0x12),
-            (KeyCode::KeyS, 0x13),
-            (KeyCode::KeyT, 0x14),
-            (KeyCode::KeyU, 0x15),
-            (KeyCode::KeyW, 0x17),
-            (KeyCode::KeyX, 0x18),
-            (KeyCode::KeyY, 0x19),
-            (KeyCode::KeyZ, 0x1a),
-        ];
-
-        for (key, byte) in cases {
-            assert_eq!(seq(key, false, true, false, false, false), Some(vec![byte]));
+    /// Host bytes for one key event, with the modifier rules of `platform` instead of the
+    /// current one. Mirrors `terminal_key_bytes`, which uses the current platform.
+    fn encode_on(
+        platform: crate::platform::PlatformKind,
+        term: &mut ronsole_term::Term,
+        input: &KeyInput,
+        modifiers: ModifiersState,
+    ) -> Option<Vec<u8>> {
+        let event = KeyEvent {
+            physical: terminal_physical_id(input.physical_key),
+            key: terminal_key(input),
+            base: us_base_char(input.physical_key),
+            mods: terminal_key_mods(platform, modifiers),
+            kind: terminal_key_kind(input),
+            text: input.logical_text.as_deref(),
+        };
+        let mut out = Vec::new();
+        match term.encode_key(&event, &mut out) {
+            KeyOutcome::Sent => Some(out),
+            KeyOutcome::Text => input.logical_text.as_ref().map(|text| text.as_bytes().to_vec()),
+            KeyOutcome::Ignore => None,
         }
+    }
 
-        assert_eq!(seq(KeyCode::KeyF, false, true, false, false, false), None);
-        assert_eq!(seq(KeyCode::KeyV, false, true, false, false, false), None);
+    #[test]
+    fn shift_enter_legacy_is_esc_cr() {
+        let mut term = term_with_kitty_flags(0);
+        let input = host_key(KeyCode::Enter, None, Some("\r"), ElementState::Pressed, false);
         assert_eq!(
-            seq(KeyCode::Slash, false, true, false, false, false),
-            Some(b"\x1f".to_vec())
+            terminal_key_bytes(&mut term, &input, ModifiersState::SHIFT),
+            Some(b"\x1b\r".to_vec())
+        );
+    }
+
+    #[test]
+    fn shift_enter_kitty_flag1() {
+        let mut term = term_with_kitty_flags(1);
+        let input = host_key(KeyCode::Enter, None, Some("\r"), ElementState::Pressed, false);
+        assert_eq!(
+            terminal_key_bytes(&mut term, &input, ModifiersState::SHIFT),
+            Some(b"\x1b[13;2u".to_vec())
+        );
+    }
+
+    #[test]
+    fn ctrl_c_without_selection_through_encoder() {
+        let mut term = term_with_kitty_flags(0);
+        let input = host_key(KeyCode::KeyC, Some('c'), Some("c"), ElementState::Pressed, false);
+        assert_eq!(
+            terminal_key_bytes(&mut term, &input, ModifiersState::CONTROL),
+            Some(vec![0x03])
+        );
+    }
+
+    #[test]
+    fn windows_altgr_text_not_csi_u() {
+        let mut term = term_with_kitty_flags(1);
+        let input = host_key(KeyCode::KeyQ, Some('q'), Some("@"), ElementState::Pressed, false);
+        let altgr = ModifiersState::CONTROL | ModifiersState::ALT;
+        assert_eq!(
+            encode_on(crate::platform::PlatformKind::Windows, &mut term, &input, altgr),
+            Some(b"@".to_vec())
+        );
+    }
+
+    #[test]
+    fn linux_ctrl_alt_letter_is_csi_u_flag1() {
+        let mut term = term_with_kitty_flags(1);
+        let input = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
+        let ctrl_alt = ModifiersState::CONTROL | ModifiersState::ALT;
+        assert_eq!(
+            encode_on(crate::platform::PlatformKind::Linux, &mut term, &input, ctrl_alt),
+            Some(b"\x1b[97;7u".to_vec())
+        );
+    }
+
+    #[test]
+    fn release_and_repeat_encode_flag11() {
+        let mut term = term_with_kitty_flags(11);
+        let press = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
+        let repeat = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, true);
+        let release = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Released, false);
+        let platform = crate::platform::PlatformKind::Linux;
+        assert_eq!(
+            encode_on(platform, &mut term, &press, ModifiersState::empty()),
+            Some(b"\x1b[97u".to_vec())
         );
         assert_eq!(
-            seq(KeyCode::BracketLeft, false, true, false, false, false),
-            Some(b"\x1b".to_vec())
+            encode_on(platform, &mut term, &repeat, ModifiersState::empty()),
+            Some(b"\x1b[97;1:2u".to_vec())
+        );
+        assert_eq!(
+            encode_on(platform, &mut term, &release, ModifiersState::empty()),
+            Some(b"\x1b[97;1:3u".to_vec())
+        );
+    }
+
+    #[test]
+    fn windows_ctrl_alt_without_text_strips_modifiers() {
+        let altgr = ModifiersState::CONTROL | ModifiersState::ALT;
+        let windows = terminal_key_mods(crate::platform::PlatformKind::Windows, altgr);
+        assert!(!windows.ctrl && !windows.alt);
+        let linux = terminal_key_mods(crate::platform::PlatformKind::Linux, altgr);
+        assert!(linux.ctrl && linux.alt);
+    }
+
+    #[test]
+    fn physical_id_stable_and_tagged() {
+        let key_a = terminal_physical_id(PhysicalKey::Code(KeyCode::KeyA));
+        assert_eq!(key_a, terminal_physical_id(PhysicalKey::Code(KeyCode::KeyA)));
+        assert_ne!(key_a, terminal_physical_id(PhysicalKey::Code(KeyCode::KeyB)));
+        assert_eq!(key_a >> 63, 1);
+        assert_eq!(
+            terminal_physical_id(PhysicalKey::Unidentified(NativeKeyCode::Xkb(5))),
+            (4_u64 << 32) | 5
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_wraps_when_enabled() {
+        let mut term = term_with_kitty_flags(0);
+        crate::app::terminal::advance_test_output(&mut term, b"\x1b[?2004h");
+        assert_eq!(
+            ronsole_term::bracketed_paste_bytes(b"ls".to_vec(), term.bracketed_paste()),
+            b"\x1b[200~ls\x1b[201~".to_vec()
         );
     }
 }

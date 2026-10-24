@@ -60,6 +60,7 @@ fn headless_hotkeys_characterize_api_request_and_field_redo() {
     let f2 = KeyInput {
         physical_key: PhysicalKey::Code(KeyCode::F2),
         logical_text: None,
+        unshifted: None,
         text: None,
         state: ElementState::Pressed,
         repeat: false,
