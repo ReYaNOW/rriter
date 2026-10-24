@@ -66,17 +66,6 @@ pub(crate) fn terminal_cell_face_from_flags(flags: CellFlags) -> u8 {
     }
 }
 
-/// Face under which a glyph is rasterized and cached. Colour glyphs and characters the styled
-/// face does not map are drawn by the Regular chain alone, so they share the Regular entry.
-#[inline]
-pub(crate) fn terminal_glyph_raster_face(face: u8, prefer_color: bool, face_maps_char: bool) -> u8 {
-    if face == TERMINAL_FACE_REGULAR || prefer_color || !face_maps_char {
-        TERMINAL_FACE_REGULAR
-    } else {
-        face
-    }
-}
-
 /// Absolute horizontal phase of column `col`, computed the same way as the cell origin so that
 /// the decoration pattern stays continuous across cells.
 #[inline]
@@ -364,20 +353,6 @@ mod tests {
             terminal_cell_face_from_flags(CellFlags::BOLD | CellFlags::ITALIC),
             TERMINAL_FACE_BOLD_ITALIC
         );
-    }
-
-    #[test]
-    fn bold_glyph_falls_back_to_regular() {
-        // A styled face that does not map the character resolves to the Regular chain.
-        assert_eq!(terminal_glyph_raster_face(TERMINAL_FACE_BOLD, false, false), TERMINAL_FACE_REGULAR);
-        assert_eq!(terminal_glyph_raster_face(TERMINAL_FACE_BOLD, false, true), TERMINAL_FACE_BOLD);
-    }
-
-    #[test]
-    fn color_and_unmapped_glyphs_share_regular_entry() {
-        assert_eq!(terminal_glyph_raster_face(TERMINAL_FACE_ITALIC, true, true), TERMINAL_FACE_REGULAR);
-        assert_eq!(terminal_glyph_raster_face(TERMINAL_FACE_ITALIC, false, false), TERMINAL_FACE_REGULAR);
-        assert_eq!(terminal_glyph_raster_face(TERMINAL_FACE_REGULAR, true, true), TERMINAL_FACE_REGULAR);
     }
 
     #[test]

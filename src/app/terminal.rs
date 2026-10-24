@@ -1,3 +1,4 @@
+use crate::app::terminal_sync_output::{SYNC_UI_FALLBACK_GRACE, sync_ui_fallback_due};
 use ronsole_term::{Term, TermConfig, TermIdentity, TermPalette};
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -80,6 +81,16 @@ pub(crate) fn advance_test_output(grid: &mut Term, bytes: &[u8]) {
     grid.advance(bytes, Instant::now(), &mut sink);
 }
 
+/// Feeds raw output bytes into tab `term` through the parser's batch path, so the hold deadline
+/// is published for the UI thread the way the parser thread publishes it.
+#[cfg(test)]
+pub(crate) fn feed_test_terminal_output(term: &Terminal, bytes: &[u8]) {
+    let mut grid = lock_terminal_grid(&term.grid);
+    let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None)
+        .with_host_events(term.host_events.clone());
+    crate::app::terminal_sync_output::advance_terminal_output_batch(&mut grid, &mut sink, &[bytes.to_vec()]);
+}
+
 pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
     let (sx, sy, ex, ey) = term.selection()?;
     let (start_x, start_y, end_x, end_y) = ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
@@ -128,6 +139,9 @@ pub struct Terminal {
     /// Hovered link and the grid generation it was resolved against; the underline is drawn only
     /// while the generation matches. Always `None` until hover tracking fills it.
     pub(crate) hovered_link: Option<(ronsole_term::LinkTarget, u64)>,
+    /// Cell and grid generation of the last hover lookup that found no link; a repeated lookup
+    /// on the same cell and generation returns without walking the grid.
+    pub(crate) hovered_link_miss: Option<((usize, usize), u64)>,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
     /// Working directory last reported by OSC 7 for a local host; a new tab starts there.
     pub(crate) osc7_cwd: Option<std::path::PathBuf>,
@@ -198,6 +212,7 @@ impl Terminal {
             #[cfg(test)]
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
+            hovered_link_miss: None,
             title_cache,
             osc7_cwd: None,
             host_events,
@@ -217,16 +232,41 @@ impl Terminal {
         events.clipboard
     }
 
-    /// Hold deadline of a mode 2026 batch that has not been replayed yet.
+    /// Hold deadline of a mode 2026 batch that has not been replayed yet. Read from the value the
+    /// parser published, so it never waits for the grid lock.
     pub(crate) fn sync_deadline(&self) -> Option<Instant> {
-        lock_terminal_grid(&self.grid).sync_deadline()
+        self.host_events.sync_deadline()
     }
 
-    /// Replays a mode 2026 batch whose hold deadline has passed; returns whether the grid changed.
+    /// When the UI thread should wake to replay a hold the parser has not replayed: the deadline
+    /// plus `SYNC_UI_FALLBACK_GRACE`.
+    pub(crate) fn sync_wake_at(&self) -> Option<Instant> {
+        self.sync_deadline()
+            .and_then(|deadline| deadline.checked_add(SYNC_UI_FALLBACK_GRACE))
+    }
+
+    /// UI-thread fallback: replays a mode 2026 batch the parser has held past `SYNC_UI_FALLBACK_GRACE`
+    /// after its deadline. Returns whether the grid changed.
     /// Replies go to the same PTY queue as the parser thread, so the replay keeps their order.
     pub(crate) fn flush_expired_sync(&self, now: Instant) -> bool {
+        let Some(deadline) = self.sync_deadline() else {
+            return false;
+        };
+        if !sync_ui_fallback_due(deadline, now) {
+            return false;
+        }
         let reply_tx = self.process.as_ref().map(|process| process.reply_sender());
         flush_expired_sync_on_grid(&self.grid, &self.title_cache, reply_tx, &self.host_events, now)
+    }
+
+    /// Queues a terminal report (focus) without blocking. A full queue or a missing process drops it.
+    pub(crate) fn queue_report(&self, bytes: &[u8]) {
+        // Tests read the reports the way they read `write_input`, which records before queueing.
+        #[cfg(test)]
+        crate::platform::lock_recover(&self.written_input).extend_from_slice(bytes);
+        if let Some(process) = self.process.as_ref() {
+            process.queue_report(bytes);
+        }
     }
 
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
@@ -242,6 +282,7 @@ impl Terminal {
             focus_sent: false,
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
+            hovered_link_miss: None,
             title_cache: Arc::new(Mutex::new(
                 crate::app::terminal_process::TerminalTitleState::new_numbered("terminal".to_string(), 1),
             )),
@@ -397,5 +438,68 @@ mod tests {
         ));
         // Cursor at home: CPR reply is CSI row;col R with 1-based coordinates (xterm ctlseqs).
         assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[1;1R".to_vec()));
+    }
+
+    use std::time::Duration;
+
+    /// Holds one mode 2026 batch in `term` through a sink that publishes to its host events.
+    fn hold_batch(term: &Terminal) -> Instant {
+        let mut sink = RriterTermSink::new(None, None).with_host_events(term.host_events.clone());
+        let mut grid = lock_terminal_grid(&term.grid);
+        crate::app::terminal_sync_output::advance_terminal_output_batch(
+            &mut grid,
+            &mut sink,
+            &[b"\x1b[?2026hheld".to_vec()],
+        );
+        drop(grid);
+        term.sync_deadline().expect("mode 2026 holds the output")
+    }
+
+    #[test]
+    fn ui_fallback_replays_only_after_grace_past_deadline() {
+        let term = Terminal::test_without_process(20, 2);
+        let deadline = hold_batch(&term);
+
+        let inside_grace = deadline + SYNC_UI_FALLBACK_GRACE - Duration::from_millis(1);
+        assert!(!term.flush_expired_sync(inside_grace));
+        assert_eq!(term.sync_deadline(), Some(deadline), "UI replayed inside the grace");
+
+        assert!(term.flush_expired_sync(deadline + SYNC_UI_FALLBACK_GRACE));
+        assert_eq!(term.sync_deadline(), None);
+    }
+
+    #[test]
+    fn sync_wake_at_reads_published_deadline_without_grid_lock() {
+        let term = Terminal::test_without_process(20, 2);
+        let deadline = hold_batch(&term);
+
+        let grid = term.grid.clone();
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder = std::thread::spawn(move || {
+            let _guard = lock_terminal_grid(&grid);
+            let _ = locked_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(3));
+        });
+        locked_rx.recv().expect("holder thread took the grid lock");
+
+        let started = Instant::now();
+        let wake_at = term.sync_wake_at();
+        // A read that takes the grid lock would wait for the holder to release it.
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "sync_wake_at waited for the grid lock"
+        );
+        assert_eq!(wake_at, Some(deadline + SYNC_UI_FALLBACK_GRACE));
+
+        let _ = release_tx.send(());
+        holder.join().expect("holder thread");
+    }
+
+    #[test]
+    fn queue_report_without_process_is_a_no_op() {
+        let term = Terminal::test_without_process(20, 2);
+        // Focus reports must never block the UI thread, even with no PTY behind the tab.
+        term.queue_report(b"\x1b[O");
     }
 }

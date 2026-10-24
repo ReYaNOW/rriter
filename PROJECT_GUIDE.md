@@ -1862,6 +1862,7 @@ Terminal:
 * `src/app/terminal_process.rs` -> platform shell selection, PTY spawn, batched reader, process-tree ownership, and bounded terminal shutdown.
 * `src/app/terminal_host_events.rs` -> per-tab pending OSC 52 clipboard and OSC 7 cwd events from the parser thread, woken through `UiWaker`; new-tab start directory.
 * `src/app/terminal_sync_output.rs` -> mode 2026 hold deadlines on the parser thread: timed receive, expired flush, and draining a hold after the reader closes.
+* `src/app/terminal_sink.rs` -> parser-side `TermSink` host: non-blocking reply and report queue, titles and host events, and publishing the hold deadline for lock-free UI reads.
 * `src/render_view/terminal_ui.rs` -> terminal visuals only.
 * `src/render_view/terminal_colors.rs` -> theme-to-terminal palette and per-cell render colours; the default background resolves to `None` and is never painted.
 

@@ -325,7 +325,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
 }
 
 /// Serves every terminal tab: applies the clipboard text and OSC 7 directory the parser stored,
-/// and replays mode 2026 output whose hold deadline has passed. Returns whether a frame is needed.
+/// and replays mode 2026 output the parser thread has held past its grace. Returns whether a frame is needed.
 /// Called after `UiWaker::begin_drain`, so an event stored during this pass posts a new wake.
 pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) -> bool {
     let mut needs_redraw = false;
@@ -334,9 +334,7 @@ pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) ->
         if let Some(text) = terminal.apply_host_events() {
             clipboard = Some(text);
         }
-        if terminal.sync_deadline().is_some_and(|at| at <= now) {
-            needs_redraw |= terminal.flush_expired_sync(now);
-        }
+        needs_redraw |= terminal.flush_expired_sync(now);
     }
     if let Some(text) = clipboard {
         app.set_clipboard_text(text);
@@ -344,12 +342,12 @@ pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) ->
     needs_redraw
 }
 
-/// Earliest mode 2026 hold deadline over all terminal tabs, if any tab holds output.
+/// Earliest UI fallback wake over all terminal tabs that hold output, read without the grid lock.
 fn terminal_sync_wake_at(app: &App) -> Option<Instant> {
     app.ide_panel
         .terminals
         .iter()
-        .filter_map(|terminal| terminal.sync_deadline())
+        .filter_map(|terminal| terminal.sync_wake_at())
         .min()
 }
 

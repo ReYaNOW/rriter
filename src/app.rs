@@ -55,6 +55,7 @@ pub mod terminal;
 mod terminal_link_hover;
 mod terminal_host_events;
 mod terminal_process;
+mod terminal_sink;
 mod terminal_sync_output;
 pub(crate) mod tool_installer;
 pub mod ui_handlers;

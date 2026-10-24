@@ -38,7 +38,12 @@ pub fn open_terminal_uri(requests: &ExternalRequestSink, uri: &str) -> bool {
         return false;
     };
     match parsed.scheme() {
-        "http" | "https" => ascii_authority(uri) && open_url(requests, uri).is_ok(),
+        "http" | "https" => {
+            ascii_authority(uri)
+                && open_url(requests, uri)
+                    .inspect_err(|error| eprintln!("RRiter could not open terminal link {uri:?}: {error}"))
+                    .is_ok()
+        }
         "file" => open_file_uri(requests, &parsed),
         _ => false,
     }
@@ -113,16 +118,19 @@ fn dispatch_local_path(requests: &ExternalRequestSink, path: PathBuf) -> bool {
 
 fn run_local_path(path: PathBuf) {
     match resolve_local_path(&path, CURRENT_PLATFORM) {
-        Some(LinkAction::Open(target)) => {
-            if let Ok(Some(mut child)) = spawn_open_path(&target) {
+        Some(LinkAction::Open(target)) => match spawn_open_path(&target) {
+            Ok(Some(mut child)) => {
                 let _ = child.wait();
             }
-        }
-        Some(LinkAction::Reveal(target)) => {
-            if let Ok(mut child) = spawn_reveal_path(&target, true) {
+            Ok(None) => {}
+            Err(error) => eprintln!("RRiter could not open terminal link target {:?}: {error}", target),
+        },
+        Some(LinkAction::Reveal(target)) => match spawn_reveal_path(&target, true) {
+            Ok(mut child) => {
                 let _ = child.wait();
             }
-        }
+            Err(error) => eprintln!("RRiter could not reveal terminal link target {:?}: {error}", target),
+        },
         None => {}
     }
 }

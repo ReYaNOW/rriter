@@ -279,6 +279,73 @@ fn terminal_key_bytes(
     }
 }
 
+/// Held-mask bit of a terminal modifier key, the flag it sets in the encoder's modifiers, and
+/// the family mask of both keys of that modifier. `None` for keys that are not modifiers.
+fn modifier_key_bits(modifier: ModKey) -> Option<(u8, ModifiersState, u8)> {
+    const SHIFT_KEYS: u8 = 0b0001_0001;
+    const CONTROL_KEYS: u8 = 0b0010_0010;
+    const ALT_KEYS: u8 = 0b0100_0100;
+    const SUPER_KEYS: u8 = 0b1000_1000;
+    Some(match modifier {
+        ModKey::LeftShift => (0b0000_0001, ModifiersState::SHIFT, SHIFT_KEYS),
+        ModKey::RightShift => (0b0001_0000, ModifiersState::SHIFT, SHIFT_KEYS),
+        ModKey::LeftCtrl => (0b0000_0010, ModifiersState::CONTROL, CONTROL_KEYS),
+        ModKey::RightCtrl => (0b0010_0000, ModifiersState::CONTROL, CONTROL_KEYS),
+        ModKey::LeftAlt => (0b0000_0100, ModifiersState::ALT, ALT_KEYS),
+        ModKey::RightAlt => (0b0100_0000, ModifiersState::ALT, ALT_KEYS),
+        ModKey::LeftSuper => (0b0000_1000, ModifiersState::SUPER, SUPER_KEYS),
+        ModKey::RightSuper => (0b1000_0000, ModifiersState::SUPER, SUPER_KEYS),
+        _ => return None,
+    })
+}
+
+impl App {
+    /// Records a physical terminal modifier key as held or released. Called for every host key
+    /// before any early return, because the held state is physical, not routed.
+    fn note_terminal_modifier_key(&mut self, input: &KeyInput) {
+        let Some(TermKey::Modifier(modifier)) = terminal_key(input) else {
+            return;
+        };
+        let Some((bit, _, _)) = modifier_key_bits(modifier) else {
+            return;
+        };
+        let held = &mut self.ide_panel.terminal_held_modifier_keys;
+        if input.state == ElementState::Pressed {
+            *held |= bit;
+        } else {
+            *held &= !bit;
+        }
+    }
+
+    /// Clears the held mask when the host reports no modifiers at all: a release that never
+    /// arrived (for example after focus loss) must not leave its key marked held.
+    pub(crate) fn sync_terminal_held_modifiers(&mut self) {
+        if self.modifiers.is_empty() {
+            self.ide_panel.terminal_held_modifier_keys = 0;
+        }
+    }
+
+    /// Modifiers for the encoder event of `input`. The host learns the state after a key only
+    /// from the following modifiers event, so a modifier key's own flag is set here: on press and
+    /// repeat, and on release only while its other key of the same family is still held.
+    fn terminal_event_modifiers(&self, input: &KeyInput) -> ModifiersState {
+        let current = self.modifiers;
+        let Some(TermKey::Modifier(modifier)) = terminal_key(input) else {
+            return current;
+        };
+        let Some((_, flag, family)) = modifier_key_bits(modifier) else {
+            return current;
+        };
+        let on = input.state == ElementState::Pressed || self.ide_panel.terminal_held_modifier_keys & family != 0;
+        let mut modifiers = current;
+        modifiers.remove(flag);
+        if on {
+            modifiers.insert(flag);
+        }
+        modifiers
+    }
+}
+
 fn single_line_ime_text(text: &str) -> Cow<'_, str> {
     if text.contains(['\n', '\r']) {
         Cow::Owned(text.replace(['\n', '\r'], ""))
@@ -585,6 +652,7 @@ impl App {
 
         let physical = key_event.physical_key;
         let pressed = key_event.state == winit::event::ElementState::Pressed;
+        let event_modifiers = self.terminal_event_modifiers(&key_event);
         // A Press consumed by a host chord (Ctrl+C with a selection, Ctrl+V) acts once: its
         // Repeat and Release never reach the encoder, until that key is released.
         if self.ide_panel.terminal_host_held_key == Some(physical) {
@@ -629,7 +697,7 @@ impl App {
                         redraw = true;
                         None
                     } else if terminal_ctrl {
-                        terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, self.modifiers)
+                        terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, event_modifiers)
                     } else {
                         None
                     }
@@ -640,7 +708,7 @@ impl App {
                         ronsole_term::bracketed_paste_bytes(payload, grid.bracketed_paste())
                     })
                 }
-                _ => terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, self.modifiers),
+                _ => terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &key_event, event_modifiers),
             };
             drop(grid);
             if let Some(input) = input {

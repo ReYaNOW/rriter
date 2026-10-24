@@ -143,3 +143,54 @@ fn parsed_combo_carries_unshifted_for_encoder() {
         Some(b"\x1b[97;2u".to_vec())
     );
 }
+
+// Expected bytes: kitty codes LeftShift 57441 and RightShift 57447 (Ronsole
+// docs/superpowers/specs/2026-10-21-terminal-protocol-ref.md:108,112); press sets its own
+// shift bit and release clears it, flags 8|2 (Ronsole plans doc :320, input.rs:2072).
+
+#[test]
+fn left_shift_press_and_release_ignore_modifiers_event_order() {
+    // KeyboardInput before ModifiersChanged: the host state still lacks shift on press
+    // and still reports it on release.
+    let mut app = terminal_app(10);
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Pressed, false), ModifiersState::empty());
+    assert_eq!(written(&app), b"\x1b[57441;2u");
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Released, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57441;1:3u");
+
+    // ModifiersChanged before KeyboardInput: the host state already has shift on press
+    // and has dropped it on release.
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57441;2u");
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Released, false), ModifiersState::empty());
+    assert_eq!(written(&app), b"\x1b[57441;1:3u");
+}
+
+#[test]
+fn held_right_shift_keeps_shift_bit_after_left_shift_release() {
+    let mut app = terminal_app(10);
+    send(&mut app, key(KeyCode::ShiftRight, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57447;2u");
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57441;2u");
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Released, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57441;2:3u");
+}
+
+#[test]
+fn empty_modifiers_event_clears_held_modifier_keys() {
+    let mut app = terminal_app(10);
+    send(&mut app, key(KeyCode::ShiftRight, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57447;2u");
+    // The release of RightShift never arrives; the host then reports no modifiers at all.
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0b0001_0000);
+    // A release is only encoded after its press was sent, so LeftShift is pressed first.
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    assert_eq!(written(&app), b"\x1b[57441;2u");
+    app.modifiers = ModifiersState::empty();
+    app.sync_terminal_held_modifiers();
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0);
+    // With the stale RightShift bit cleared, releasing LeftShift no longer reports shift.
+    send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Released, false), ModifiersState::empty());
+    assert_eq!(written(&app), b"\x1b[57441;1:3u");
+}

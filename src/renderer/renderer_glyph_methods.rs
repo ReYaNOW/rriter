@@ -799,4 +799,15 @@ mod terminal_face_tests {
         let x_height = renderer.terminal_regular_x_height_at_size(TEST_PIXEL_SIZE);
         assert!(x_height > 0.0 && x_height < TEST_PIXEL_SIZE);
     }
+
+    #[test]
+    fn terminal_styled_face_applies_only_to_plain_text_glyphs() {
+        // Plain text may use the styled face; colour glyphs and custom-drawn glyphs stay on
+        // the Regular chain. Characters the styled face does not map fall back at lookup time.
+        assert!(super::terminal_styled_face_applies('a', None));
+        assert!(!super::terminal_styled_face_applies('a', Some(true)));
+        assert!(!super::terminal_styled_face_applies('😀', None));
+        assert!(!super::terminal_styled_face_applies('▶', None));
+        assert!(!super::terminal_styled_face_applies('\u{2801}', None));
+    }
 }

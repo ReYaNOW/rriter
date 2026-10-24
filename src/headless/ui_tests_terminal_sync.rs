@@ -46,6 +46,10 @@ fn hold_deadline(session: &HeadlessSession, index: usize) -> Instant {
         .expect("mode 2026 holds the output")
 }
 
+/// The UI thread replays a hold only this long after its deadline, as a fallback for a stalled
+/// parser thread; the parser replays on the deadline itself (final-fix-1 decision M2).
+const UI_FALLBACK_GRACE: Duration = Duration::from_millis(50);
+
 /// Sleeps until `deadline` has passed, so the next pass sees it as expired.
 fn sleep_past(deadline: Instant) {
     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -64,7 +68,7 @@ fn sync_deadline_sets_wait_until() {
     feed(&session, 1, b"\x1b[?2026hheld-wait");
     let deadline = hold_deadline(&session, 1);
 
-    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(deadline));
+    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(deadline + UI_FALLBACK_GRACE));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -81,7 +85,7 @@ fn sync_deadline_merged_with_other_deadlines() {
     let second = hold_deadline(&session, 0);
     assert!(first < second);
 
-    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(first));
+    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(first + UI_FALLBACK_GRACE));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -94,10 +98,10 @@ fn sync_deadline_served_while_render_suspended() {
     let deadline = hold_deadline(&session, 1);
     session.app.render_suspended = true;
 
-    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(deadline));
+    assert_eq!(about_wait(&mut session), ControlFlow::WaitUntil(deadline + UI_FALLBACK_GRACE));
     assert!(!held_text_visible(&session, 1, "held-suspended"));
 
-    sleep_past(deadline);
+    sleep_past(deadline + UI_FALLBACK_GRACE);
     about_wait(&mut session);
     assert!(held_text_visible(&session, 1, "held-suspended"));
     assert_eq!(session.app.ide_panel.terminals[1].sync_deadline(), None);
@@ -113,7 +117,7 @@ fn sync_deadline_flushed_at_deadline_redraws() {
     let deadline = hold_deadline(&session, 1);
     take_redraw_request(&session.app);
 
-    sleep_past(deadline);
+    sleep_past(deadline + UI_FALLBACK_GRACE);
     about_wait(&mut session);
     assert!(held_text_visible(&session, 1, "held-redraw"));
     assert!(take_redraw_request(&session.app), "the replay must request a frame");

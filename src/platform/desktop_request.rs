@@ -212,13 +212,27 @@ pub(crate) fn spawn_reveal_path(path: &Path, always_select: bool) -> io::Result<
         } else {
             path.parent().unwrap_or(path)
         };
-        return Command::new("xdg-open").arg(target).spawn();
+        return xdg_open_command()?.arg(target).spawn();
     }
     #[allow(unreachable_code)]
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "revealing files is not supported on this platform",
     ))
+}
+
+/// `xdg-open` resolved through `platform::resolve_executable`. A missing opener is an
+/// `io::ErrorKind::NotFound` error, never a panic.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn xdg_open_command() -> io::Result<Command> {
+    xdg_open_from(crate::platform::resolve_executable(std::ffi::OsStr::new("xdg-open")))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn xdg_open_from(program: Option<PathBuf>) -> io::Result<Command> {
+    program
+        .map(Command::new)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "xdg-open was not found on PATH"))
 }
 
 /// Opens `path` with the platform's default handler. The caller passes a
@@ -247,7 +261,7 @@ pub(crate) fn spawn_open_path(path: &Path) -> io::Result<Option<Child>> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        return Command::new("xdg-open").arg(path).spawn().map(Some);
+        return xdg_open_command()?.arg(path).spawn().map(Some);
     }
     #[allow(unreachable_code)]
     Err(io::Error::new(
@@ -323,7 +337,7 @@ pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        return Command::new("xdg-open")
+        return xdg_open_command()?
             .arg(parsed.as_str())
             .spawn()
             .and_then(reap_child);
@@ -333,4 +347,15 @@ pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "opening URLs is not supported on this platform",
     ))
+}
+
+#[cfg(all(test, unix, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_xdg_open_is_not_found_error() {
+        let error = xdg_open_from(None).expect_err("a missing opener must not produce a command");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
 }

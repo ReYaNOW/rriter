@@ -2,7 +2,7 @@
 //! shared fixtures (`tests_support`) later headless tasks build on.
 
 pub(crate) mod tests_support {
-    use crate::app::terminal::{advance_test_output, lock_terminal_grid};
+    use crate::app::terminal::feed_test_terminal_output;
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
     use crate::platform::{self, ToolKind};
@@ -14,11 +14,10 @@ pub(crate) mod tests_support {
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    /// Feeds bytes straight into the grid of tab `index`.
+    /// Feeds bytes into tab `index` through the parser's batch path, without the PTY reader.
     pub(crate) fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
         let term = &session.app.ide_panel.terminals[index];
-        let mut grid = lock_terminal_grid(&term.grid);
-        advance_test_output(&mut grid, bytes);
+        feed_test_terminal_output(term, bytes);
     }
 
     /// Takes the bytes written to the PTY of tab `index` since the previous call.

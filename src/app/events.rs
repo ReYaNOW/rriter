@@ -516,6 +516,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
             }
             WindowEvent::ModifiersChanged(mod_state) => {
                 self.modifiers = mod_state.state();
+                self.sync_terminal_held_modifiers();
                 if !self.modifiers.control_key() {
                     self.clear_ctrl_definition();
                 }

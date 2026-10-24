@@ -1,5 +1,5 @@
 use crate::platform::{self, PlatformKind, ProcessTree};
-use ronsole_term::{Term, TermSink};
+use ronsole_term::Term;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -12,6 +12,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::app::terminal_host_events::HostEventsSink;
+pub(crate) use crate::app::terminal_sink::RriterTermSink;
+use crate::app::terminal_sink::try_queue_report;
 use crate::app::terminal_sync_output::{
     advance_terminal_output_batch, receive_terminal_chunk, wait_out_sync_deadline,
 };
@@ -23,7 +25,7 @@ const TERMINAL_TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const TERMINAL_EXIT_BEFORE_OUTPUT: &[u8] = b"RRiter terminal exited before producing output\r\n";
 
 /// Bounded queue for PTY replies (DA, DSR, and similar); a full queue drops the reply.
-const TERMINAL_REPLY_QUEUE_CAPACITY: usize = 32;
+pub(crate) const TERMINAL_REPLY_QUEUE_CAPACITY: usize = 32;
 pub(crate) const TERMINAL_TITLE_MAX_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -274,6 +276,12 @@ impl TerminalProcess {
             .map_err(|_| io::Error::other("terminal writer lock is poisoned"))?;
         writer.write_all(bytes)?;
         writer.flush()
+    }
+
+    /// Queues a terminal report behind the parser replies without taking the writer lock, so a
+    /// stalled child cannot block the caller. Returns `false` when the report was dropped.
+    pub(crate) fn queue_report(&self, bytes: &[u8]) -> bool {
+        try_queue_report(&self.reply_tx, bytes)
     }
 
     pub(crate) fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -579,6 +587,9 @@ fn refresh_terminal_title_cache(
     false
 }
 
+/// Stop sender and join handle of the session title worker; both are `None` where it is not started.
+type TitleRefreshHandles = (Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>);
+
 #[cfg(target_os = "linux")]
 fn install_terminal_title_refresh(
     master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
@@ -586,7 +597,7 @@ fn install_terminal_title_refresh(
     shell_title: String,
     initial_cwd: Option<PathBuf>,
     window: Option<Arc<crate::platform::WindowHost>>,
-) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
+) -> io::Result<TitleRefreshHandles> {
     let (stop_tx, stop_rx) = std::sync::mpsc::channel();
     let worker = crate::platform::spawn_named("rriter-session-title", move || {
         let home = platform::user_home_dir();
@@ -622,62 +633,8 @@ fn install_terminal_title_refresh(
     _shell_title: String,
     _initial_cwd: Option<PathBuf>,
     _window: Option<Arc<crate::platform::WindowHost>>,
-) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
+) -> io::Result<TitleRefreshHandles> {
     Ok((None, None))
-}
-
-/// Host side of `ronsole_term::TermSink`: forwards replies to the PTY writer, programmed
-/// titles to the title cache, and clipboard and working-directory events to the tab's
-/// `HostEventsSink` for the UI thread.
-pub(crate) struct RriterTermSink {
-    title_cache: Option<TerminalTitleCache>,
-    reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
-    host_events: Option<HostEventsSink>,
-}
-
-impl RriterTermSink {
-    pub(crate) fn new(
-        title_cache: Option<TerminalTitleCache>,
-        reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
-    ) -> Self {
-        Self {
-            title_cache,
-            reply_tx,
-            host_events: None,
-        }
-    }
-
-    pub(crate) fn with_host_events(mut self, host_events: HostEventsSink) -> Self {
-        self.host_events = Some(host_events);
-        self
-    }
-}
-
-impl TermSink for RriterTermSink {
-    fn reply(&mut self, bytes: &[u8]) {
-        if let Some(tx) = self.reply_tx.as_ref() {
-            // A full queue drops the reply: blocking here would stall the parser under the grid lock.
-            let _ = tx.try_send(bytes.to_vec());
-        }
-    }
-
-    fn title(&mut self, title: &str) {
-        if let Some(cache) = self.title_cache.as_ref() {
-            crate::platform::lock_recover(cache).set_programmed(title.to_string());
-        }
-    }
-
-    fn clipboard_set(&mut self, text: String) {
-        if let Some(host_events) = self.host_events.as_ref() {
-            host_events.set_clipboard(text);
-        }
-    }
-
-    fn working_directory(&mut self, host_name: &str, path: &[u8]) {
-        if let Some(host_events) = self.host_events.as_ref() {
-            host_events.set_cwd(host_name, path);
-        }
-    }
 }
 
 fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> bool {
@@ -686,6 +643,7 @@ fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> 
     }
 
     grid.advance(TERMINAL_EXIT_BEFORE_OUTPUT, Instant::now(), sink);
+    sink.publish_sync_deadline(grid);
     true
 }
 
@@ -734,13 +692,16 @@ pub(crate) fn install_terminal_io_threads(
             let Ok(mut grid) = parser_grid.lock() else {
                 break;
             };
-            let new_deadline = advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
+            let outcome = advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
             drop(grid);
-            if new_deadline {
+            if outcome.new_deadline {
                 // The UI thread re-arms its wait for the mode 2026 hold deadline; no frame is needed.
                 host_events.wake();
             }
-            request_redraw();
+            if outcome.grid_changed {
+                // A batch held entirely by mode 2026 leaves the screen as it was: no frame.
+                request_redraw();
+            }
             first = receive_terminal_chunk(&rx, &parser_grid, &mut sink, &request_redraw);
         }
 
@@ -1100,28 +1061,6 @@ mod tests {
             })
             .collect();
         (rows, grid.cursor())
-    }
-
-    #[test]
-    fn terminal_replies_through_bounded_channel() {
-        let mut grid = crate::app::terminal::test_term(8, 2);
-        let (reply_tx, reply_rx) =
-            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
-        let mut sink = RriterTermSink::new(None, Some(reply_tx));
-
-        // Primary device attributes replies `ESC [ ? 62 c` (ronsole-term perform.rs).
-        grid.advance(b"\x1b[c", Instant::now(), &mut sink);
-        assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[?62c".to_vec()));
-
-        // With nobody draining the queue, replies beyond its capacity are dropped, not blocked on.
-        for _ in 0..TERMINAL_REPLY_QUEUE_CAPACITY * 2 {
-            grid.advance(b"\x1b[c", Instant::now(), &mut sink);
-        }
-        let mut queued = 0;
-        while reply_rx.try_recv().is_ok() {
-            queued += 1;
-        }
-        assert_eq!(queued, TERMINAL_REPLY_QUEUE_CAPACITY);
     }
 
     /// Write target that copies every byte into a shared buffer the test can inspect.

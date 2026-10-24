@@ -800,14 +800,16 @@ impl App {
             if let Some(term) = self.ide_panel.terminals.get(self.ide_panel.active_terminal) {
                 let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                 let total_lines = grid.total_rows();
+                let mut line_str = String::new();
+                let mut byte_cells = Vec::new();
                 for y in 0..total_lines {
                     let Some(row) = grid.row(y) else {
                         continue;
                     };
-                    let line_str: String = row.iter().map(|c| c.ch()).collect();
+                    terminal_row_search_text(row, &mut line_str, &mut byte_cells);
                     for mat in re.find_iter(&line_str) {
                         if let Some((start_col, end_col)) =
-                            terminal_match_cell_range(&line_str, mat.start(), mat.end())
+                            terminal_match_cell_range(row, &byte_cells, mat.start(), mat.end())
                         {
                             self.ide_panel
                                 .term_search_results
@@ -1126,34 +1128,72 @@ fn normalize_tab_drag_after_close(
     }
 }
 
+/// Builds the searchable text of one terminal row into `line` and records, for every byte of
+/// that text, the column that produced it. Spacer columns add no text and so own no bytes.
+fn terminal_row_search_text(row: &[ronsole_term::Cell], line: &mut String, byte_cells: &mut Vec<usize>) {
+    line.clear();
+    byte_cells.clear();
+    for (col, cell) in row.iter().enumerate() {
+        cell.append_text_to(line);
+        byte_cells.resize(line.len(), col);
+    }
+}
+
+/// Converts a byte range of the row text built by `terminal_row_search_text` into an inclusive
+/// column range. A match ending on a wide character also covers that character's spacer column.
 fn terminal_match_cell_range(
-    line: &str,
+    row: &[ronsole_term::Cell],
+    byte_cells: &[usize],
     match_start: usize,
     match_end: usize,
 ) -> Option<(usize, usize)> {
-    if match_start >= match_end
-        || match_end > line.len()
-        || !line.is_char_boundary(match_start)
-        || !line.is_char_boundary(match_end)
-    {
+    if match_start >= match_end || match_end > byte_cells.len() {
         return None;
     }
-    let start_col = line[..match_start].chars().count();
-    let end_exclusive_col = start_col + line[match_start..match_end].chars().count();
-    Some((start_col, end_exclusive_col.saturating_sub(1)))
+    let start_col = byte_cells[match_start];
+    let last_col = byte_cells[match_end - 1];
+    let end_col = match row.get(last_col) {
+        Some(cell) if cell.is_wide() && last_col + 1 < row.len() => last_col + 1,
+        _ => last_col,
+    };
+    Some((start_col, end_col))
 }
 
 #[cfg(test)]
 mod editor_focus_keymap_tests {
-    use super::{normalize_tab_drag_after_close, terminal_match_cell_range};
+    use super::{normalize_tab_drag_after_close, terminal_row_search_text, terminal_match_cell_range};
+
+    /// Runs the same text-to-cell path as `update_terminal_search` on one row.
+    fn search_row_columns(row: &[ronsole_term::Cell], query: &str) -> Option<(usize, usize)> {
+        let mut line = String::new();
+        let mut byte_cells = Vec::new();
+        terminal_row_search_text(row, &mut line, &mut byte_cells);
+        let re = regex::Regex::new(&regex::escape(query)).expect("regex");
+        let mat = re.find(&line)?;
+        terminal_match_cell_range(row, &byte_cells, mat.start(), mat.end())
+    }
 
     #[test]
-    fn terminal_search_converts_utf8_byte_offsets_to_cell_columns() {
-        let line = "λ中abc";
-        let start = line.find("abc").expect("query");
-        let end = start + "abc".len();
-        assert_eq!(terminal_match_cell_range(line, start, end), Some((2, 4)));
-        assert_eq!(terminal_match_cell_range(line, end, start), None);
+    fn terminal_search_finds_wide_characters_and_highlights_both_cells() {
+        let mut term = crate::app::terminal::test_term(20, 1);
+        let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None);
+        // 日 owns columns 0-1 and 本 owns columns 2-3; the spacers add no search text.
+        term.advance("日本".as_bytes(), std::time::Instant::now(), &mut sink);
+        let row = term.row(0).expect("row");
+        assert_eq!(search_row_columns(row, "日本"), Some((0, 3)));
+        assert_eq!(search_row_columns(row, "本"), Some((2, 3)));
+    }
+
+    #[test]
+    fn terminal_search_maps_wide_and_combining_text_to_physical_columns() {
+        let mut term = crate::app::terminal::test_term(32, 1);
+        let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None);
+        // Same row as the Ronsole search test (search.rs:573-594): 界 is wide and the
+        // combining mark joins the base cell of 'e' without adding a column.
+        term.advance("é界e\u{301}needle".as_bytes(), std::time::Instant::now(), &mut sink);
+        let row = term.row(0).expect("row");
+        assert_eq!(search_row_columns(row, "needle"), Some((4, 9)));
+        assert_eq!(search_row_columns(row, "e\u{301}"), Some((3, 3)));
     }
 
     #[test]

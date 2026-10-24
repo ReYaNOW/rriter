@@ -3,10 +3,12 @@
 //!
 //! The parser thread only stores the latest value per tab and wakes the UI through
 //! `UiWaker`; the UI thread takes the stored values on its tick, without the grid lock.
+//! It also publishes the mode 2026 hold deadline, which the UI thread reads the same way.
 
 use crate::ui_waker::UiWaker;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Working directory reported by OSC 7, kept as the raw host and percent-decoded path bytes.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -26,6 +28,7 @@ pub(crate) struct PendingHostEvents {
 #[derive(Clone)]
 pub(crate) struct HostEventsSink {
     pending: Arc<Mutex<PendingHostEvents>>,
+    published_sync_deadline: Arc<Mutex<Option<Instant>>>,
     waker: UiWaker,
 }
 
@@ -33,8 +36,20 @@ impl HostEventsSink {
     pub(crate) fn new(waker: UiWaker) -> Self {
         Self {
             pending: Arc::new(Mutex::new(PendingHostEvents::default())),
+            published_sync_deadline: Arc::new(Mutex::new(None)),
             waker,
         }
+    }
+
+    /// Parser side: publishes the mode 2026 hold deadline of the grid it just changed.
+    pub(crate) fn set_sync_deadline(&self, deadline: Option<Instant>) {
+        *crate::platform::lock_recover(&self.published_sync_deadline) = deadline;
+    }
+
+    /// Any thread: the last published hold deadline. It reads no grid state, so it never waits
+    /// for the grid lock.
+    pub(crate) fn sync_deadline(&self) -> Option<Instant> {
+        *crate::platform::lock_recover(&self.published_sync_deadline)
     }
 
     pub(crate) fn set_clipboard(&self, text: String) {

@@ -304,6 +304,14 @@ fn terminal_cell_background(
     }
 }
 
+/// Zero-width marks of a cell that the renderer draws over its base glyph, in cell order.
+fn terminal_cell_mark_chars(cell: &ronsole_term::Cell) -> impl Iterator<Item = char> + '_ {
+    cell.zero_width()
+        .iter()
+        .copied()
+        .filter(|&mark| ronsole_term::terminal_should_render_zero_width(mark))
+}
+
 fn terminal_glyph_anchor(
     c: char,
     glyph: crate::renderer::GlyphInfo,
@@ -758,6 +766,15 @@ impl Renderer {
                                         self.push_scaled_glyph(g, cx, baseline_y, fg_color, false);
                                     }
                                 }
+                                // Combining marks reuse the base glyph's face, colour and baseline,
+                                // anchored at the cell origin.
+                                for mark in terminal_cell_mark_chars(cell) {
+                                    if let Some(g) =
+                                        self.terminal_glyph_at_scale(mark, prefer_color, term_scale, face)
+                                    {
+                                        self.push_scaled_glyph(g, cx, baseline_y, fg_color, false);
+                                    }
+                                }
                             }
                         }
                         TerminalBodyLayer::Decoration => {
@@ -1097,6 +1114,26 @@ mod tests {
             advance: width,
             is_emoji,
         }
+    }
+
+    /// Sink that drops replies, titles and clipboard text; the cell test needs only the grid.
+    struct NullSink;
+
+    impl ronsole_term::TermSink for NullSink {
+        fn reply(&mut self, _bytes: &[u8]) {}
+        fn title(&mut self, _title: &str) {}
+        fn clipboard_set(&mut self, _text: String) {}
+        fn working_directory(&mut self, _host: &str, _path: &[u8]) {}
+    }
+
+    #[test]
+    fn terminal_cell_mark_chars_keeps_renderable_marks_only() {
+        let mut term = crate::app::terminal::test_term(4, 1);
+        // U+0301 is drawn over its base cell; U+200D is a format character that the
+        // ronsole_term predicate (cell.rs, terminal_should_render_zero_width) filters out.
+        term.advance("e\u{301}\u{200d}".as_bytes(), std::time::Instant::now(), &mut NullSink);
+        let row = term.row(0).expect("row");
+        assert_eq!(terminal_cell_mark_chars(&row[0]).collect::<Vec<_>>(), vec!['\u{301}']);
     }
 
     #[test]

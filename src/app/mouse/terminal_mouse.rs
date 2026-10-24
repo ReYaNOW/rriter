@@ -305,7 +305,8 @@ impl App {
     }
 }
 
-/// Writes `CSI I` / `CSI O` to one tab when its desired DECSET 1004 state changes and the application enabled reporting.
+/// Queues `CSI I` / `CSI O` for one tab when its desired DECSET 1004 state changes and the application enabled reporting.
+/// The report goes through the PTY writer queue without blocking, so closing a tab never waits for the child.
 fn set_focus_report(term: &mut Terminal, desired: bool) {
     if desired == term.focus_sent {
         return;
@@ -315,7 +316,7 @@ fn set_focus_report(term: &mut Terminal, desired: bool) {
         .focus_changed(desired)
         .map(<[u8]>::to_vec);
     if let Some(bytes) = report {
-        let _ = term.write_input(&bytes);
+        term.queue_report(&bytes);
     }
 }
 

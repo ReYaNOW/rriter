@@ -1,13 +1,25 @@
 //! Synchronized output (DEC mode 2026) on the parser side: a held batch must be replayed when
 //! its deadline passes, even if the PTY stays silent and no frame is being drawn.
 
-use crate::app::terminal_process::RriterTermSink;
+use crate::app::terminal_sink::RriterTermSink;
 use ronsole_term::Term;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// How long the UI thread waits after a hold deadline before replaying the held bytes itself.
+/// The parser thread replays on time; the UI replay is only a fallback for a stalled parser.
+pub(crate) const SYNC_UI_FALLBACK_GRACE: Duration = Duration::from_millis(50);
+
+/// Whether the UI thread may replay a hold with `deadline` at `now`.
+pub(crate) fn sync_ui_fallback_due(deadline: Instant, now: Instant) -> bool {
+    deadline
+        .checked_add(SYNC_UI_FALLBACK_GRACE)
+        .is_some_and(|at| now >= at)
+}
 
 /// Replays the held mode 2026 output when its deadline has passed. Returns whether the grid changed.
+/// Publishes the grid's hold deadline afterwards, so the UI thread sees the replay.
 pub(crate) fn flush_expired_terminal_output(
     grid: &mut Term,
     sink: &mut RriterTermSink,
@@ -17,6 +29,7 @@ pub(crate) fn flush_expired_terminal_output(
     if changed {
         grid.mark_changed();
     }
+    sink.publish_sync_deadline(grid);
     changed
 }
 
@@ -80,12 +93,21 @@ pub(crate) fn wait_out_sync_deadline(
     }
 }
 
-/// Feeds a batch to the grid and returns whether it started a new mode 2026 hold deadline.
+/// What one parsed batch did to the grid.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct BatchOutcome {
+    /// The batch started a mode 2026 hold, so the UI thread must re-arm its wait.
+    pub(crate) new_deadline: bool,
+    /// The batch changed the visible grid; a batch held entirely by mode 2026 does not.
+    pub(crate) grid_changed: bool,
+}
+
+/// Feeds a batch to the grid and reports what changed. Publishes the hold deadline before returning.
 pub(crate) fn advance_terminal_output_batch(
     grid: &mut Term,
     sink: &mut RriterTermSink,
     chunks: &[Vec<u8>],
-) -> bool {
+) -> BatchOutcome {
     let now = Instant::now();
     let mut grid_changed = false;
     let mut new_deadline = false;
@@ -99,7 +121,11 @@ pub(crate) fn advance_terminal_output_batch(
     if grid_changed {
         grid.mark_changed();
     }
-    new_deadline
+    sink.publish_sync_deadline(grid);
+    BatchOutcome {
+        new_deadline,
+        grid_changed,
+    }
 }
 
 #[cfg(test)]
@@ -138,6 +164,40 @@ mod tests {
         assert!(flush_expired_terminal_output(&mut grid, &mut sink, deadline));
         assert!(screen_text(&grid).contains("held"));
         assert_eq!(grid.sync_deadline(), None);
+    }
+
+    #[test]
+    fn batch_held_entirely_by_mode_2026_requests_no_frame() {
+        let mut grid = test_term(20, 2);
+        let mut sink = RriterTermSink::new(None, None);
+        let outcome = advance_terminal_output_batch(
+            &mut grid,
+            &mut sink,
+            &[b"\x1b[?2026hheld".to_vec()],
+        );
+        // Mode 2026 holds the bytes, so the screen is unchanged; the new deadline still wakes the UI.
+        // Expected values: ronsole-term tests/sync.rs (held set reports grid_changed false, new_deadline true).
+        assert_eq!(
+            outcome,
+            BatchOutcome {
+                new_deadline: true,
+                grid_changed: false,
+            }
+        );
+        assert!(grid.sync_deadline().is_some());
+    }
+
+    #[test]
+    fn published_sync_deadline_follows_the_grid() {
+        let mut grid = test_term(20, 2);
+        let host_events = HostEventsSink::new(UiWaker::counting());
+        let mut sink = RriterTermSink::new(None, None).with_host_events(host_events.clone());
+        advance_terminal_output_batch(&mut grid, &mut sink, &[b"\x1b[?2026hheld".to_vec()]);
+        let deadline = grid.sync_deadline().expect("mode 2026 holds the output");
+        assert_eq!(host_events.sync_deadline(), Some(deadline));
+
+        assert!(flush_expired_terminal_output(&mut grid, &mut sink, deadline));
+        assert_eq!(host_events.sync_deadline(), None);
     }
 
     /// Yields one held batch, then output that never pauses until `stop` is set.
