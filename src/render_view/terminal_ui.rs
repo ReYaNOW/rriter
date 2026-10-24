@@ -262,7 +262,7 @@ const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 2] =
 fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize, usize)) -> bool {
     let (sx, sy, ex, ey) = bounds;
     let (start_x, start_y, end_x, end_y) =
-        crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
+        ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
     if row > start_y && row < end_y {
         true
     } else if row == start_y && row == end_y {
@@ -572,6 +572,9 @@ impl Renderer {
 
             if grid.cols() != new_cols || grid.rows() != new_rows {
                 grid.resize(new_cols, new_rows);
+                // Term::resize clears the selection only on column change; a row-only resize
+                // would leave selection indices pointing at shifted rows.
+                grid.set_selection(None);
                 term.resize_pty(
                     clamp_terminal_pty_dimension(new_cols),
                     clamp_terminal_pty_dimension(new_rows),
@@ -1079,13 +1082,13 @@ mod tests {
 
     #[test]
     fn terminal_content_gate_waits_for_output_and_first_layout() {
-        let mut output_first = crate::app::terminal::TermGrid::new(200, 60);
+        let mut output_first = crate::app::terminal::test_term(200, 60);
         output_first.mark_presentation_ready();
         assert!(!output_first.presentation_visible());
         output_first.mark_presentation_layout_ready();
         assert!(output_first.presentation_visible());
 
-        let mut layout_first = crate::app::terminal::TermGrid::new(200, 60);
+        let mut layout_first = crate::app::terminal::test_term(200, 60);
         layout_first.mark_presentation_layout_ready();
         assert!(!layout_first.presentation_visible());
         layout_first.mark_presentation_ready();

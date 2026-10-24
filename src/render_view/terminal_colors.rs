@@ -52,3 +52,85 @@ pub(crate) fn terminal_cell_render_colors(
     };
     (rgb_to_rgba(colors.fg), bg)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeId;
+    use ronsole_term::{CellFlags, TerminalColor, UnderlineStyle};
+
+    const TEST_THEMES: [ThemeId; 2] = [ThemeId::Dracula, ThemeId::OneDark];
+
+    fn cell(flags: CellFlags, fg: TerminalColor, bg: TerminalColor) -> Cell {
+        Cell::new_for_test('a', fg, bg, flags, UnderlineStyle::None)
+    }
+
+    fn default_cell(flags: CellFlags) -> Cell {
+        cell(
+            flags,
+            TerminalColor::default_foreground(),
+            TerminalColor::default_background(),
+        )
+    }
+
+    #[test]
+    fn default_foreground_color_unchanged() {
+        for id in TEST_THEMES {
+            let theme = Theme::for_id(id, [0.0; 4]);
+            let palette = terminal_palette(&theme);
+            let expected = theme.terminal[7];
+            let (fg, bg) = terminal_cell_render_colors(&default_cell(CellFlags::empty()), &palette);
+
+            assert_eq!(bg, None);
+            assert_eq!(palette.foreground, theme_rgb(expected));
+            for channel in 0..3 {
+                // Compared on the u8 channel, so a one-step shift of the palette fails.
+                assert_eq!(
+                    (fg[channel] * 255.0).round() as u8,
+                    (expected[channel] * 255.0).round() as u8,
+                );
+                assert!((fg[channel] - expected[channel]).abs() < 1.0 / 255.0);
+            }
+        }
+    }
+
+    #[test]
+    fn default_background_not_painted() {
+        for id in TEST_THEMES {
+            let palette = terminal_palette(&Theme::for_id(id, [0.0; 4]));
+            let (_, bg) = terminal_cell_render_colors(&default_cell(CellFlags::empty()), &palette);
+            assert_eq!(bg, None);
+        }
+    }
+
+    #[test]
+    fn inverse_paints_default_fg_as_background() {
+        for id in TEST_THEMES {
+            let theme = Theme::for_id(id, [0.0; 4]);
+            let palette = terminal_palette(&theme);
+            let (plain_fg, _) = terminal_cell_render_colors(&default_cell(CellFlags::empty()), &palette);
+            let (inverse_fg, inverse_bg) =
+                terminal_cell_render_colors(&default_cell(CellFlags::INVERSE), &palette);
+
+            assert_eq!(inverse_bg, Some(plain_fg));
+            for channel in 0..3 {
+                assert_eq!(
+                    (inverse_fg[channel] * 255.0).round() as u8,
+                    (theme.terminal_bg[channel] * 255.0).round() as u8,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn truecolor_background_painted() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        let truecolor_bg = cell(
+            CellFlags::empty(),
+            TerminalColor::default_foreground(),
+            TerminalColor::rgb(1, 2, 3),
+        );
+        let (_, bg) = terminal_cell_render_colors(&truecolor_bg, &palette);
+        assert_eq!(bg, Some([1.0 / 255.0, 2.0 / 255.0, 3.0 / 255.0, 1.0]));
+    }
+}

@@ -1649,6 +1649,7 @@ Entrypoints/state:
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
 * `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.
+* `src/app/git_panel/git_ansi_sgr.rs` -> SGR parser for the Git commit console; u8 palette colours, independent of `ronsole_term::Term`.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_baseline.rs` -> HEAD snapshots, baseline loading, and open-tab HEAD refresh.
@@ -1849,6 +1850,7 @@ Terminal:
 * `src/app/terminal.rs` -> terminal grid facade, input/output access, resize, dirty redraw, and shutdown ownership.
 * `src/app/terminal_process.rs` -> platform shell selection, PTY spawn, batched reader, process-tree ownership, and bounded terminal shutdown.
 * `src/render_view/terminal_ui.rs` -> terminal visuals only.
+* `src/render_view/terminal_colors.rs` -> theme-to-terminal palette and per-cell render colours; the default background resolves to `None` and is never painted.
 
 Assets:
 

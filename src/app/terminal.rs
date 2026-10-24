@@ -18,6 +18,33 @@ pub(crate) fn lock_terminal_grid(grid: &Mutex<Term>) -> MutexGuard<'_, Term> {
     recover_terminal_lock(grid.lock())
 }
 
+/// Builds a `Term` with the production config (scrollback, identity) and a fixed
+/// palette, for tests that need a grid without spawning a process.
+#[cfg(test)]
+pub(crate) fn test_term(cols: usize, rows: usize) -> Term {
+    let black = ronsole_term::Rgb { r: 0, g: 0, b: 0 };
+    let white = ronsole_term::Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    Term::new(TermConfig {
+        cols,
+        rows,
+        scrollback_lines: TERMINAL_SCROLLBACK_LINES,
+        identity: TermIdentity {
+            name: "rriter",
+            version: env!("CARGO_PKG_VERSION"),
+        },
+        palette: TermPalette {
+            foreground: white,
+            background: black,
+            cursor: white,
+            ansi: [black; 16],
+        },
+    })
+}
+
 pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
     let (sx, sy, ex, ey) = term.selection()?;
     let (start_x, start_y, end_x, end_y) = ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
@@ -153,5 +180,49 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::terminal_process::RriterTermSink;
+
+    #[test]
+    fn osc_11_reply_uses_theme_background() {
+        let mut term = test_term(20, 3);
+        let background = ronsole_term::Rgb {
+            r: 0x12,
+            g: 0x34,
+            b: 0x56,
+        };
+        let white = ronsole_term::Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        term.set_palette(TermPalette {
+            foreground: white,
+            background,
+            cursor: white,
+            ansi: [background; 16],
+        });
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let mut sink = RriterTermSink::new(None, Some(reply_tx));
+        term.advance(b"\x1b]11;?\x07", Instant::now(), &mut sink);
+
+        let reply = String::from_utf8_lossy(&reply_rx.try_recv().unwrap_or_default()).into_owned();
+        // xterm `rgb:` spec doubles each 8-bit channel (ronsole-term osc.rs `rgb_spec`).
+        assert!(reply.contains("rgb:1212/3434/5656"), "{reply}");
+        assert!(!reply.contains("ffff"), "{reply}");
+    }
+
+    #[test]
+    fn selection_text_in_alt_screen() {
+        let mut term = test_term(20, 3);
+        let mut sink = RriterTermSink::new(None, None);
+        term.advance(b"\x1b[?1049hhello world", Instant::now(), &mut sink);
+        term.set_selection(Some((0, 0, 4, 0)));
+        assert_eq!(terminal_selection_text(&term).as_deref(), Some("hello"));
     }
 }

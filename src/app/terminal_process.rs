@@ -326,45 +326,6 @@ impl Drop for TerminalProcess {
     }
 }
 
-pub(crate) fn terminal_programmed_title(parts: &[&[u8]]) -> Option<String> {
-    let capacity = parts
-        .iter()
-        .fold(parts.len().saturating_sub(1), |total, part| {
-            total.saturating_add(part.len())
-        })
-        .min(TERMINAL_TITLE_MAX_BYTES);
-    let mut title = String::with_capacity(capacity);
-
-    'parts: for (index, part) in parts.iter().enumerate() {
-        if index != 0 {
-            if title.len() == TERMINAL_TITLE_MAX_BYTES {
-                break;
-            }
-            title.push(';');
-        }
-        let part = std::str::from_utf8(part).ok()?;
-        for ch in part.chars() {
-            if ch.is_control() {
-                continue;
-            }
-            if title.len() + ch.len_utf8() > TERMINAL_TITLE_MAX_BYTES {
-                break 'parts;
-            }
-            title.push(ch);
-        }
-    }
-
-    let first_non_whitespace = title
-        .char_indices()
-        .find_map(|(index, ch)| (!ch.is_whitespace()).then_some(index))?;
-    let trimmed_len = title.trim_end().len();
-    title.truncate(trimmed_len);
-    if first_non_whitespace != 0 {
-        title.drain(..first_non_whitespace);
-    }
-    (!title.is_empty()).then_some(title)
-}
-
 fn bounded_terminal_title(text: &str) -> String {
     let mut title = String::with_capacity(text.len().min(TERMINAL_TITLE_MAX_BYTES));
     for ch in text.chars() {
@@ -981,6 +942,7 @@ fn terminal_fallback_title_with_home(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ronsole_term::TerminalColor;
 
     fn process_snapshot(program: &str, cwd: &str, args: &[&str]) -> platform::ProcessSnapshot {
         platform::ProcessSnapshot {
@@ -1072,30 +1034,77 @@ mod tests {
         assert!(!title_path.contains("format!("));
     }
 
-    fn parser_grid() -> (TermGrid, TerminalTitleCache) {
+    fn parser_grid() -> (Term, TerminalTitleCache) {
         let cache = Arc::new(Mutex::new(TerminalTitleState::new("fallback".to_string())));
-        (TermGrid::new_with_title_cache(8, 2, cache.clone()), cache)
+        (crate::app::terminal::test_term(8, 2), cache)
+    }
+
+    /// Feeds bytes through the sink the parser thread uses, so titles reach `cache`.
+    fn feed(grid: &mut Term, cache: &TerminalTitleCache, bytes: &[u8]) {
+        let mut sink = RriterTermSink::new(Some(cache.clone()), None);
+        grid.advance(bytes, Instant::now(), &mut sink);
+    }
+
+    /// Text, colours and cursor of the whole buffer, for comparing two grids.
+    fn grid_snapshot(
+        grid: &Term,
+    ) -> (
+        Vec<Vec<(char, TerminalColor, TerminalColor)>>,
+        (usize, usize),
+    ) {
+        let rows = (0..grid.total_rows())
+            .map(|y| {
+                grid.row(y)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|cell| (cell.ch(), cell.fg(), cell.bg()))
+                    .collect()
+            })
+            .collect();
+        (rows, grid.cursor())
+    }
+
+    #[test]
+    fn terminal_replies_through_bounded_channel() {
+        let mut grid = crate::app::terminal::test_term(8, 2);
+        let (reply_tx, reply_rx) =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let mut sink = RriterTermSink::new(None, Some(reply_tx));
+
+        // Primary device attributes replies `ESC [ ? 62 c` (ronsole-term perform.rs).
+        grid.advance(b"\x1b[c", Instant::now(), &mut sink);
+        assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[?62c".to_vec()));
+
+        // With nobody draining the queue, replies beyond its capacity are dropped, not blocked on.
+        for _ in 0..TERMINAL_REPLY_QUEUE_CAPACITY * 2 {
+            grid.advance(b"\x1b[c", Instant::now(), &mut sink);
+        }
+        let mut queued = 0;
+        while reply_rx.try_recv().is_ok() {
+            queued += 1;
+        }
+        assert_eq!(queued, TERMINAL_REPLY_QUEUE_CAPACITY);
     }
 
     #[test]
     fn terminal_presentation_waits_for_displayable_output_without_timeout_fallback() {
-        let mut grid = TermGrid::new(24, 3);
-        let mut parser = Parser::new();
+        let mut grid = crate::app::terminal::test_term(24, 3);
+        let mut sink = RriterTermSink::new(None, None);
 
-        assert!(!grid.presentation_ready);
+        assert!(!grid.presentation_ready());
         advance_terminal_output_batch(
-            &mut parser,
             &mut grid,
+            &mut sink,
             &[b"\x1b[?25l\x1b[2J\r\n\t   \x1b[?25h".to_vec()],
         );
-        assert!(!grid.presentation_ready);
+        assert!(!grid.presentation_ready());
 
         advance_terminal_output_batch(
-            &mut parser,
             &mut grid,
+            &mut sink,
             &[b"\x1b[32muser@host> \x1b[0m".to_vec()],
         );
-        assert!(grid.presentation_ready);
+        assert!(grid.presentation_ready());
 
         let source = include_str!("terminal_process.rs");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
@@ -1108,54 +1117,49 @@ mod tests {
     #[test]
     fn parsed_terminal_output_reveals_once_without_changing_grid_bytes() {
         let chunks = vec![b"\x1b[31mready\x1b[0m".to_vec()];
-        let mut expected = TermGrid::new(12, 2);
-        let mut expected_parser = Parser::new();
+        let mut expected = crate::app::terminal::test_term(12, 2);
+        let mut expected_sink = RriterTermSink::new(None, None);
         for chunk in &chunks {
-            expected_parser.advance(&mut expected, chunk);
+            expected.advance(chunk, Instant::now(), &mut expected_sink);
         }
 
-        let mut actual = TermGrid::new(12, 2);
-        assert!(!actual.presentation_ready);
-        assert!(!actual.presentation_layout_ready);
-        let mut parser = Parser::new();
-        advance_terminal_output_batch(&mut parser, &mut actual, &chunks);
+        let mut actual = crate::app::terminal::test_term(12, 2);
+        assert!(!actual.presentation_ready());
+        assert!(!actual.presentation_visible());
+        let mut sink = RriterTermSink::new(None, None);
+        advance_terminal_output_batch(&mut actual, &mut sink, &chunks);
 
-        assert!(actual.presentation_ready);
-        assert!(actual.lines == expected.lines);
-        assert_eq!(
-            (actual.cur_x, actual.cur_y),
-            (expected.cur_x, expected.cur_y)
-        );
-        assert_eq!(
-            (actual.cur_fg, actual.cur_bg),
-            (expected.cur_fg, expected.cur_bg)
-        );
+        assert!(actual.presentation_ready());
+        assert_eq!(grid_snapshot(&actual), grid_snapshot(&expected));
 
-        actual.dirty = false;
-        advance_terminal_output_batch(&mut parser, &mut actual, &[b"!".to_vec()]);
-        assert!(actual.presentation_ready);
-        assert!(actual.dirty);
+        actual.set_dirty(false);
+        advance_terminal_output_batch(&mut actual, &mut sink, &[b"!".to_vec()]);
+        assert!(actual.presentation_ready());
+        assert!(actual.dirty());
     }
 
     #[test]
     fn terminal_stream_end_before_displayable_output_shows_explicit_state_once() {
-        let mut grid = TermGrid::new(64, 3);
-        let mut parser = Parser::new();
-        advance_terminal_output_batch(&mut parser, &mut grid, &[b"\x1b[?25l\x1b[2J\r\n".to_vec()]);
-        assert!(!grid.presentation_ready);
+        let mut grid = crate::app::terminal::test_term(64, 3);
+        let mut sink = RriterTermSink::new(None, None);
+        advance_terminal_output_batch(
+            &mut grid,
+            &mut sink,
+            &[b"\x1b[?25l\x1b[2J\r\n".to_vec()],
+        );
+        assert!(!grid.presentation_ready());
 
-        assert!(finish_terminal_output_stream(&mut parser, &mut grid));
-        assert!(grid.presentation_ready);
-        let text = grid
-            .lines
-            .iter()
-            .flat_map(|line| line.iter().map(|cell| cell.c))
+        assert!(finish_terminal_output_stream(&mut grid, &mut sink));
+        assert!(grid.presentation_ready());
+        let text = (0..grid.total_rows())
+            .filter_map(|y| grid.row(y))
+            .flat_map(|line| line.iter().map(|cell| cell.ch()))
             .collect::<String>();
         assert!(text.contains("RRiter terminal exited before producing output"));
 
-        let lines = grid.lines.clone();
-        assert!(!finish_terminal_output_stream(&mut parser, &mut grid));
-        assert!(grid.lines == lines);
+        let snapshot = grid_snapshot(&grid);
+        assert!(!finish_terminal_output_stream(&mut grid, &mut sink));
+        assert!(grid_snapshot(&grid) == snapshot);
     }
 
     #[test]
@@ -1358,14 +1362,13 @@ mod tests {
     #[test]
     fn osc_zero_bel_and_osc_two_st_update_the_shared_title_cache() {
         let (mut grid, cache) = parser_grid();
-        let mut parser = Parser::new();
-        parser.advance(&mut grid, b"\x1b]0;~ : htop\x07");
+        feed(&mut grid, &cache,b"\x1b]0;~ : htop\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "~ : htop"
         );
 
-        parser.advance(&mut grid, b"\x1b]2;bin : sleep\x1b\\");
+        feed(&mut grid, &cache,b"\x1b]2;bin : sleep\x1b\\");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "bin : sleep"
@@ -1375,27 +1378,21 @@ mod tests {
     #[test]
     fn programmed_title_is_utf8_control_safe_bounded_and_sequential() {
         let (mut grid, cache) = parser_grid();
-        let mut parser = Parser::new();
-        parser.advance(&mut grid, b"\x1b]0;\x07");
+        feed(&mut grid, &cache,b"\x1b]0;\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "fallback"
         );
-        parser.advance(&mut grid, "\x1b]0;~ : компилятор\x07".as_bytes());
-        parser.advance(&mut grid, b"\x1b]0;(reyan) 89.169.37.107\x07");
+        feed(&mut grid, &cache,"\x1b]0;~ : компилятор\x07".as_bytes());
+        feed(&mut grid, &cache,b"\x1b]0;(reyan) 89.169.37.107\x07");
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)),
             "(reyan) 89.169.37.107"
         );
 
-        assert_eq!(terminal_programmed_title(&[b"\xff"]), None);
-        assert_eq!(
-            terminal_programmed_title(&[b"  safe\n\0title  "]).as_deref(),
-            Some("safetitle")
-        );
         let huge = "x".repeat(TERMINAL_TITLE_MAX_BYTES * 8);
         let sequence = format!("\x1b]2;{huge}\x07");
-        parser.advance(&mut grid, sequence.as_bytes());
+        feed(&mut grid, &cache,sequence.as_bytes());
         assert_eq!(
             resolved_title(&crate::platform::lock_recover(&cache)).len(),
             TERMINAL_TITLE_MAX_BYTES
