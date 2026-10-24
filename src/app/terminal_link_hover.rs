@@ -6,11 +6,19 @@
 use crate::app::terminal::{Terminal, lock_terminal_grid};
 use ronsole_term::LinkTarget;
 
+#[cfg(test)]
+thread_local! {
+    /// Counts `resolve_link` calls on the current thread, so tests can observe the miss cache.
+    static RESOLVE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Terminal {
     /// Link under `cell` = `(column, absolute row)` for the hover, with the grid generation it was resolved against.
     /// Cells are collected within one viewport height of `cell` on each side, which contains every
     /// visible row, so the underline is complete on screen without walking all of scrollback.
     pub(crate) fn resolve_link(&self, cell: (usize, usize)) -> (Option<LinkTarget>, u64) {
+        #[cfg(test)]
+        RESOLVE_CALLS.with(|calls| calls.set(calls.get() + 1));
         let (col, row) = cell;
         let grid = lock_terminal_grid(&self.grid);
         let height = grid.rows();
@@ -81,6 +89,7 @@ impl Terminal {
 
 #[cfg(test)]
 mod tests {
+    use super::RESOLVE_CALLS;
     use crate::app::terminal::{Terminal, lock_terminal_grid};
     use crate::app::terminal_process::RriterTermSink;
     use crate::app::terminal_sync_output::advance_terminal_output_batch;
@@ -95,11 +104,19 @@ mod tests {
     #[test]
     fn repeated_miss_on_same_cell_and_generation_is_remembered() {
         let mut term = Terminal::test_without_process(20, 2);
+        RESOLVE_CALLS.with(|calls| calls.set(0));
         assert!(!term.update_hovered_link(Some((15, 1))), "blank cell has no link");
+        assert_eq!(RESOLVE_CALLS.with(std::cell::Cell::get), 1, "first lookup resolves");
         let generation = lock_terminal_grid(&term.grid).content_generation();
         assert_eq!(term.hovered_link_miss, Some(((15, 1), generation)));
 
         assert!(!term.update_hovered_link(Some((15, 1))), "repeated miss changes nothing");
+        assert_eq!(
+            RESOLVE_CALLS.with(std::cell::Cell::get),
+            1,
+            "repeated miss on the same cell and generation must not call resolve_link again"
+        );
+        assert_eq!(term.hovered_link_miss, Some(((15, 1), generation)));
         assert!(term.hovered_link.is_none());
     }
 
