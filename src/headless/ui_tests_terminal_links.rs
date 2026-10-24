@@ -22,7 +22,7 @@ fn link_bytes(uri: &str) -> Vec<u8> {
 }
 
 fn char_metrics(session: &HeadlessSession) -> (f32, f32) {
-    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    let renderer = session.app.renderer.as_ref().unwrap_or_else(|| panic!("headless renderer"));
     let char_w = renderer.ascii_advances['A' as usize].max(1.0) * TERMINAL_TEXT_SCALE;
     (renderer.scale_factor, char_w)
 }

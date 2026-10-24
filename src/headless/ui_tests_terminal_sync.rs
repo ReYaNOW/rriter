@@ -43,7 +43,7 @@ fn about_wait(session: &mut HeadlessSession) -> ControlFlow {
 fn hold_deadline(session: &HeadlessSession, index: usize) -> Instant {
     session.app.ide_panel.terminals[index]
         .sync_deadline()
-        .expect("mode 2026 holds the output")
+        .unwrap_or_else(|| panic!("mode 2026 holds the output"))
 }
 
 /// The UI thread replays a hold only this long after its deadline, as a fallback for a stalled

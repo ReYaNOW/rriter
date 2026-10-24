@@ -113,11 +113,8 @@ mod tests {
                 terminal_cell_render_colors(&default_cell(CellFlags::INVERSE), &palette);
 
             assert_eq!(inverse_bg, Some(plain_fg));
-            for channel in 0..3 {
-                assert_eq!(
-                    (inverse_fg[channel] * 255.0).round() as u8,
-                    (theme.terminal_bg[channel] * 255.0).round() as u8,
-                );
+            for (fg, bg) in inverse_fg.iter().zip(theme.terminal_bg.iter()).take(3) {
+                assert_eq!((fg * 255.0).round() as u8, (bg * 255.0).round() as u8);
             }
         }
     }

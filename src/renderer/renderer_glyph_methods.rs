@@ -700,8 +700,10 @@ mod terminal_face_tests {
     const EMOJI: char = '😀';
 
     fn test_renderer() -> (OffscreenContext, Renderer) {
-        let context = OffscreenContext::new(64, 64).expect("offscreen EGL context");
-        let app = crate::app::reviewer_stage2_test_app().expect("headless App");
+        let context = OffscreenContext::new(64, 64)
+            .unwrap_or_else(|error| panic!("offscreen EGL context: {error:?}"));
+        let app = crate::app::reviewer_stage2_test_app()
+            .unwrap_or_else(|| panic!("headless App"));
         let renderer = Renderer::new(
             context.glow(),
             1.0,
@@ -709,7 +711,7 @@ mod terminal_face_tests {
             context.requested_context(),
             &mut crate::startup_trace::StartupTrace::disabled(),
         )
-        .expect("production Renderer");
+        .unwrap_or_else(|error| panic!("production Renderer: {error:?}"));
         (context, renderer)
     }
 

@@ -32,7 +32,7 @@ fn activate_terminal_tab(session: &mut HeadlessSession, index: usize) {
 }
 
 fn char_metrics(session: &HeadlessSession) -> (f32, f32, f32) {
-    let renderer = session.app.renderer.as_ref().expect("headless renderer");
+    let renderer = session.app.renderer.as_ref().unwrap_or_else(|| panic!("headless renderer"));
     let char_w = renderer.ascii_advances['A' as usize].max(1.0) * TERMINAL_TEXT_SCALE;
     let char_h = renderer.line_height * TERMINAL_TEXT_SCALE;
     (renderer.scale_factor, char_w, char_h)
@@ -307,8 +307,8 @@ fn tab_drag_over_tracking_body_keeps_moving_tab() {
     feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
     let (x, y) = point_for_visible_cell(&mut session, 4, 2);
     let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");
-    let tab_x = tab[0] as f64 + tab[2] as f64 / 2.0;
-    let tab_y = tab[1] as f64 + tab[3] as f64 / 2.0;
+    let tab_x = tab[0] + tab[2] / 2.0;
+    let tab_y = tab[1] + tab[3] / 2.0;
     run(&mut session, &format!("mouse_move {tab_x} {tab_y}\nclick left down\n"));
     assert!(session.app.ide_panel.terminal_tab_drag.is_some(), "tab press must start a tab drag");
     session.app.ide_panel.terminal_focused = true;
@@ -335,8 +335,8 @@ fn tab_drag_released_over_tracking_body_ends_tab_drag() {
     feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
     let (x, y) = point_for_visible_cell(&mut session, 4, 2);
     let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");
-    let tab_x = tab[0] as f64 + tab[2] as f64 / 2.0;
-    let tab_y = tab[1] as f64 + tab[3] as f64 / 2.0;
+    let tab_x = tab[0] + tab[2] / 2.0;
+    let tab_y = tab[1] + tab[3] / 2.0;
     written(&session, 0);
     run(&mut session, &format!("mouse_move {tab_x} {tab_y}\nclick left down\n"));
     session.app.ide_panel.terminal_focused = true;

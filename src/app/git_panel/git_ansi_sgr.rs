@@ -69,22 +69,20 @@ pub(crate) fn apply_ansi_sgr(
                     *bg = default_bg;
                 }
             }
-            38 | 48 => {
-                if index + 1 < values.len() && !values[index + 1].is_empty() {
-                    let mode = values[index + 1][0];
-                    if mode == 5 && index + 2 < values.len() && !values[index + 2].is_empty() {
-                        let color = values[index + 2][0] as u8;
-                        if value == 38 {
-                            *fg = Some(color);
-                        } else if let Some(bg) = bg.as_deref_mut() {
-                            *bg = color;
-                        }
-                        index += 2;
-                    } else if mode == 2 && index + 4 < values.len() {
-                        index += 4;
-                    } else {
-                        index += 1;
+            38 | 48 if index + 1 < values.len() && !values[index + 1].is_empty() => {
+                let mode = values[index + 1][0];
+                if mode == 5 && index + 2 < values.len() && !values[index + 2].is_empty() {
+                    let color = values[index + 2][0] as u8;
+                    if value == 38 {
+                        *fg = Some(color);
+                    } else if let Some(bg) = bg.as_deref_mut() {
+                        *bg = color;
                     }
+                    index += 2;
+                } else if mode == 2 && index + 4 < values.len() {
+                    index += 4;
+                } else {
+                    index += 1;
                 }
             }
             _ => {}

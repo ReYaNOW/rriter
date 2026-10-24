@@ -2,7 +2,6 @@
 // a local host yields a path, and that path is then used as a native path.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 /// Maps an OSC 7 host and path to a local path. `path` holds the bytes of the
 /// URI path after the caller's percent-decoding. `None` for a remote host, an
@@ -55,10 +54,10 @@ fn osc7_windows_path(path: &str) -> Option<PathBuf> {
     Some(PathBuf::from(native))
 }
 
-/// The machine name, read once per process; empty when it cannot be read.
-pub fn local_host_name() -> &'static str {
-    static NAME: OnceLock<String> = OnceLock::new();
-    NAME.get_or_init(read_host_name).as_str()
+/// The machine name; empty when it cannot be read. Read per call (OSC 7 and
+/// link clicks only), so no process-wide cache is needed.
+pub fn local_host_name() -> String {
+    read_host_name()
 }
 
 fn read_host_name() -> String {

@@ -87,7 +87,7 @@ fn open_file_uri(requests: &ExternalRequestSink, uri: &url::Url) -> bool {
     if bytes.len() <= 1 {
         return false;
     }
-    let Some(path) = osc7_path(uri.host_str().unwrap_or(""), &bytes, local_host_name()) else {
+    let Some(path) = osc7_path(uri.host_str().unwrap_or(""), &bytes, &local_host_name()) else {
         return false;
     };
     dispatch_local_path(requests, path)

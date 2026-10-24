@@ -142,6 +142,9 @@ pub struct Terminal {
     /// Cell and grid generation of the last hover lookup that found no link; a repeated lookup
     /// on the same cell and generation returns without walking the grid.
     pub(crate) hovered_link_miss: Option<((usize, usize), u64)>,
+    /// Number of `resolve_link` calls, so tests can observe the miss cache.
+    #[cfg(test)]
+    pub(crate) resolve_calls: std::sync::atomic::AtomicUsize,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
     /// Working directory last reported by OSC 7 for a local host; a new tab starts there.
     pub(crate) osc7_cwd: Option<std::path::PathBuf>,
@@ -213,6 +216,8 @@ impl Terminal {
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
             hovered_link_miss: None,
+            #[cfg(test)]
+            resolve_calls: std::sync::atomic::AtomicUsize::new(0),
             title_cache,
             osc7_cwd: None,
             host_events,
@@ -225,7 +230,7 @@ impl Terminal {
         let events = self.host_events.take();
         if let Some(cwd) = events.cwd {
             let local_host = crate::platform::local_host_name();
-            if let Some(path) = crate::platform::osc7_path(&cwd.host, &cwd.path, local_host) {
+            if let Some(path) = crate::platform::osc7_path(&cwd.host, &cwd.path, &local_host) {
                 self.osc7_cwd = Some(path);
             }
         }
@@ -283,6 +288,8 @@ impl Terminal {
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
             hovered_link_miss: None,
+            #[cfg(test)]
+            resolve_calls: std::sync::atomic::AtomicUsize::new(0),
             title_cache: Arc::new(Mutex::new(
                 crate::app::terminal_process::TerminalTitleState::new_numbered("terminal".to_string(), 1),
             )),
