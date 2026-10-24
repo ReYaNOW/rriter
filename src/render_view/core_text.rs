@@ -242,24 +242,16 @@ impl Renderer {
         c: char,
         prefer_color: Option<bool>,
         scale: f32,
+        face: u8,
     ) -> Option<ScaledGlyph> {
         // Sized lookup first: one cache hit per cell on the hot path; the base glyph is
         // only needed for the fallback quad (terminal cells ignore `advance`).
         if let Some(pixel_size) = self.sized_text_pixel_size(scale)
-            && let Some(glyph) = self.get_terminal_glyph_at_size(
-                c,
-                prefer_color,
-                pixel_size,
-                crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
-            )
+            && let Some(glyph) = self.get_terminal_glyph_at_size(c, prefer_color, pixel_size, face)
         {
             return Some(ScaledGlyph { glyph, quad_scale: 1.0, advance: glyph.advance.round() });
         }
-        let base = self.get_terminal_glyph(
-            c,
-            prefer_color,
-            crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
-        )?;
+        let base = self.get_terminal_glyph(c, prefer_color, face)?;
         let sized = self.sized_text_pixel_size(scale).is_none().then_some(base);
         Some(ScaledGlyph::new(base, sized, scale))
     }

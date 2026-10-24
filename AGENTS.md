@@ -53,6 +53,7 @@ Allowed file ops inside project:
 * Search files
 * Edit files
 * Create only `.rs`, `.py`, `.dart`, `.md`, `.txt`, and the single manifest `pdfium.json` at the repo root (named exception, 30.09)
+* Create also the terminal `.ttf` files in `src/fonts/` (`JetBrainsMonoNerdFont-{Bold,Italic,BoldItalic}.ttf`, terminal fonts; named exception, 24.10)
 * Delete only `.rs`, `.py`, `.dart`, `.md`, `.txt` when directly required
 
 Allowed shell commands:

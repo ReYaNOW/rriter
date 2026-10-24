@@ -2,6 +2,7 @@ use crate::app::IdePanelState;
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 use super::terminal_colors::{terminal_cell_render_colors, terminal_palette};
+use super::terminal_decoration::{terminal_cell_face_from_flags, terminal_cell_is_hidden};
 use glow::HasContext;
 
 pub(crate) const TERMINAL_TEXT_SCALE: f32 = 1.05;
@@ -253,10 +254,14 @@ pub(crate) fn terminal_scrollbar(
 enum TerminalBodyLayer {
     Background,
     Glyph,
+    Decoration,
 }
 
-const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 2] =
-    [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph];
+const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 3] = [
+    TerminalBodyLayer::Background,
+    TerminalBodyLayer::Glyph,
+    TerminalBodyLayer::Decoration,
+];
 
 #[inline(always)]
 fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize, usize)) -> bool {
@@ -697,9 +702,10 @@ impl Renderer {
                                     break;
                                 }
                                 let ch = cell.ch();
-                                if ch == ' ' {
+                                if ch == ' ' || terminal_cell_is_hidden(cell) {
                                     continue;
                                 }
+                                let face = terminal_cell_face_from_flags(cell.flags());
                                 let cx = (draw_x + c_idx as f32 * char_w).round();
                                 let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
                                 let cell_w = next_cx - cx;
@@ -711,11 +717,7 @@ impl Renderer {
                                 };
                                 let baseline_y = draw_y + self.baseline_offset * term_scale;
                                 if crate::renderer::terminal_force_text_presentation(ch)
-                                    && let Some(g) = self.get_terminal_glyph(
-                                        ch,
-                                        prefer_color,
-                                        crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
-                                    )
+                                    && let Some(g) = self.get_terminal_glyph(ch, prefer_color, face)
                                     && g.is_emoji == 0.0
                                 {
                                     let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
@@ -734,7 +736,7 @@ impl Renderer {
                                         g.is_emoji,
                                     );
                                 } else if let Some(g) =
-                                    self.terminal_glyph_at_scale(ch, prefer_color, term_scale)
+                                    self.terminal_glyph_at_scale(ch, prefer_color, term_scale, face)
                                 {
                                     if let Some((x, y, w, h)) = terminal_block_glyph_rect(
                                         ch, cx, next_cx, draw_y, char_h,
@@ -742,7 +744,7 @@ impl Renderer {
                                         ch,
                                         prefer_color,
                                         self.final_text_pixel_size(term_scale),
-                                        crate::render_view::terminal_decoration::TERMINAL_FACE_REGULAR,
+                                        face,
                                     ) {
                                         // lint: subpixel-glyph-ok block elements fill the cell
                                         self.push_quad(
@@ -757,6 +759,20 @@ impl Renderer {
                                     }
                                 }
                             }
+                        }
+                        TerminalBodyLayer::Decoration => {
+                            self.push_terminal_row_decorations(
+                                row,
+                                i,
+                                draw_x,
+                                draw_y,
+                                char_w,
+                                char_h,
+                                term_scale,
+                                &palette,
+                                term.hovered_link.as_ref(),
+                                grid.content_generation(),
+                            );
                         }
                     }
                 }
@@ -1432,7 +1448,11 @@ mod tests {
         assert!(qx + qw > next_cell_left, "fixture icon must overhang into next cell");
         assert_eq!(
             TERMINAL_BODY_LAYERS,
-            [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph]
+            [
+                TerminalBodyLayer::Background,
+                TerminalBodyLayer::Glyph,
+                TerminalBodyLayer::Decoration,
+            ]
         );
     }
 

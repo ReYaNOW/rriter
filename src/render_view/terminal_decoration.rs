@@ -1,7 +1,9 @@
 //! Geometry of terminal text decorations: SGR underline styles, strikethrough and the
 //! hovered-link underline. Everything here is pure; the renderer turns the output into quads.
 
-use ronsole_term::{CellFlags, LinkTarget, UnderlineStyle};
+use super::terminal_colors::{rgb_to_rgba, terminal_cell_render_colors};
+use crate::renderer::Renderer;
+use ronsole_term::{Cell, CellFlags, LinkTarget, TermPalette, UnderlineStyle};
 use std::ops::Range;
 
 /// Upper bound on quads one cell can produce: a double underline or a single underline plus strike.
@@ -215,6 +217,96 @@ pub(crate) fn terminal_row_ranges_contain(
     ranges
         .get(*next)
         .is_some_and(|(_, range)| range.start <= col)
+}
+
+/// Whether a cell is concealed (SGR 8) or hidden by the host. Such a cell gets neither glyph
+/// nor decoration.
+#[inline]
+pub(crate) fn terminal_cell_is_hidden(cell: &Cell) -> bool {
+    let flags = cell.flags();
+    flags.contains(CellFlags::CONCEAL) || flags.contains(CellFlags::HOST_HIDDEN)
+}
+
+impl Renderer {
+    /// Pushes the decorations of one visible row, drawn after the row's glyphs. `row_index` is the
+    /// grid row index used for the hovered-link lookup and `draw_y` the top edge of the row.
+    /// Cells without a decoration return before any colour work.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn push_terminal_row_decorations(
+        &mut self,
+        row: &[Cell],
+        row_index: usize,
+        draw_x: f32,
+        draw_y: f32,
+        char_w: f32,
+        char_h: f32,
+        scale: f32,
+        palette: &TermPalette,
+        hovered: Option<&(LinkTarget, u64)>,
+        generation: u64,
+    ) {
+        let baseline_y = (draw_y + self.baseline_offset * scale).round();
+        let row_bottom = (draw_y + char_h).floor();
+        let x_height = self.terminal_regular_x_height_at_size(self.final_text_pixel_size(scale));
+        let hovered_ranges = terminal_hovered_link_row_ranges(hovered, generation, row_index);
+        // Columns are visited in increasing order, so the hovered ranges are walked once per row.
+        let mut link_next = 0usize;
+        for (col, cell) in row.iter().enumerate() {
+            let hovered_cell = terminal_row_ranges_contain(hovered_ranges, &mut link_next, col);
+            if terminal_cell_is_hidden(cell) {
+                continue;
+            }
+            let underline = cell.underline();
+            let plain_underline = matches!(underline, UnderlineStyle::None);
+            let strike = cell.flags().contains(CellFlags::STRIKE);
+            if plain_underline && !strike && !hovered_cell {
+                continue;
+            }
+            let (fg, _) = terminal_cell_render_colors(cell, palette);
+            // A hovered link gets a single underline in the cell colour unless the cell already
+            // has its own underline style.
+            let (underline, underline_color) = if hovered_cell && plain_underline {
+                (UnderlineStyle::Single, fg)
+            } else {
+                let color = cell
+                    .underline_color()
+                    .map_or(fg, |color| rgb_to_rgba(palette.rgb(color)));
+                (underline, color)
+            };
+            let decoration = CellDecoration {
+                underline,
+                underline_color,
+                strike,
+                strike_color: fg,
+            };
+            let (quads, len) = terminal_decoration_quads(
+                &decoration,
+                draw_x,
+                col,
+                char_w,
+                baseline_y,
+                row_bottom,
+                x_height,
+                scale,
+            );
+            for quad in &quads[..len] {
+                match quad.kind {
+                    DecorationKind::Solid => {
+                        self.push_rect(quad.x, quad.y, quad.w, quad.h, quad.color);
+                    }
+                    DecorationKind::Wave => self.push_decoration_quad(
+                        quad.x, quad.y, quad.w, quad.h, quad.u, quad.uw, quad.color, 1.0,
+                    ),
+                    DecorationKind::Dots => self.push_decoration_quad(
+                        quad.x, quad.y, quad.w, quad.h, quad.u, quad.uw, quad.color, 2.0,
+                    ),
+                    DecorationKind::Dashes => self.push_decoration_quad(
+                        quad.x, quad.y, quad.w, quad.h, quad.u, quad.uw, quad.color, 3.0,
+                    ),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

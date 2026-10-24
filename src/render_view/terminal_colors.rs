@@ -17,7 +17,7 @@ fn theme_rgb(color: [f32; 4]) -> Rgb {
 }
 
 #[inline(always)]
-fn rgb_to_rgba(color: Rgb) -> [f32; 4] {
+pub(crate) fn rgb_to_rgba(color: Rgb) -> [f32; 4] {
     [
         f32::from(color.r) / 255.0,
         f32::from(color.g) / 255.0,

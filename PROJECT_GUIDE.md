@@ -1780,6 +1780,7 @@ Rendering:
 * `src/render_view/scrollbar_widget.rs` -> the one scrollbar widget: `Scrollbar` (style preset + axis + lane + extent) -> `geometry` (pixel-rounded, shared by render and input), `Renderer::draw_scrollbar` (paint + optional hitbox, returns geometry), `ScrollbarGeometry::{press_target, drag_target}`; App-side wrappers `app::mouse::{press_scrollbar, drag_scrollbar}`. New or changed scrollbars go through it. Hot path.
 * `src/render_view/sticky.rs` -> sticky headers.
 * `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.
+* `src/render_view/terminal_decoration.rs` -> terminal text decorations: underline/strike/hovered-link geometry, per-row decoration pass, styled face selection. Hot path.
 * `src/render_view/lsp_ui.rs` -> LSP server panel/action menu visuals.
 * `src/render_view/hover_overlays.rs` -> squiggles + hover popup routing.
 * `src/render_view/ui/hover_widget.rs` -> hover popup layout/render/selection/scroll.
