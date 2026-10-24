@@ -30,6 +30,22 @@ pub(crate) fn resize_terminal_grid(grid: &mut Term, cols: usize, rows: usize) ->
     true
 }
 
+/// Replays the held mode 2026 output on `grid` with the same sink the parser thread uses, so
+/// replies, titles and host events produced by the replay are not dropped.
+fn flush_expired_sync_on_grid(
+    grid: &Mutex<Term>,
+    title_cache: &crate::app::terminal_process::TerminalTitleCache,
+    reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    host_events: &crate::app::terminal_host_events::HostEventsSink,
+    now: Instant,
+) -> bool {
+    let mut sink =
+        crate::app::terminal_process::RriterTermSink::new(Some(title_cache.clone()), reply_tx)
+            .with_host_events(host_events.clone());
+    let mut grid = lock_terminal_grid(grid);
+    crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now)
+}
+
 /// Builds a `Term` with the production config (scrollback, identity) and a fixed
 /// palette, for tests that need a grid without spawning a process.
 #[cfg(test)]
@@ -207,12 +223,10 @@ impl Terminal {
     }
 
     /// Replays a mode 2026 batch whose hold deadline has passed; returns whether the grid changed.
-    /// Replies are not sent from here: the parser thread owns the PTY reply queue.
+    /// Replies go to the same PTY queue as the parser thread, so the replay keeps their order.
     pub(crate) fn flush_expired_sync(&self, now: Instant) -> bool {
-        let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None)
-            .with_host_events(self.host_events.clone());
-        let mut grid = lock_terminal_grid(&self.grid);
-        crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now)
+        let reply_tx = self.process.as_ref().map(|process| process.reply_sender());
+        flush_expired_sync_on_grid(&self.grid, &self.title_cache, reply_tx, &self.host_events, now)
     }
 
     pub(crate) fn write_display_title(&self, output: &mut String) {
@@ -330,5 +344,35 @@ mod tests {
         term.advance("日本e\u{301}".as_bytes(), Instant::now(), &mut sink);
         term.set_selection(Some((0, 0, 4, 0)));
         assert_eq!(terminal_selection_text(&term).as_deref(), Some("日本e\u{301}"));
+    }
+
+    #[test]
+    fn reply_from_flush_reaches_writer() {
+        let grid = Mutex::new(test_term(20, 2));
+        let title_cache = Arc::new(Mutex::new(
+            crate::app::terminal_process::TerminalTitleState::new("shell".to_string()),
+        ));
+        let host_events = crate::app::terminal_host_events::HostEventsSink::new(
+            crate::ui_waker::UiWaker::counting(),
+        );
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let now = Instant::now();
+        // The parser thread holds this batch without a reply queue; the CPR is produced only by the replay.
+        let mut parser_sink = RriterTermSink::new(None, None);
+        lock_terminal_grid(&grid).advance(b"\x1b[?2026h\x1b[6n", now, &mut parser_sink);
+        let deadline = lock_terminal_grid(&grid)
+            .sync_deadline()
+            .expect("mode 2026 holds the output");
+        assert!(reply_rx.try_recv().is_err());
+
+        assert!(flush_expired_sync_on_grid(
+            &grid,
+            &title_cache,
+            Some(reply_tx),
+            &host_events,
+            deadline
+        ));
+        // Cursor at home: CPR reply is CSI row;col R with 1-based coordinates (xterm ctlseqs).
+        assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[1;1R".to_vec()));
     }
 }

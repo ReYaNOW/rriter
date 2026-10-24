@@ -2,9 +2,11 @@
 //! routing (never to the PTY, even under mouse tracking) and the URI scheme matrix. The
 //! expected requests come from the link text and the task matrix, not from the app code.
 
-use crate::app::terminal::{advance_test_output, lock_terminal_grid};
+use crate::app::terminal::lock_terminal_grid;
 use crate::headless::HeadlessSession;
-use crate::headless::tests_support::{dump, run_script, shell_failed, terminal_session, ui_rect};
+use crate::headless::tests_support::{
+    dump, feed, run_script, shell_failed, terminal_session, ui_rect, written,
+};
 use crate::platform::ExternalRequest;
 use crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
 use winit::keyboard::ModifiersState;
@@ -12,19 +14,6 @@ use winit::keyboard::ModifiersState;
 fn run(session: &mut HeadlessSession, script: &str) {
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-}
-
-/// Feeds bytes straight into the grid of tab `index`.
-fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
-    let term = &session.app.ide_panel.terminals[index];
-    let mut grid = lock_terminal_grid(&term.grid);
-    advance_test_output(&mut grid, bytes);
-}
-
-/// Takes the bytes written to the PTY of tab `index` since the previous call.
-fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
-    let term = &session.app.ide_panel.terminals[index];
-    std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
 }
 
 /// Clears the visible grid and writes `label` as an OSC 8 hyperlink to `uri`, so the URI is exact.
@@ -96,6 +85,46 @@ fn ctrl_click_with_tracking_not_sent_to_pty() {
         session.app.external_requests.take(),
         Some(ExternalRequest::OpenUrl("https://a".to_string()))
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ctrl_right_click_over_link_reaches_pty_under_tracking() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-links-right") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    feed(&session, 0, &link_bytes("https://a"));
+    let (x, y) = point_for_visible_cell(&mut session, 2, 0);
+    written(&session, 0);
+    session.app.external_requests.take();
+    session.app.modifiers = ModifiersState::CONTROL;
+    run(&mut session, &format!("mouse_move {x} {y}\nclick right down\nclick right up\n"));
+    session.app.modifiers = ModifiersState::empty();
+    // SGR button code 2 is the right button; only a left press on a link is opened.
+    assert_eq!(written(&session, 0), b"\x1b[<2;3;1M\x1b[<2;3;1m");
+    assert_eq!(session.app.external_requests.take(), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ctrl_over_link_keeps_pty_drag_going() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-links-drag") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    feed(&session, 0, &link_bytes("https://a"));
+    let (x0, y0) = point_for_visible_cell(&mut session, 0, 1);
+    let (x1, y1) = point_for_visible_cell(&mut session, 2, 0);
+    written(&session, 0);
+    session.app.external_requests.take();
+    run(&mut session, &format!("mouse_move {x0} {y0}\nclick left down\n"));
+    session.app.modifiers = ModifiersState::CONTROL;
+    run(&mut session, &format!("mouse_move {x1} {y1}\nclick left up\n"));
+    session.app.modifiers = ModifiersState::empty();
+    // SGR: left press at column 1 row 2; motion with left held (32 + 0) at column 3 row 1; left release.
+    assert_eq!(written(&session, 0), b"\x1b[<0;1;2M\x1b[<32;3;1M\x1b[<0;3;1m");
+    assert_eq!(session.app.external_requests.take(), None);
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -7,14 +7,24 @@ use crate::app::terminal::{Terminal, lock_terminal_grid};
 use ronsole_term::LinkTarget;
 
 impl Terminal {
-    /// Link under `cell` = `(column, absolute row)`, with the grid generation it was resolved against.
-    /// The search covers scrollback and the visible area, so a link that starts in history is reported whole.
+    /// Link under `cell` = `(column, absolute row)` for the hover, with the grid generation it was resolved against.
+    /// Cells are collected within one viewport height of `cell` on each side, which contains every
+    /// visible row, so the underline is complete on screen without walking all of scrollback.
     pub(crate) fn resolve_link(&self, cell: (usize, usize)) -> Option<(LinkTarget, u64)> {
         let (col, row) = cell;
         let grid = lock_terminal_grid(&self.grid);
-        let rows = 0..grid.scrollback_len() + grid.rows();
-        let link = grid.link_at(row, col, rows)?;
+        let height = grid.rows();
+        let link = grid.link_at(row, col, row.saturating_sub(height)..row + height + 1)?;
         Some((link, grid.content_generation()))
+    }
+
+    /// URI of the link under `cell`, for a click or a tracking decision. The URI does not depend on
+    /// the rows searched for cells, so only the cell's own row is walked.
+    pub(crate) fn link_uri_at(&self, cell: (usize, usize)) -> Option<String> {
+        let (col, row) = cell;
+        let grid = lock_terminal_grid(&self.grid);
+        let link = grid.link_at(row, col, row..row + 1)?;
+        Some(link.uri.to_string())
     }
 
     /// Whether the stored hovered link is still current for the grid and covers `cell`,

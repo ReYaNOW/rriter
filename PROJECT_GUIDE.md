@@ -1504,6 +1504,7 @@ Root:
 * `src/headless/ui_tests_pickers.rs` -> headless UI tests for API Client OpenAPI import, Welcome Open File/cancel, Settings IDE workspace picker, and Save As.
 * `src/headless/ui_tests_scrollbars_panels.rs` -> headless UI tests for Git workspace and API Mock combined editor scrollbar wheel/drag behavior.
 * `src/headless/ui_tests_terminal_scrollbar.rs` -> headless UI test for clicking the terminal scrollbar track to return toward the bottom.
+* `src/headless/ui_tests_terminal_sync.rs` -> headless UI tests for the mode 2026 hold deadline: event-loop wait, merged tab deadlines, replay while render is suspended, and the redraw request at the deadline.
 * `src/headless/ui_tests_problem_url.rs` -> headless UI test for opening a diagnostic URL through the external request log.
 * `src/headless/ui_tests_deleted_tab.rs` -> headless UI tests for deleting/recreating files while their clean or dirty tabs remain open.
 * `src/headless/ui_tests_editor_search_center.rs` -> headless UI tests for keeping editor search matches centered at 2560×1440 and 1280×720.

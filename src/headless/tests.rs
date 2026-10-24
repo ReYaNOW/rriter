@@ -2,6 +2,7 @@
 //! shared fixtures (`tests_support`) later headless tasks build on.
 
 pub(crate) mod tests_support {
+    use crate::app::terminal::{advance_test_output, lock_terminal_grid};
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
     use crate::platform::{self, ToolKind};
@@ -12,6 +13,19 @@ pub(crate) mod tests_support {
     use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
+
+    /// Feeds bytes straight into the grid of tab `index`.
+    pub(crate) fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
+        let term = &session.app.ide_panel.terminals[index];
+        let mut grid = lock_terminal_grid(&term.grid);
+        advance_test_output(&mut grid, bytes);
+    }
+
+    /// Takes the bytes written to the PTY of tab `index` since the previous call.
+    pub(crate) fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
+        let term = &session.app.ide_panel.terminals[index];
+        std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
+    }
 
     pub(crate) fn install_fake_ty(
         session: &mut HeadlessSession,

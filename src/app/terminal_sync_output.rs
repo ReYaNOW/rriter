@@ -34,18 +34,21 @@ pub(crate) fn receive_terminal_chunk(
         let Some(deadline) = deadline else {
             return rx.recv().ok();
         };
-        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(chunk) => return Some(chunk),
-            Err(RecvTimeoutError::Disconnected) => return None,
-            Err(RecvTimeoutError::Timeout) => {
-                let changed = {
-                    let mut guard = grid.lock().ok()?;
-                    flush_expired_terminal_output(&mut guard, sink, Instant::now())
-                };
-                if changed {
-                    redraw();
-                }
+        // A chunk that is already queued must not skip the deadline: while output keeps
+        // arriving, `recv_timeout` returns at once and the hold would never end.
+        if deadline > Instant::now() {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(chunk) => return Some(chunk),
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {}
             }
+        }
+        let changed = {
+            let mut guard = grid.lock().ok()?;
+            flush_expired_terminal_output(&mut guard, sink, Instant::now())
+        };
+        if changed {
+            redraw();
         }
     }
 }
@@ -87,6 +90,8 @@ pub(crate) fn advance_terminal_output_batch(
     let mut grid_changed = false;
     let mut new_deadline = false;
     for chunk in chunks {
+        // A long batch can pass the hold deadline; replay before the chunk joins the held bytes.
+        grid_changed |= grid.flush_expired(now, sink).grid_changed;
         let outcome = grid.advance(chunk, now, sink);
         grid_changed |= outcome.grid_changed;
         new_deadline |= outcome.new_deadline;
@@ -105,6 +110,7 @@ mod tests {
     use crate::app::terminal_process::{TerminalTitleState, install_terminal_io_threads};
     use crate::ui_waker::UiWaker;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     fn screen_text(grid: &Term) -> String {
@@ -132,6 +138,64 @@ mod tests {
         assert!(flush_expired_terminal_output(&mut grid, &mut sink, deadline));
         assert!(screen_text(&grid).contains("held"));
         assert_eq!(grid.sync_deadline(), None);
+    }
+
+    /// Yields one held batch, then output that never pauses until `stop` is set.
+    struct ContinuousOutput {
+        first: Option<Vec<u8>>,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl std::io::Read for ContinuousOutput {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if let Some(first) = self.first.take() {
+                let len = first.len().min(buf.len());
+                buf[..len].copy_from_slice(&first[..len]);
+                return Ok(len);
+            }
+            if self.stop.load(Ordering::Acquire) {
+                return Ok(0);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+            let line = b"tick\r\n";
+            buf[..line.len()].copy_from_slice(line);
+            Ok(line.len())
+        }
+    }
+
+    #[test]
+    fn sync_hold_flushed_during_continuous_output() {
+        let grid = Arc::new(Mutex::new(test_term(40, 4)));
+        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(std::io::sink())));
+        let title_cache = Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let stop = Arc::new(AtomicBool::new(false));
+        // The hold never ends by reset, and the stream never gaps: only the deadline can replay it.
+        install_terminal_io_threads(
+            &grid,
+            Box::new(ContinuousOutput {
+                first: Some(b"\x1b[?2026hheld-marker\r\n".to_vec()),
+                stop: stop.clone(),
+            }),
+            writer,
+            None,
+            title_cache,
+            HostEventsSink::new(UiWaker::counting()),
+            (reply_tx, reply_rx),
+        )
+        .expect("terminal io threads spawn");
+
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = screen_text(&grid.lock().expect("grid lock"));
+            if text.contains("held-marker") {
+                break;
+            }
+            assert!(Instant::now() < until, "held output never replayed: {text:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        stop.store(true, Ordering::Release);
     }
 
     #[test]

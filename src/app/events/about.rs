@@ -327,7 +327,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
 /// Serves every terminal tab: applies the clipboard text and OSC 7 directory the parser stored,
 /// and replays mode 2026 output whose hold deadline has passed. Returns whether a frame is needed.
 /// Called after `UiWaker::begin_drain`, so an event stored during this pass posts a new wake.
-fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) -> bool {
+pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) -> bool {
     let mut needs_redraw = false;
     let mut clipboard = None;
     for terminal in app.ide_panel.terminals.iter_mut() {

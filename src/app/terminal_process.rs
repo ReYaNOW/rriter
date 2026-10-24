@@ -142,6 +142,8 @@ pub(crate) struct TerminalProcess {
     title_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     title_worker: Option<JoinHandle<()>>,
     finished: bool,
+    /// Clone of the PTY reply queue sender, so a replay on the UI thread queues replies in order.
+    reply_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
 }
 
 impl TerminalProcess {
@@ -222,6 +224,7 @@ impl TerminalProcess {
         };
         let reply_channel =
             std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let reply_tx = reply_channel.0.clone();
         if let Err(error) = install_terminal_io_threads(
             &grid,
             reader,
@@ -253,9 +256,15 @@ impl TerminalProcess {
                 title_stop_tx,
                 title_worker,
                 finished: false,
+                reply_tx,
             },
             shell,
         ))
+    }
+
+    /// Sender of the PTY reply queue that the writer thread drains.
+    pub(crate) fn reply_sender(&self) -> std::sync::mpsc::SyncSender<Vec<u8>> {
+        self.reply_tx.clone()
     }
 
     pub(crate) fn write_input(&self, bytes: &[u8]) -> io::Result<()> {

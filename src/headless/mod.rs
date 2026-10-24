@@ -148,6 +148,8 @@ mod ui_tests_terminal_mouse;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_terminal_scrollbar;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_terminal_sync;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tree_ops;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tree_trash;

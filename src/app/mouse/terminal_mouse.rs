@@ -101,9 +101,10 @@ pub(crate) fn terminal_mouse_report(
 
 impl App {
     /// Active terminal index when the pointer is over its body, the panel is focused,
-    /// and the application enabled mouse tracking. Tracking takes every pointer event, except
-    /// the link modifier over a link: that stays local (see `terminal_link_at_pointer`).
-    fn terminal_tracking_target(&mut self, mx: f32, my: f32) -> Option<usize> {
+    /// and the application enabled mouse tracking. Tracking takes every pointer event, including
+    /// the link modifier over a link: a left press there is opened before this check runs
+    /// (see `forward_terminal_mouse_button`), and any other event belongs to the PTY.
+    fn terminal_tracking_target(&self, mx: f32, my: f32) -> Option<usize> {
         if !self.is_ide_mode
             || !self.ide_panel.is_open(PanelId::Terminal)
             || !self.ide_panel.terminal_focused
@@ -114,10 +115,7 @@ impl App {
         let active = self.ide_panel.active_terminal;
         let term = self.ide_panel.terminals.get(active)?;
         let tracking = lock_terminal_grid(&term.grid).mouse_tracking().enabled();
-        if !tracking || self.terminal_link_at_pointer(mx, my).is_some() {
-            return None;
-        }
-        Some(active)
+        tracking.then_some(active)
     }
 
     /// Whether the link modifier (Ctrl, or Command on macOS) is held.
@@ -138,7 +136,7 @@ impl App {
         }
         let cell = self.terminal_mouse_cell(mx, my)?;
         let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
-        term.resolve_link(cell).map(|(link, _)| link.uri.to_string())
+        term.link_uri_at(cell)
     }
 
     /// Re-resolves the hovered link of the active terminal for the pointer. The link is cleared
