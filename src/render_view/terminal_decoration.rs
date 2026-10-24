@@ -98,7 +98,8 @@ pub(crate) fn terminal_underline_top(
 /// Builds the rectangles of `decoration` for the cell at column `col`.
 ///
 /// `baseline_y` is the rounded baseline of the row and `row_bottom` the integer bottom edge of
-/// the row. `x_height` is the Regular face x-height in pixels, `scale` the text scale factor.
+/// the row. `x_height` is the Regular face x-height in pixels, `ui_scale` the window scale factor
+/// whose rounded value is the line thickness.
 /// Every coordinate is an integer except the pattern phase.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn terminal_decoration_quads(
@@ -109,9 +110,9 @@ pub(crate) fn terminal_decoration_quads(
     baseline_y: f32,
     row_bottom: f32,
     x_height: f32,
-    scale: f32,
+    ui_scale: f32,
 ) -> ([DecorationQuad; DECORATION_MAX_QUADS], usize) {
-    let thickness = scale.round().max(1.0);
+    let thickness = ui_scale.round().max(1.0);
     let text_x = terminal_decoration_phase(draw_x, col, char_w);
     let x = text_x.round();
     let next_x = terminal_decoration_phase(draw_x, col + 1, char_w).round();
@@ -227,9 +228,45 @@ pub(crate) fn terminal_cell_is_hidden(cell: &Cell) -> bool {
     flags.contains(CellFlags::CONCEAL) || flags.contains(CellFlags::HOST_HIDDEN)
 }
 
+/// Decoration of one cell, or `None` when the cell draws none. A hovered link gets a single
+/// underline; strikethrough and the underline colour are kept.
+#[inline]
+pub(crate) fn terminal_cell_decoration(
+    cell: &Cell,
+    palette: &TermPalette,
+    hovered: bool,
+) -> Option<CellDecoration> {
+    if terminal_cell_is_hidden(cell) {
+        return None;
+    }
+    let strike = cell.flags().contains(CellFlags::STRIKE);
+    if !hovered && !strike && matches!(cell.underline(), UnderlineStyle::None) {
+        return None;
+    }
+    // A hovered link replaces any underline style with a single one; the colour is the cell's
+    // underline colour when it has one, the rendered foreground otherwise.
+    let underline = if hovered {
+        UnderlineStyle::Single
+    } else {
+        cell.underline()
+    };
+    let (fg, _) = terminal_cell_render_colors(cell, palette);
+    let underline_color = cell
+        .underline_color()
+        .map_or(fg, |color| rgb_to_rgba(palette.rgb(color)));
+    Some(CellDecoration {
+        underline,
+        underline_color,
+        strike,
+        strike_color: fg,
+    })
+}
+
 impl Renderer {
     /// Pushes the decorations of one visible row, drawn after the row's glyphs. `row_index` is the
     /// grid row index used for the hovered-link lookup and `draw_y` the top edge of the row.
+    /// `scale` is the text scale that places the baseline, `ui_scale` the window scale that sets
+    /// the line thickness, and `cols` bounds the walk to the grid width.
     /// Cells without a decoration return before any colour work.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn push_terminal_row_decorations(
@@ -241,6 +278,8 @@ impl Renderer {
         char_w: f32,
         char_h: f32,
         scale: f32,
+        ui_scale: f32,
+        cols: usize,
         palette: &TermPalette,
         hovered: Option<&(LinkTarget, u64)>,
         generation: u64,
@@ -251,33 +290,10 @@ impl Renderer {
         let hovered_ranges = terminal_hovered_link_row_ranges(hovered, generation, row_index);
         // Columns are visited in increasing order, so the hovered ranges are walked once per row.
         let mut link_next = 0usize;
-        for (col, cell) in row.iter().enumerate() {
+        for (col, cell) in row.iter().take(cols).enumerate() {
             let hovered_cell = terminal_row_ranges_contain(hovered_ranges, &mut link_next, col);
-            if terminal_cell_is_hidden(cell) {
+            let Some(decoration) = terminal_cell_decoration(cell, palette, hovered_cell) else {
                 continue;
-            }
-            let underline = cell.underline();
-            let plain_underline = matches!(underline, UnderlineStyle::None);
-            let strike = cell.flags().contains(CellFlags::STRIKE);
-            if plain_underline && !strike && !hovered_cell {
-                continue;
-            }
-            let (fg, _) = terminal_cell_render_colors(cell, palette);
-            // A hovered link gets a single underline in the cell colour unless the cell already
-            // has its own underline style.
-            let (underline, underline_color) = if hovered_cell && plain_underline {
-                (UnderlineStyle::Single, fg)
-            } else {
-                let color = cell
-                    .underline_color()
-                    .map_or(fg, |color| rgb_to_rgba(palette.rgb(color)));
-                (underline, color)
-            };
-            let decoration = CellDecoration {
-                underline,
-                underline_color,
-                strike,
-                strike_color: fg,
             };
             let (quads, len) = terminal_decoration_quads(
                 &decoration,
@@ -287,7 +303,7 @@ impl Renderer {
                 baseline_y,
                 row_bottom,
                 x_height,
-                scale,
+                ui_scale,
             );
             for quad in &quads[..len] {
                 match quad.kind {
@@ -312,6 +328,21 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render_view::terminal_colors::terminal_palette;
+    use crate::renderer::Theme;
+    use crate::theme::ThemeId;
+    use ronsole_term::{Term, TermConfig, TermIdentity, TermSink, TerminalColor};
+    use std::time::Instant;
+
+    /// Sink that drops replies, titles and clipboard text; the cell tests need only the grid.
+    struct NullSink;
+
+    impl TermSink for NullSink {
+        fn reply(&mut self, _bytes: &[u8]) {}
+        fn title(&mut self, _title: &str) {}
+        fn clipboard_set(&mut self, _text: String) {}
+        fn working_directory(&mut self, _host: &str, _path: &[u8]) {}
+    }
 
     const WHITE: [f32; 4] = [1.0; 4];
 
@@ -477,19 +508,130 @@ mod tests {
         assert!(terminal_row_ranges_contain(row_two, &mut next, 7));
     }
 
+    /// First cell of `bytes` after parsing them with the real terminal, so SGR sequences such as
+    /// 58 (underline colour) are applied.
+    fn parsed_cell(bytes: &[u8]) -> Cell {
+        let theme = Theme::for_id(ThemeId::Dracula, [0.0; 4]);
+        let mut term = Term::new(TermConfig {
+            cols: 4,
+            rows: 1,
+            scrollback_lines: 0,
+            identity: TermIdentity {
+                name: "rriter",
+                version: env!("CARGO_PKG_VERSION"),
+            },
+            palette: terminal_palette(&theme),
+        });
+        term.advance(bytes, Instant::now(), &mut NullSink);
+        term.row(0).expect("visible row")[0].clone()
+    }
+
+    fn assert_rgb_close(actual: [f32; 4], expected: [f32; 3]) {
+        for channel in 0..3 {
+            assert_eq!(
+                (actual[channel] * 255.0).round() as u8,
+                (expected[channel] * 255.0).round() as u8,
+                "channel {channel}"
+            );
+        }
+    }
+
+    #[test]
+    fn decoration_thickness_follows_ui_scale() {
+        // Thickness is max(1, round(ui_scale)), the rule of the brief.
+        for (ui_scale, expected) in [(1.0_f32, 1.0), (1.333, 1.0), (1.5, 2.0), (1.75, 2.0), (2.0, 2.0)] {
+            let (quads, len) = terminal_decoration_quads(
+                &decoration(UnderlineStyle::Single, false),
+                0.0,
+                0,
+                8.0,
+                28.0,
+                40.0,
+                9.9,
+                ui_scale,
+            );
+            assert_eq!(len, 1);
+            assert_eq!(quads[0].h, expected, "ui_scale {ui_scale}");
+        }
+    }
+
     #[test]
     fn decoration_color_after_inverse_and_dim() {
-        // The colour is whatever the caller resolved (underline colour or foreground after inverse
-        // and dim); the geometry must carry it unchanged.
-        let color = [0.2, 0.4, 0.6, 1.0];
-        let deco = CellDecoration {
-            underline: UnderlineStyle::Single,
-            underline_color: color,
-            strike: false,
-            strike_color: WHITE,
-        };
-        let (quads, len) = terminal_decoration_quads(&deco, 0.0, 0, 8.0, 28.0, 40.0, 9.9, 1.0);
-        assert_eq!(len, 1);
-        assert_eq!(quads[0].color, color);
+        let theme = Theme::for_id(ThemeId::Dracula, [0.0; 4]);
+        let palette = terminal_palette(&theme);
+        // INVERSE paints the foreground in the background colour, ANSI 4 here.
+        let inverse = parsed_cell(b"\x1b[31;44;7;4mx");
+        let deco = terminal_cell_decoration(&inverse, &palette, false).expect("underlined");
+        assert_rgb_close(deco.underline_color, [theme.terminal[4][0], theme.terminal[4][1], theme.terminal[4][2]]);
+        assert_eq!(deco.strike_color, deco.underline_color);
+
+        // DIM scales the rendered foreground RGB by 0.66 (Ronsole decoration test of the same name).
+        let dim = parsed_cell(b"\x1b[2;4;38;2;150;120;90mx");
+        let deco = terminal_cell_decoration(&dim, &palette, false).expect("underlined");
+        assert_rgb_close(deco.underline_color, [150.0 * 0.66 / 255.0, 120.0 * 0.66 / 255.0, 90.0 * 0.66 / 255.0]);
+        assert_eq!(deco.strike_color, deco.underline_color);
+    }
+
+    #[test]
+    fn underline_color_overrides_fg() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        let cell = parsed_cell(b"\x1b[4;58;2;10;20;30mx");
+        let deco = terminal_cell_decoration(&cell, &palette, false).expect("underlined");
+        assert_rgb_close(deco.underline_color, [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0]);
+        assert_ne!(deco.strike_color, deco.underline_color);
+    }
+
+    #[test]
+    fn hovered_curly_becomes_single() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        let curly = Cell::new_for_test(
+            'x',
+            TerminalColor::default_foreground(),
+            TerminalColor::default_background(),
+            CellFlags::empty(),
+            UnderlineStyle::Curly,
+        );
+        let plain = terminal_cell_decoration(&curly, &palette, false).expect("curly");
+        assert_eq!(plain.underline, UnderlineStyle::Curly);
+        let hovered = terminal_cell_decoration(&curly, &palette, true).expect("hovered");
+        assert_eq!(hovered.underline, UnderlineStyle::Single);
+    }
+
+    #[test]
+    fn hovered_link_uses_underline_color_not_fg() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        let cell = parsed_cell(b"\x1b[58;2;10;20;30mx");
+        let deco = terminal_cell_decoration(&cell, &palette, true).expect("hovered");
+        assert_eq!(deco.underline, UnderlineStyle::Single);
+        assert_rgb_close(deco.underline_color, [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0]);
+    }
+
+    #[test]
+    fn concealed_and_host_hidden_cells_draw_nothing() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        for flag in [CellFlags::CONCEAL, CellFlags::HOST_HIDDEN] {
+            let cell = Cell::new_for_test(
+                'x',
+                TerminalColor::default_foreground(),
+                TerminalColor::default_background(),
+                flag,
+                UnderlineStyle::Single,
+            );
+            assert!(terminal_cell_decoration(&cell, &palette, true).is_none());
+        }
+    }
+
+    #[test]
+    fn plain_cell_without_hover_has_no_decoration() {
+        let palette = terminal_palette(&Theme::for_id(ThemeId::Dracula, [0.0; 4]));
+        let cell = Cell::new_for_test(
+            'x',
+            TerminalColor::default_foreground(),
+            TerminalColor::default_background(),
+            CellFlags::empty(),
+            UnderlineStyle::None,
+        );
+        assert!(terminal_cell_decoration(&cell, &palette, false).is_none());
+        assert!(terminal_cell_decoration(&cell, &palette, true).is_some());
     }
 }

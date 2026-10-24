@@ -769,6 +769,8 @@ impl Renderer {
                                 char_w,
                                 char_h,
                                 term_scale,
+                                s,
+                                grid.cols(),
                                 &palette,
                                 term.hovered_link.as_ref(),
                                 grid.content_generation(),
