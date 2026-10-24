@@ -5,22 +5,14 @@
 
 use crate::app::events::about;
 use crate::app::events::host_loop::HostLoop;
-use crate::app::terminal::{advance_test_output, lock_terminal_grid};
 use crate::headless::HeadlessSession;
 use crate::headless::frame::take_redraw_request;
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, shell_failed, terminal_session, terminal_text, wait_until,
+    click_ui, dump, feed, has_ui, shell_failed, terminal_session, terminal_text, wait_until,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event_loop::ControlFlow;
-
-/// Feeds bytes straight into the grid of tab `index`, as the PTY reader does.
-fn feed(session: &HeadlessSession, index: usize, bytes: &[u8]) {
-    let term = &session.app.ide_panel.terminals[index];
-    let mut grid = lock_terminal_grid(&term.grid);
-    advance_test_output(&mut grid, bytes);
-}
 
 /// Shell tab 0 and a second shell tab 1; tab 0 is active, so tab 1 is the background tab.
 fn two_terminal_session(name: &str) -> Option<(PathBuf, HeadlessSession)> {
