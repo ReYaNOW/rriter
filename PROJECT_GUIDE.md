@@ -271,7 +271,7 @@ src/app/terminal_process.rs
 src/render_view/terminal_ui.rs
 ```
 
-Integrated terminal uses PTY and Alacritty terminal grid.
+Integrated terminal uses PTY and the `ronsole-term` crate for the terminal core (protocol parsing, grid, key/mouse encoders); RRiter keeps the host side (process, rendering, input, hyperlinks, platform).
 
 Important ideas:
 
@@ -279,7 +279,7 @@ Important ideas:
 * Shell selection is platform-aware: PowerShell/cmd on Windows, the configured shell with zsh fallback on macOS, and the configured shell with bash/sh fallback on Linux.
 * PTY spawn errors are rendered in the terminal instead of panicking.
 * I/O thread reads terminal output in batches.
-* Grid is shared with renderer.
+* Grid (`ronsole-term` type) is shared with renderer.
 * Render path reads visible cells and reserves symmetric top/bottom text padding so a full grid never clips the first row.
 * Terminal scroll geometry is shared by rendering, wheel clamping, selection hit-testing, track clicks, and thumb dragging; the thumb stays inset from the focus frame.
 * Terminal focused state captures keyboard input.

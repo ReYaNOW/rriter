@@ -281,7 +281,9 @@ Before new UI action:
 * Render perf bug -> `src/render_view.rs`, `src/render_view/core_text.rs`, `src/render_view/editor_text_layer.rs`, `src/renderer.rs`.
 * Syntax bug -> `src/highlighter.rs`, `src/highlighter_runtime.rs`, `src/queries.rs`, `src/languages/*`.
 * LSP hover bug -> `src/lsp.rs`, `src/lsp/hover.rs`, `src/lsp/protocol.rs`, `src/app/events/source_hover.rs`, `src/languages/python.rs`, hover UI.
-* Terminal bug -> `src/app/terminal.rs`, `src/render_view/terminal_ui.rs`, keyboard routing.
+* Terminal bug -> `src/app/terminal.rs`, `src/render_view/terminal_ui.rs`, keyboard routing; protocol, grid, and encoders are in the `ronsole-term` crate (see below).
 * File tree bug -> `src/app/file_tree.rs`, `src/app/mouse/input.rs`, explorer render, `src/app/ui_handlers.rs`.
+
+Terminal core: the `ronsole-term` crate (Ronsole project, pinned by git rev in `Cargo.toml`) owns the protocol, grid, and key/mouse encoders. Changes to protocol or grid behaviour are made in the Ronsole repository first, then the pinned rev in `Cargo.toml` is raised here. RRiter keeps only the host side: process and PTY, rendering, input routing, hyperlinks, and platform integration.
 
 Architecture and full file index: `PROJECT_GUIDE.md`.
