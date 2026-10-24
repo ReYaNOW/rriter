@@ -37,6 +37,13 @@ fn written(session: &HeadlessSession, index: usize) -> Vec<u8> {
     std::mem::take(&mut *crate::platform::lock_recover(&term.written_input))
 }
 
+/// Clicks tab `index` and waits until it is the active terminal, so tracking set on it is the one the pointer reaches.
+fn activate_terminal_tab(session: &mut HeadlessSession, index: usize) {
+    click_ui(session, &format!("TerminalTab({index})"));
+    wait_until(session, 5000, "terminal tab activated", |session| session.app.ide_panel.active_terminal == index);
+    assert_eq!(session.app.ide_panel.active_terminal, index);
+}
+
 fn char_metrics(session: &HeadlessSession) -> (f32, f32, f32) {
     let renderer = session.app.renderer.as_ref().expect("headless renderer");
     let char_w = renderer.ascii_advances['A' as usize].max(1.0) * TERMINAL_TEXT_SCALE;
@@ -249,6 +256,54 @@ fn first_click_on_tracking_terminal_without_focus_sends_no_release() {
 }
 
 #[test]
+fn release_of_second_button_reaches_pty_while_first_is_held() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-two-buttons") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    run(&mut session, &format!("mouse_move {x} {y}\n"));
+    written(&session, 0);
+    run(&mut session, "click left down\nclick right down\nclick right up\n");
+    // SGR button codes from the protocol: left 0, right 2. The right release is owed while left is still held.
+    assert_eq!(written(&session, 0), b"\x1b[<0;5;3M\x1b[<2;5;3M\x1b[<2;5;3m");
+    run(&mut session, "click left up\n");
+    assert_eq!(written(&session, 0), b"\x1b[<0;5;3m");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cancelled_pointer_gesture_forgets_held_button() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-cancel-held") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\n"));
+    written(&session, 0);
+    session.app.cancel_pointer_interactions();
+    run(&mut session, "click left up\n");
+    assert!(written(&session, 0).is_empty(), "release after a cancelled press must not reach the PTY");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn focus_loss_forgets_held_button_before_release() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-focus-held") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\n"));
+    written(&session, 0);
+    session.app.ide_panel.terminal_focused = false;
+    session.app.sync_terminal_focus_reports();
+    run(&mut session, "click left up\n");
+    assert!(written(&session, 0).is_empty(), "release after focus loss must not reach the PTY");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn tab_drag_over_tracking_body_keeps_moving_tab() {
     let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-tab-drag") else {
         return;
@@ -261,6 +316,7 @@ fn tab_drag_over_tracking_body_keeps_moving_tab() {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
+    activate_terminal_tab(&mut session, 0);
     feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
     let (x, y) = point_for_visible_cell(&mut session, 4, 2);
     let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");
@@ -288,6 +344,7 @@ fn tab_drag_released_over_tracking_body_ends_tab_drag() {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
+    activate_terminal_tab(&mut session, 0);
     feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
     let (x, y) = point_for_visible_cell(&mut session, 4, 2);
     let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");

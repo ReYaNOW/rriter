@@ -9,26 +9,47 @@ use crate::ui_system::UiId;
 use ronsole_term::{MouseButton, MouseEventKind, Term, mouse_report};
 use winit::event::ElementState;
 
-/// Per-tab mouse state: the button held over the body and the last cell reported.
+/// Per-tab mouse state: the buttons whose press was forwarded to the PTY and whose release is still owed, and the last cell reported.
 #[derive(Default)]
 pub(crate) struct TerminalMouseState {
-    held: Option<MouseButton>,
+    /// One bit per button (see `button_bit`).
+    held_buttons: u8,
     last_cell: Option<(usize, usize)>,
 }
 
 impl TerminalMouseState {
-    /// Records a press or a release of `btn`; a second button pressed while one is held does not replace it.
+    /// Records a forwarded press or release of `btn`; other buttons keep their bits.
     fn update_held(&mut self, pressed: bool, btn: MouseButton) {
         if pressed {
-            self.held.get_or_insert(btn);
-        } else if self.held == Some(btn) {
-            self.held = None;
+            self.held_buttons |= button_bit(btn);
+        } else {
+            self.held_buttons &= !button_bit(btn);
         }
     }
 
-    /// Forgets the held button when the host drops the gesture (focus loss, tab switch, cancelled drag).
+    /// Whether the press of `btn` was forwarded and its release is still owed.
+    fn holds(&self, btn: MouseButton) -> bool {
+        self.held_buttons & button_bit(btn) != 0
+    }
+
+    /// Button reported with motion in button-motion modes: the first held one in `Left, Middle, Right` order.
+    fn motion_button(&self) -> Option<MouseButton> {
+        [MouseButton::Left, MouseButton::Middle, MouseButton::Right]
+            .into_iter()
+            .find(|&btn| self.holds(btn))
+    }
+
+    /// Forgets every held button when the host drops the gesture (focus loss, tab switch, cancelled drag).
     pub(crate) fn clear_held(&mut self) {
-        self.held = None;
+        self.held_buttons = 0;
+    }
+}
+
+fn button_bit(btn: MouseButton) -> u8 {
+    match btn {
+        MouseButton::Left => 1,
+        MouseButton::Middle => 2,
+        MouseButton::Right => 4,
     }
 }
 
@@ -111,7 +132,7 @@ impl App {
         let btn = terminal_mouse_button(button)?;
         let active = self.ide_panel.active_terminal;
         let term = self.ide_panel.terminals.get(active)?;
-        (term.mouse.held == Some(btn)).then_some(active)
+        term.mouse.holds(btn).then_some(active)
     }
 
     /// Forwards a press or release over a tracking terminal to the PTY. Returns `true`
@@ -175,7 +196,7 @@ impl App {
         }
         term.mouse.last_cell = Some(cell);
         let kind = MouseEventKind::Motion {
-            held: term.mouse.held,
+            held: term.mouse.motion_button(),
         };
         // Encode under the grid lock, but write after it is released: a blocking PTY write
         // must not hold the grid while the parser thread waits for it.
