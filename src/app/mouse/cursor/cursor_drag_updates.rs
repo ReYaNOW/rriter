@@ -793,7 +793,11 @@ impl App {
                     self.scroll_y.anim_speed = 15.0;
                 }
             }
-        } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
+        } else if self.ide_panel.is_dragging_terminal
+            && self.is_dragging
+            && !self.show_settings
+            && !self.active_terminal_tracks_mouse()
+        {
             let active = self.ide_panel.active_terminal;
             if let Some((cell_x, cell_y)) =
                 self.terminal_mouse_cell(position.x as f32, position.y as f32)

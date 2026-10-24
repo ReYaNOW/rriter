@@ -41,10 +41,6 @@ impl App {
             return;
         }
 
-        if self.forward_terminal_mouse_motion(px, py) {
-            return;
-        }
-
         let window_size = self.window.as_ref().unwrap().inner_size();
         if !cursor_position_allows_editor_hover(
             position.x as f32,
@@ -105,6 +101,11 @@ impl App {
         }
 
         if self.cursor_moved_ide_panel_drags(position, s) {
+            return;
+        }
+
+        // Runs after the panel drags so that an active tab or resize drag keeps the pointer.
+        if self.forward_terminal_mouse_motion(px, py) {
             return;
         }
 

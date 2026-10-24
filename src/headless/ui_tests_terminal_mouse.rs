@@ -233,6 +233,140 @@ fn release_after_drag_out_of_body_reaches_pty_clamped() {
 }
 
 #[test]
+fn first_click_on_tracking_terminal_without_focus_sends_no_release() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-first-click") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    session.app.ide_panel.terminal_focused = false;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\n"));
+    // A release without its press is not a valid report; the focusing click must not write to the PTY.
+    assert!(written(&session, 0).is_empty(), "release without a press reached the PTY");
+    assert!(!session.app.ide_panel.is_dragging_terminal, "release over the body must end the body drag");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn tab_drag_over_tracking_body_keeps_moving_tab() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-tab-drag") else {
+        return;
+    };
+    click_ui(&mut session, "TerminalAdd");
+    wait_until(&mut session, 5000, "second terminal tab", |session| {
+        session.app.ide_panel.terminals.len() == 2 && crate::headless::tests_support::has_ui(&dump(session), "TerminalTab(1)")
+    });
+    if shell_failed(&session, 1) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");
+    let tab_x = tab[0] as f64 + tab[2] as f64 / 2.0;
+    let tab_y = tab[1] as f64 + tab[3] as f64 / 2.0;
+    run(&mut session, &format!("mouse_move {tab_x} {tab_y}\nclick left down\n"));
+    assert!(session.app.ide_panel.terminal_tab_drag.is_some(), "tab press must start a tab drag");
+    session.app.ide_panel.terminal_focused = true;
+    run(&mut session, &format!("mouse_move {x} {y}\n"));
+    let drag = session.app.ide_panel.terminal_tab_drag.as_ref().expect("tab drag still active");
+    assert!((drag.current_x - x as f32).abs() < 0.5, "tab drag must follow the pointer over the body: {}", drag.current_x);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn tab_drag_released_over_tracking_body_ends_tab_drag() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-tab-release") else {
+        return;
+    };
+    click_ui(&mut session, "TerminalAdd");
+    wait_until(&mut session, 5000, "second terminal tab", |session| {
+        session.app.ide_panel.terminals.len() == 2 && crate::headless::tests_support::has_ui(&dump(session), "TerminalTab(1)")
+    });
+    if shell_failed(&session, 1) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    let tab = ui_rect(&dump(&mut session), "TerminalTab(0)");
+    let tab_x = tab[0] as f64 + tab[2] as f64 / 2.0;
+    let tab_y = tab[1] as f64 + tab[3] as f64 / 2.0;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {tab_x} {tab_y}\nclick left down\n"));
+    session.app.ide_panel.terminal_focused = true;
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left up\n"));
+    assert!(session.app.ide_panel.terminal_tab_drag.is_none(), "release over the body must end the tab drag");
+    assert!(written(&session, 0).is_empty(), "release of a press that never reached the PTY must not be written");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_alt_screen_without_tracking_sends_capped_arrows() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-alt") else {
+        return;
+    };
+    // DECCKM off: normal cursor keys; wheel down is 100 px, i.e. 5 steps, capped at 3 arrows.
+    feed(&session, 0, b"\x1b[?1049h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nwheel 0 -100 px\n"));
+    assert_eq!(written(&session, 0), b"\x1b[B\x1b[B\x1b[B");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_alt_screen_with_application_cursor_keys_sends_ss3_arrows() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-alt-app") else {
+        return;
+    };
+    // DECCKM on (`?1h`): application cursor keys, so wheel down is SS3 B.
+    feed(&session, 0, b"\x1b[?1049h\x1b[?1h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nwheel 0 -100 px\n"));
+    assert_eq!(written(&session, 0), b"\x1bOB\x1bOB\x1bOB");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_with_tracking_reports_real_cell() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-tracking") else {
+        return;
+    };
+    // Wheel down (SGR button 65) at visible cell (4, 2) is column 5, row 3; three capped steps.
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nwheel 0 -100 px\n"));
+    assert_eq!(written(&session, 0), b"\x1b[<65;5;3M\x1b[<65;5;3M\x1b[<65;5;3M");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn motion_1003_reports_without_button_and_with_button_once_per_cell() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-1003") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1003h\x1b[?1006h");
+    let (x1, y1) = point_for_visible_cell(&mut session, 4, 2);
+    let (x2, y2) = point_for_visible_cell(&mut session, 6, 2);
+    let (x3, y3) = point_for_visible_cell(&mut session, 8, 2);
+    written(&session, 0);
+    // Motion without a button: code 35 (3 + 32).
+    run(&mut session, &format!("mouse_move {x1} {y1}\n"));
+    assert_eq!(written(&session, 0), b"\x1b[<35;5;3M");
+    // A second event inside the same cell is deduplicated.
+    run(&mut session, &format!("mouse_move {} {y1}\n", x1 + 1.0));
+    assert_eq!(written(&session, 0), b"", "motion within one cell must not be reported twice");
+    // Motion with the left button held: code 32 + 0.
+    run(&mut session, &format!("mouse_move {x2} {y2}\nclick left down\nmouse_move {x3} {y3}\n"));
+    assert_eq!(written(&session, 0), b"\x1b[<35;7;3M\x1b[<0;7;3M\x1b[<32;9;3M");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn tracking_reports_visible_row_while_scrolled_back() {
     let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-scrollback") else {
         return;

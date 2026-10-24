@@ -273,6 +273,9 @@ impl App {
         self.is_dragging_lsp_log = false;
         self.autocomplete_detail_selecting = false;
         self.ide_panel.is_dragging_terminal = false;
+        for term in self.ide_panel.terminals.iter_mut() {
+            term.mouse.clear_held();
+        }
         self.ide_panel.is_resizing_left = false;
         self.ide_panel.is_resizing_bottom = false;
         self.ide_panel.git.graph_resizing = false;

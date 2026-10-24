@@ -293,6 +293,7 @@ impl App {
             return;
         }
         let active = self.ide_panel.active_terminal;
+        self.send_terminal_focus_out(idx);
         self.ide_panel.terminals.remove(idx);
         if self.ide_panel.terminals.is_empty() {
             self.add_terminal();
