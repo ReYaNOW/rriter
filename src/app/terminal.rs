@@ -113,6 +113,10 @@ pub struct Terminal {
     /// while the generation matches. Always `None` until hover tracking fills it.
     pub(crate) hovered_link: Option<(ronsole_term::LinkTarget, u64)>,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
+    /// Working directory last reported by OSC 7 for a local host; a new tab starts there.
+    pub(crate) osc7_cwd: Option<std::path::PathBuf>,
+    /// Latest unapplied OSC 52 and OSC 7 events from the parser thread.
+    host_events: crate::app::terminal_host_events::HostEventsSink,
 }
 
 fn write_terminal_spawn_error(term: &mut Term, error: &io::Error) {
@@ -129,6 +133,7 @@ impl Terminal {
         cwd: Option<&std::path::Path>,
         display_number: u64,
         palette: TermPalette,
+        ui_waker: &crate::ui_waker::UiWaker,
     ) -> Self {
         let title_cache = Arc::new(Mutex::new(
             crate::app::terminal_process::TerminalTitleState::new_numbered(
@@ -147,11 +152,13 @@ impl Terminal {
             palette,
         });
         let grid = Arc::new(Mutex::new(term));
+        let host_events = crate::app::terminal_host_events::HostEventsSink::new(ui_waker.clone());
         let result = crate::app::terminal_process::TerminalProcess::spawn(
             grid.clone(),
             title_cache.clone(),
             window,
             cwd,
+            host_events.clone(),
         );
         let process = match result {
             Ok((process, _shell)) => Some(process),
@@ -176,7 +183,36 @@ impl Terminal {
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
             title_cache,
+            osc7_cwd: None,
+            host_events,
         }
+    }
+
+    /// Takes the OSC 7 directory and returns the OSC 52 clipboard text stored since the last call.
+    /// The caller sets the clipboard, because the App owns it.
+    pub(crate) fn apply_host_events(&mut self) -> Option<String> {
+        let events = self.host_events.take();
+        if let Some(cwd) = events.cwd {
+            let local_host = crate::platform::local_host_name();
+            if let Some(path) = crate::platform::osc7_path(&cwd.host, &cwd.path, local_host) {
+                self.osc7_cwd = Some(path);
+            }
+        }
+        events.clipboard
+    }
+
+    /// Hold deadline of a mode 2026 batch that has not been replayed yet.
+    pub(crate) fn sync_deadline(&self) -> Option<Instant> {
+        lock_terminal_grid(&self.grid).sync_deadline()
+    }
+
+    /// Replays a mode 2026 batch whose hold deadline has passed; returns whether the grid changed.
+    /// Replies are not sent from here: the parser thread owns the PTY reply queue.
+    pub(crate) fn flush_expired_sync(&self, now: Instant) -> bool {
+        let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None)
+            .with_host_events(self.host_events.clone());
+        let mut grid = lock_terminal_grid(&self.grid);
+        crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now)
     }
 
     pub(crate) fn write_display_title(&self, output: &mut String) {

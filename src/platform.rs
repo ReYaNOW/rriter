@@ -45,7 +45,7 @@ pub(crate) use integration::app_root_override;
 pub(crate) type AppPaths = integration::AppPaths;
 pub use window_host::{HeadlessWindow, WindowHost};
 pub use terminal_cwd::{local_host_name, osc7_path};
-pub use terminal_link::{open_terminal_uri, percent_decode_uri_path};
+pub use terminal_link::open_terminal_uri;
 
 pub(crate) fn configure_allocator() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -84,7 +84,7 @@ pub fn state_dir() -> PathBuf {
 }
 pub(crate) use desktop_request::intercept_external;
 pub use desktop_request::{
-    ExternalRequest, ExternalRequestLog, ExternalRequestSink, open_path, open_url, pick_file,
+    ExternalRequest, ExternalRequestLog, ExternalRequestSink, open_url, pick_file,
     pick_file_with_filter, pick_files, pick_folder, reveal_path, save_file, save_file_with_filter,
 };
 pub use elevated_save::{handle_startup_helper, write_text_file_elevated};

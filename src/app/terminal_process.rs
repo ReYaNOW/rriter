@@ -11,6 +11,11 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::app::terminal_host_events::HostEventsSink;
+use crate::app::terminal_sync_output::{
+    advance_terminal_output_batch, receive_terminal_chunk, wait_out_sync_deadline,
+};
+
 const INITIAL_COLS: u16 = 200;
 const INITIAL_ROWS: u16 = 60;
 const TERMINAL_SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
@@ -145,6 +150,7 @@ impl TerminalProcess {
         title_cache: TerminalTitleCache,
         window: Option<Arc<crate::platform::WindowHost>>,
         cwd: Option<&Path>,
+        host_events: HostEventsSink,
     ) -> io::Result<(Self, TerminalShellSpec)> {
         let shell = resolve_terminal_shell()?;
         let fallback = terminal_fallback_title(cwd, &shell.title);
@@ -214,9 +220,17 @@ impl TerminalProcess {
                 return Err(error);
             }
         };
-        if let Err(error) =
-            install_terminal_io_threads(&grid, reader, writer.clone(), window, title_cache)
-        {
+        let reply_channel =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        if let Err(error) = install_terminal_io_threads(
+            &grid,
+            reader,
+            writer.clone(),
+            window,
+            title_cache,
+            host_events,
+            reply_channel,
+        ) {
             if let Some(stop_tx) = title_stop_tx {
                 let _ = stop_tx.send(());
             }
@@ -603,12 +617,13 @@ fn install_terminal_title_refresh(
     Ok((None, None))
 }
 
-/// Host side of `ronsole_term::TermSink`: forwards replies to the PTY writer and
-/// programmed titles to the title cache. Clipboard and working-directory events
-/// are ignored until their hosts are wired.
+/// Host side of `ronsole_term::TermSink`: forwards replies to the PTY writer, programmed
+/// titles to the title cache, and clipboard and working-directory events to the tab's
+/// `HostEventsSink` for the UI thread.
 pub(crate) struct RriterTermSink {
     title_cache: Option<TerminalTitleCache>,
     reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    host_events: Option<HostEventsSink>,
 }
 
 impl RriterTermSink {
@@ -619,7 +634,13 @@ impl RriterTermSink {
         Self {
             title_cache,
             reply_tx,
+            host_events: None,
         }
+    }
+
+    pub(crate) fn with_host_events(mut self, host_events: HostEventsSink) -> Self {
+        self.host_events = Some(host_events);
+        self
     }
 }
 
@@ -637,19 +658,16 @@ impl TermSink for RriterTermSink {
         }
     }
 
-    fn clipboard_set(&mut self, _text: String) {}
-
-    fn working_directory(&mut self, _host: &str, _path: &[u8]) {}
-}
-
-fn advance_terminal_output_batch(grid: &mut Term, sink: &mut RriterTermSink, chunks: &[Vec<u8>]) {
-    let now = Instant::now();
-    let mut grid_changed = false;
-    for chunk in chunks {
-        grid_changed |= grid.advance(chunk, now, sink).grid_changed;
+    fn clipboard_set(&mut self, text: String) {
+        if let Some(host_events) = self.host_events.as_ref() {
+            host_events.set_clipboard(text);
+        }
     }
-    if grid_changed {
-        grid.mark_changed();
+
+    fn working_directory(&mut self, host_name: &str, path: &[u8]) {
+        if let Some(host_events) = self.host_events.as_ref() {
+            host_events.set_cwd(host_name, path);
+        }
     }
 }
 
@@ -662,27 +680,32 @@ fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> 
     true
 }
 
-fn install_terminal_io_threads(
+pub(crate) fn install_terminal_io_threads(
     grid: &Arc<Mutex<Term>>,
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     window: Option<Arc<crate::platform::WindowHost>>,
     title_cache: TerminalTitleCache,
+    host_events: HostEventsSink,
+    (reply_tx, reply_rx): (
+        std::sync::mpsc::SyncSender<Vec<u8>>,
+        std::sync::mpsc::Receiver<Vec<u8>>,
+    ),
 ) -> io::Result<()> {
-    let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let reader_finished = Arc::new(AtomicBool::new(false));
 
     let parser_grid = grid.clone();
     let parser_reader_finished = reader_finished.clone();
-    let mut sink = RriterTermSink::new(Some(title_cache), Some(reply_tx));
+    let mut sink = RriterTermSink::new(Some(title_cache), Some(reply_tx))
+        .with_host_events(host_events.clone());
     crate::platform::spawn_named("rriter-terminal-parser", move || {
         let request_redraw = || {
             if let Some(window) = window.as_ref() {
                 window.request_redraw();
             }
         };
-        let mut first = rx.recv().ok();
+        let mut first = receive_terminal_chunk(&rx, &parser_grid, &mut sink, &request_redraw);
 
         while let Some(first_chunk) = first {
             let mut chunks = vec![first_chunk];
@@ -702,12 +725,18 @@ fn install_terminal_io_threads(
             let Ok(mut grid) = parser_grid.lock() else {
                 break;
             };
-            advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
+            let new_deadline = advance_terminal_output_batch(&mut grid, &mut sink, &chunks);
             drop(grid);
+            if new_deadline {
+                // The UI thread re-arms its wait for the mode 2026 hold deadline; no frame is needed.
+                host_events.wake();
+            }
             request_redraw();
-            first = rx.recv().ok();
+            first = receive_terminal_chunk(&rx, &parser_grid, &mut sink, &request_redraw);
         }
 
+        // The reader is gone, but a mode 2026 hold may still owe its bytes to the grid.
+        wait_out_sync_deadline(&parser_grid, &mut sink, &request_redraw);
         if parser_reader_finished.load(Ordering::Acquire) {
             let Ok(mut grid) = parser_grid.lock() else {
                 return;
@@ -1113,6 +1142,11 @@ mod tests {
         let title_cache: TerminalTitleCache =
             Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
 
+        let reply_channel =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let host_events = crate::app::terminal_host_events::HostEventsSink::new(
+            crate::ui_waker::UiWaker::counting(),
+        );
         // The reader yields one DA1 query; the reply must travel parser -> channel -> writer.
         install_terminal_io_threads(
             &grid,
@@ -1120,6 +1154,8 @@ mod tests {
             writer,
             None,
             title_cache,
+            host_events,
+            reply_channel,
         )
         .expect("terminal io threads spawn");
 
@@ -1159,7 +1195,7 @@ mod tests {
         assert!(!production.contains("TERMINAL_PRESENTATION_FALLBACK"));
         assert!(!production.contains("terminal_presentation_wait_remaining"));
         assert!(!production.contains("grid.mark_presentation_ready();"));
-        assert!(production.contains("let mut first = rx.recv().ok();"));
+        assert!(production.contains("receive_terminal_chunk(&rx, &parser_grid"));
     }
 
     #[test]

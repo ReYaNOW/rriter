@@ -186,10 +186,15 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         // Reset before draining (see `ui_waker`). Other channels wait for resume: their
         // results need a frame anyway, and re-waking for them here would spin while hidden.
         app.ui_waker.begin_drain();
+        // Served before this early return, so held output and OSC 52 do not wait for a resume event.
+        about_to_wait_terminal_host_events(app, now);
         app.poll_database_runtime();
         event_loop.set_awaiting_background(app.ide_panel.database.pending_job.is_some());
-        let cancel_deadline = app.ide_panel.database.cancel_deadline();
-        event_loop.set_control_flow(match suspended_about_wait_plan(cancel_deadline) {
+        let suspended_deadline = earliest_optional_wake(
+            app.ide_panel.database.cancel_deadline(),
+            terminal_sync_wake_at(app),
+        );
+        event_loop.set_control_flow(match suspended_about_wait_plan(suspended_deadline) {
             AboutWaitPlan::Wait => ControlFlow::Wait,
             AboutWaitPlan::WaitUntil(at) => ControlFlow::WaitUntil(at),
         });
@@ -209,6 +214,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     // Reset the coalesced wake BEFORE the sections below walk the background channels:
     // a result sent during the walk then posts a fresh event instead of being stranded.
     app.ui_waker.begin_drain();
+    needs_redraw |= about_to_wait_terminal_host_events(app, now);
 
     // Each section only ever raises `needs_redraw`, so OR-ing keeps the old semantics.
     let Some(bench_redraw) = about_to_wait_scroll_bench(app, event_loop, now) else {
@@ -270,7 +276,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             || app.ide_panel.database.pending_job.is_some(),
     );
     let deadline_wake_at = earliest_optional_wake(
-        hover_wake_at,
+        earliest_optional_wake(terminal_sync_wake_at(app), hover_wake_at),
         earliest_optional_wake(
             background_wake_at,
             earliest_optional_wake(
@@ -316,6 +322,35 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
         }
     }
+}
+
+/// Serves every terminal tab: applies the clipboard text and OSC 7 directory the parser stored,
+/// and replays mode 2026 output whose hold deadline has passed. Returns whether a frame is needed.
+/// Called after `UiWaker::begin_drain`, so an event stored during this pass posts a new wake.
+fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) -> bool {
+    let mut needs_redraw = false;
+    let mut clipboard = None;
+    for terminal in app.ide_panel.terminals.iter_mut() {
+        if let Some(text) = terminal.apply_host_events() {
+            clipboard = Some(text);
+        }
+        if terminal.sync_deadline().is_some_and(|at| at <= now) {
+            needs_redraw |= terminal.flush_expired_sync(now);
+        }
+    }
+    if let Some(text) = clipboard {
+        app.set_clipboard_text(text);
+    }
+    needs_redraw
+}
+
+/// Earliest mode 2026 hold deadline over all terminal tabs, if any tab holds output.
+fn terminal_sync_wake_at(app: &App) -> Option<Instant> {
+    app.ide_panel
+        .terminals
+        .iter()
+        .filter_map(|terminal| terminal.sync_deadline())
+        .min()
 }
 
 #[cfg(test)]
