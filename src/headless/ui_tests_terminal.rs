@@ -78,10 +78,9 @@ fn headless_terminal_search_highlights_navigates_and_closes() {
     wait_until(&mut session, 5000, "repeated terminal output", |session| {
         let terminal = &session.app.ide_panel.terminals[0];
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        grid.scrollback
-            .iter()
-            .chain(grid.lines.iter())
-            .filter(|row| row.iter().map(|cell| cell.c).collect::<String>().trim() == "marker")
+        (0..grid.total_rows())
+            .filter_map(|index| grid.row(index))
+            .filter(|row| row.iter().map(|cell| cell.ch()).collect::<String>().trim() == "marker")
             .count()
             >= 2
     });
@@ -103,7 +102,7 @@ fn headless_terminal_search_highlights_navigates_and_closes() {
     assert!(has_ui(&dump(&mut session), "TerminalSearchInput"));
     let grid_selection = {
         let terminal = &session.app.ide_panel.terminals[0];
-        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection
+        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection()
     };
     assert_eq!(grid_selection, Some(expected));
 
@@ -115,7 +114,7 @@ fn headless_terminal_search_highlights_navigates_and_closes() {
     let expected = search.term_search_results[previous];
     let grid_selection = {
         let terminal = &session.app.ide_panel.terminals[0];
-        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection
+        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection()
     };
     assert_eq!(grid_selection, Some(expected));
 
@@ -149,16 +148,12 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
         let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(scale);
         let terminal = &session.app.ide_panel.terminals[0];
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
-        let total_lines = scrollback_len + grid.lines.len();
+        let total_lines = grid.total_rows();
         // The shell may pad the output row, so select from the column where the text starts.
-        let (row, col) = grid
-            .scrollback
-            .iter()
-            .chain(grid.lines.iter())
-            .enumerate()
-            .find_map(|(row, line)| {
-                let text = line.iter().map(|cell| cell.c).collect::<String>();
+        let (row, col) = (0..total_lines)
+            .find_map(|row| {
+                let line = grid.row(row)?;
+                let text = line.iter().map(|cell| cell.ch()).collect::<String>();
                 (text.trim() == "marker")
                     .then(|| (row, text.chars().take_while(|c| c.is_whitespace()).count()))
             })
@@ -172,7 +167,7 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
         let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
             terminal.scroll_y.current,
             max_scroll,
-            grid.is_alt,
+            grid.is_alt_screen(),
         );
         let offset_from_bottom = total_lines.saturating_sub(1).saturating_sub(row);
         let text_top = body[1] as f32 + body[3] as f32
@@ -193,7 +188,7 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     wait_until(&mut session, 1000, "terminal mouse selection", |session| {
         let terminal = &session.app.ide_panel.terminals[0];
-        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection.is_some()
+        crate::app::terminal::lock_terminal_grid(&terminal.grid).selection().is_some()
     });
 
     let before_copy = dump(&mut session);
@@ -205,7 +200,7 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
         let grid = crate::app::terminal::lock_terminal_grid(
             &session.app.ide_panel.terminals[0].grid,
         );
-        assert!(grid.selection.is_some());
+        assert!(grid.selection().is_some());
     }
     let _ = std::fs::remove_dir_all(dir);
 }

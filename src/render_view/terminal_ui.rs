@@ -1448,27 +1448,21 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cell_background_priority_is_active_search_selection_match_ansi() {
-        let ansi = [[0.1, 0.1, 0.1, 1.0]; 16];
+    fn terminal_cell_background_priority_is_active_search_selection_match_cell() {
+        let cell_bg = Some([0.1, 0.1, 0.1, 1.0]);
         let sel = [0.2, 0.3, 0.4, 1.0];
         let search_match = [0.6, 0.6, 0.6, 0.35];
         let search_match_active = [1.0, 0.6, 0.0, 0.5];
-        assert_eq!(terminal_cell_background(0, &ansi, search_match, search_match_active, false, false, false, sel), None);
-        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, false, false, false, sel), Some(ansi[3]));
-        assert_eq!(terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, false, sel), Some(sel));
+        assert_eq!(terminal_cell_background(None, search_match, search_match_active, false, false, false, sel), None);
+        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, false, false, false, sel), cell_bg);
+        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, true, true, false, sel), Some(sel));
         assert_eq!(
-            terminal_cell_background(3, &ansi, search_match, search_match_active, false, true, false, sel),
+            terminal_cell_background(cell_bg, search_match, search_match_active, false, true, false, sel),
             Some(search_match)
         );
         assert_eq!(
-            terminal_cell_background(3, &ansi, search_match, search_match_active, true, true, true, sel),
+            terminal_cell_background(cell_bg, search_match, search_match_active, true, true, true, sel),
             Some(search_match_active)
         );
-    }
-
-    #[test]
-    fn terminal_default_cell_text_uses_theme_ansi_seven() {
-        let theme = crate::renderer::Theme::for_id(crate::theme::ThemeId::OneLight, [0.0; 4]);
-        assert_eq!(terminal_cell_foreground(7, &theme.terminal, theme.fg), theme.terminal[7]);
     }
 }

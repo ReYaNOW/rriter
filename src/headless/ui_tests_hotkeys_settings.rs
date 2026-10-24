@@ -135,8 +135,9 @@ fn headless_hotkeys_settings_recording_owns_terminal_chord_before_pty() {
     wait_until(&mut session, 3000, "cat -v waiting for terminal input", |session| {
         let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        grid.scrollback.iter().chain(grid.lines.iter())
-            .any(|row| row.iter().map(|cell| cell.c).collect::<String>().contains("cat -v"))
+        (0..grid.total_rows())
+            .filter_map(|index| grid.row(index))
+            .any(|row| row.iter().map(|cell| cell.ch()).collect::<String>().contains("cat -v"))
     });
     assert!(session.app.ide_panel.terminal_focused, "terminal did not retain focus before opening Settings");
     session.app.ide_panel.terminal_focused = false;
@@ -150,8 +151,9 @@ fn headless_hotkeys_settings_recording_owns_terminal_chord_before_pty() {
     let echoed = {
         let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        grid.scrollback.iter().chain(grid.lines.iter())
-            .any(|row| row.iter().map(|cell| cell.c).collect::<String>().contains("^E"))
+        (0..grid.total_rows())
+            .filter_map(|index| grid.row(index))
+            .any(|row| row.iter().map(|cell| cell.ch()).collect::<String>().contains("^E"))
     };
     assert!(!echoed, "Ctrl+E reached cat -v in the PTY; echoed={echoed}");
     drop(session);

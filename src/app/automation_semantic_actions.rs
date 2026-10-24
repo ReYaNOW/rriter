@@ -279,8 +279,9 @@ fn panel_failure_diagnostics(app: &App, requested_panel: PanelId) -> String {
             |terminal| {
                 let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
                 format!(
-                    "presentation_ready={} presentation_intent={:?}",
+                    "presentation_ready={} presentation_visible={} presentation_intent={:?}",
                     grid.presentation_ready(),
+                    grid.presentation_visible(),
                     terminal.presentation_intent
                 )
             },

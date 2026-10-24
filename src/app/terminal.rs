@@ -71,6 +71,7 @@ pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
     Some(result.trim_end().to_string())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalPresentationIntent {
     None,
     ActivateWhenReady,
@@ -189,30 +190,32 @@ mod tests {
     use crate::app::terminal_process::RriterTermSink;
 
     #[test]
-    fn osc_11_reply_uses_theme_background() {
+    fn osc_10_11_reply_uses_theme_palette() {
         let mut term = test_term(20, 3);
+        let foreground = ronsole_term::Rgb {
+            r: 0xab,
+            g: 0xcd,
+            b: 0xef,
+        };
         let background = ronsole_term::Rgb {
             r: 0x12,
             g: 0x34,
             b: 0x56,
         };
-        let white = ronsole_term::Rgb {
-            r: 255,
-            g: 255,
-            b: 255,
-        };
         term.set_palette(TermPalette {
-            foreground: white,
+            foreground,
             background,
-            cursor: white,
+            cursor: foreground,
             ansi: [background; 16],
         });
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
         let mut sink = RriterTermSink::new(None, Some(reply_tx));
-        term.advance(b"\x1b]11;?\x07", Instant::now(), &mut sink);
+        term.advance(b"\x1b]10;?\x07\x1b]11;?\x07", Instant::now(), &mut sink);
 
+        // One batch of replies is sent as a single message, both queries in order.
         let reply = String::from_utf8_lossy(&reply_rx.try_recv().unwrap_or_default()).into_owned();
         // xterm `rgb:` spec doubles each 8-bit channel (ronsole-term osc.rs `rgb_spec`).
+        assert!(reply.contains("rgb:abab/cdcd/efef"), "{reply}");
         assert!(reply.contains("rgb:1212/3434/5656"), "{reply}");
         assert!(!reply.contains("ffff"), "{reply}");
     }

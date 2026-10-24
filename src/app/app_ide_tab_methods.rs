@@ -957,7 +957,7 @@ mod tests {
             .unwrap();
 
         let cancel = selection.find("self.cancel_terminal_presentation_intents();").unwrap();
-        let ready = selection.find(".presentation_ready;").unwrap();
+        let ready = selection.find(".presentation_ready();").unwrap();
         assert!(cancel < ready);
         assert!(selection.contains("self.ide_panel.active_terminal = idx;"));
         assert!(selection.contains("TerminalPresentationIntent::ActivateWhenReady"));

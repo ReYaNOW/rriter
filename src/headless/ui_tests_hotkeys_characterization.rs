@@ -33,10 +33,9 @@ fn run_ok(session: &mut HeadlessSession, script: &str) {
 fn terminal_grid_text(session: &HeadlessSession) -> String {
     let terminal = &session.app.ide_panel.terminals[session.app.ide_panel.active_terminal];
     let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-    grid.scrollback
-        .iter()
-        .chain(grid.lines.iter())
-        .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+    (0..grid.total_rows())
+        .filter_map(|index| grid.row(index))
+        .map(|row| row.iter().map(|cell| cell.ch()).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
 }

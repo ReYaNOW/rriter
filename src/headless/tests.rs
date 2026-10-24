@@ -644,10 +644,9 @@ pub(crate) mod tests_support {
         let terminal = session.app.ide_panel.terminals.get(index)?;
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
         Some(
-            grid.scrollback
-                .iter()
-                .chain(grid.lines.iter())
-                .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+            (0..grid.total_rows())
+                .filter_map(|index| grid.row(index))
+                .map(|row| row.iter().map(|cell| cell.ch()).collect::<String>())
                 .collect(),
         )
     }

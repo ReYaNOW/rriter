@@ -132,11 +132,19 @@ pub(super) fn steps(_workspace: &Path) -> Vec<AutomationStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::terminal::Cell;
+    use ronsole_term::{Cell, CellFlags, TerminalColor, UnderlineStyle};
 
     fn row(text: &str) -> Vec<Cell> {
         text.chars()
-            .map(|c| Cell { c, fg: 0, bg: 0, presentation: 0 })
+            .map(|c| {
+                Cell::new_for_test(
+                    c,
+                    TerminalColor::default_foreground(),
+                    TerminalColor::default_background(),
+                    CellFlags::empty(),
+                    UnderlineStyle::None,
+                )
+            })
             .collect()
     }
 
