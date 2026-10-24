@@ -512,6 +512,7 @@ fn external_request_json(request: Option<ExternalRequest>) -> Value {
         ExternalRequest::SaveFile => ("save_file", None),
         ExternalRequest::OpenUrl(url) => ("open_url", Some(url)),
         ExternalRequest::RevealPath(path) => ("reveal_path", Some(path.display().to_string())),
+        ExternalRequest::OpenPath(path) => ("open_path", Some(path.display().to_string())),
     };
     json!({"kind": kind, "arg": arg})
 }
@@ -544,6 +545,10 @@ mod tests {
         assert_eq!(
             external_request_json(Some(ExternalRequest::RevealPath("/tmp/a b".into()))),
             json!({"kind": "reveal_path", "arg": "/tmp/a b"})
+        );
+        assert_eq!(
+            external_request_json(Some(ExternalRequest::OpenPath("/tmp/a b".into()))),
+            json!({"kind": "open_path", "arg": "/tmp/a b"})
         );
     }
 }

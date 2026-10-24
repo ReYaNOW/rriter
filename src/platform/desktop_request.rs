@@ -2,7 +2,7 @@
 // manager and the browser. Headless intercepts every one of them and records
 // it in the owning `App`'s `ExternalRequestLog` instead of touching the desktop.
 
-use super::{HeadlessPolicy, headless_policy};
+use super::{HeadlessPolicy, headless_policy, reap_unit_thread, spawn_named};
 #[cfg(target_os = "macos")]
 use super::macos;
 #[cfg(windows)]
@@ -25,6 +25,7 @@ pub enum ExternalRequest {
     SaveFile,
     OpenUrl(String),
     RevealPath(PathBuf),
+    OpenPath(PathBuf),
 }
 
 /// Sending half of one `ExternalRequestLog`; cloned into picker worker threads.
@@ -106,6 +107,12 @@ pub(crate) fn intercept_external(
     true
 }
 
+/// `true` when this sink's requests are recorded instead of reaching the desktop,
+/// so callers may resolve and record synchronously.
+pub(crate) fn external_requests_intercepted(sink: &ExternalRequestSink) -> bool {
+    headless_policy().is_some() || sink.intercept
+}
+
 pub fn pick_file(requests: &ExternalRequestSink, title: &str) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::PickFile) {
         return take_picker_path(requests);
@@ -176,6 +183,13 @@ pub fn reveal_path(requests: &ExternalRequestSink, path: &Path) -> io::Result<Ch
     if intercept_external(headless_policy(), requests, ExternalRequest::RevealPath(path.to_path_buf())) {
         return Err(io::Error::new(io::ErrorKind::Unsupported, "disabled in headless mode"));
     }
+    spawn_reveal_path(path, false)
+}
+
+/// Starts the file manager on `path` without the headless check. `always_select`
+/// makes macOS select the path even when it is a launchable bundle.
+pub(crate) fn spawn_reveal_path(path: &Path, always_select: bool) -> io::Result<Child> {
+    let _ = always_select;
     #[cfg(windows)]
     {
         let mut command = Command::new("explorer.exe");
@@ -189,7 +203,7 @@ pub fn reveal_path(requests: &ExternalRequestSink, path: &Path) -> io::Result<Ch
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::reveal_path(path);
+        return macos::reveal_path(path, always_select);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -205,6 +219,78 @@ pub fn reveal_path(requests: &ExternalRequestSink, path: &Path) -> io::Result<Ch
         io::ErrorKind::Unsupported,
         "revealing files is not supported on this platform",
     ))
+}
+
+/// Opens `path` with the platform's default handler. The caller passes a
+/// canonical path; this function does no filtering of what it opens.
+pub fn open_path(requests: &ExternalRequestSink, path: &Path) -> io::Result<()> {
+    if intercept_external(headless_policy(), requests, ExternalRequest::OpenPath(path.to_path_buf())) {
+        return Ok(());
+    }
+    match spawn_open_path(path)? {
+        Some(child) => reap_child(child),
+        None => Ok(()),
+    }
+}
+
+/// Starts the platform's default handler for `path`. `None` when the handler
+/// returns no child process (Windows ShellExecute).
+pub(crate) fn spawn_open_path(path: &Path) -> io::Result<Option<Child>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let operation = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let target = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result as isize > 32 {
+            return Ok(None);
+        }
+        return Err(io::Error::other(format!(
+            "ShellExecuteW failed with code {}",
+            result as isize
+        )));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos::open_path(path).map(Some);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return Command::new("xdg-open").arg(path).spawn().map(Some);
+    }
+    #[allow(unreachable_code)]
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "opening files is not supported on this platform",
+    ))
+}
+
+/// Waits for one started handler on its own named thread so the child is reaped.
+fn reap_child(mut child: Child) -> io::Result<()> {
+    let worker = spawn_named("rriter-open-path-wait", move || {
+        let _ = child.wait();
+    })?;
+    reap_unit_thread(worker);
+    Ok(())
 }
 
 pub fn open_url(requests: &ExternalRequestSink, url: &str) -> io::Result<()> {
