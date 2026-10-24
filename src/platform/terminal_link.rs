@@ -18,9 +18,11 @@ use std::path::{Path, PathBuf};
 const MAX_LINK_PATH_BYTES: usize = 4096;
 
 /// Extensions that run on macOS without an executable bit; the file manager selects them.
+/// Location files (`fileloc`, `inetloc`, `webloc`) are listed because Finder opens their
+/// target, which may be an application.
 const MACOS_LAUNCHABLE_EXTENSIONS: &[&str] = &[
     "app", "command", "tool", "terminal", "workflow", "pkg", "mpkg", "prefpane", "mobileconfig",
-    "jar",
+    "jar", "fileloc", "inetloc", "webloc",
 ];
 
 /// Extensions that run or open with a shell on Windows, whatever `PATHEXT` says.
@@ -346,6 +348,9 @@ mod tests {
         assert!(launchable_for_platform(macos, Path::new("a.command"), false, None));
         assert!(launchable_for_platform(macos, Path::new("a.pkg"), false, None));
         assert!(launchable_for_platform(macos, Path::new("a.jar"), false, None));
+        assert!(launchable_for_platform(macos, Path::new("a.fileloc"), false, None));
+        assert!(launchable_for_platform(macos, Path::new("a.inetloc"), false, None));
+        assert!(launchable_for_platform(macos, Path::new("a.webloc"), false, None));
         assert!(launchable_for_platform(macos, Path::new("a.txt"), true, None));
         assert!(!launchable_for_platform(macos, Path::new("a.txt"), false, None));
 
