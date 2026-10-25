@@ -162,6 +162,8 @@ impl App {
             .title
             .unwrap_or_else(|| "Безымянный".to_string());
         let ext = options.ext.unwrap_or_default();
+        // Same owner as every other open path: the initial mode of a Markdown file is Read.
+        let markdown = crate::app::MarkdownTabState::for_file_extension(&ext);
 
         let keymap = crate::keymap::Keymap::build(&config.keymap_overrides);
         let mut keymap_settings = crate::app::keymap_settings::KeymapSettingsState::default();
@@ -216,7 +218,7 @@ impl App {
             file_key,
             text_file_format: options.text_file_format.unwrap_or_default(),
             file_extension: ext,
-            markdown: Default::default(),
+            markdown,
             markdown_toc: Default::default(),
             markdown_media,
             highlighter,
@@ -415,6 +417,24 @@ mod tests {
         assert!(app.show_welcome);
         assert_eq!(app.base_title, "Добро пожаловать");
         assert!(!app.editor.original_hashes.is_empty());
+    }
+
+    #[test]
+    fn app_bootstrap_argv_markdown_file_starts_in_read_mode() {
+        // Same options as `main` builds for `rriter FILE.md` (OS file-manager open).
+        let app = App::new_from_config(
+            crate::Config::default(),
+            AppInitOptions {
+                title: Some("notes.md".to_string()),
+                ext: Some("md".to_string()),
+                file_path: Some(PathBuf::from("/tmp/rriter-mdread/notes.md")),
+                has_file_arg: true,
+                ..AppInitOptions::headless(None)
+            },
+        );
+
+        assert_eq!(app.markdown.mode, crate::app::MarkdownMode::Read);
+        assert_eq!(app.markdown_mode(), crate::app::MarkdownMode::Read);
     }
 
     #[test]
