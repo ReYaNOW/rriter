@@ -246,6 +246,7 @@ impl App {
             && idx + 1 == self.ide_panel.terminals.len();
         self.cancel_terminal_presentation_intents();
         self.ide_panel.active_terminal = idx;
+        self.clear_terminal_held_keys();
         if intent == crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady {
             self.ide_panel.open(PanelId::Terminal);
             crate::save_panel_state(&self.ide_panel);
@@ -282,6 +283,7 @@ impl App {
         if ready {
             self.ide_panel.active_terminal = idx;
             self.reveal_active_terminal_tab_now();
+            self.clear_terminal_held_keys();
         } else {
             self.ide_panel.terminals[idx].presentation_intent =
                 crate::app::terminal::TerminalPresentationIntent::ActivateWhenReady;
@@ -295,6 +297,7 @@ impl App {
         let active = self.ide_panel.active_terminal;
         self.send_terminal_focus_out(idx);
         self.ide_panel.terminals.remove(idx);
+        self.clear_terminal_held_keys();
         if self.ide_panel.terminals.is_empty() {
             self.add_terminal();
         } else {

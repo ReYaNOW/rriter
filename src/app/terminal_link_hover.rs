@@ -21,11 +21,12 @@ impl Terminal {
     }
 
     /// Whether the last lookup found no link on `cell` in the current grid generation.
+    /// Reads the published generation, so the hover does not wait for the grid lock.
     fn hovered_link_missed(&self, cell: (usize, usize)) -> bool {
         let Some((missed, generation)) = self.hovered_link_miss else {
             return false;
         };
-        missed == cell && generation == lock_terminal_grid(&self.grid).content_generation()
+        missed == cell && generation == self.host_events().content_generation()
     }
 
     /// URI of the link under `cell`, for a click or a tracking decision. The URI does not depend on
@@ -44,7 +45,7 @@ impl Terminal {
             return false;
         };
         let (col, row) = cell;
-        if *generation != lock_terminal_grid(&self.grid).content_generation() {
+        if *generation != self.host_events().content_generation() {
             return false;
         }
         link.cells
@@ -83,15 +84,12 @@ impl Terminal {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::terminal::{Terminal, lock_terminal_grid};
-    use crate::app::terminal_process::RriterTermSink;
-    use crate::app::terminal_sync_output::advance_terminal_output_batch;
+    use crate::app::terminal::{Terminal, feed_test_terminal_output, lock_terminal_grid};
 
-    /// Feeds `bytes` into the grid of `term` through the output batch path.
+    /// Feeds `bytes` into the grid of `term` through the parser's batch path, which publishes the
+    /// content generation that the hover reads.
     fn feed(term: &Terminal, bytes: &[u8]) {
-        let mut sink = RriterTermSink::new(None, None);
-        let mut grid = lock_terminal_grid(&term.grid);
-        advance_terminal_output_batch(&mut grid, &mut sink, &[bytes.to_vec()]);
+        feed_test_terminal_output(term, bytes);
     }
 
     #[test]

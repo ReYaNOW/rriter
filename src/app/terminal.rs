@@ -1,4 +1,6 @@
-use crate::app::terminal_sync_output::{SYNC_UI_FALLBACK_GRACE, sync_ui_fallback_due};
+use crate::app::terminal_sync_output::{
+    SYNC_UI_FALLBACK_GRACE, SYNC_UI_RETRY_INTERVAL, sync_ui_fallback_due,
+};
 use ronsole_term::{Term, TermConfig, TermIdentity, TermPalette};
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -20,31 +22,63 @@ pub(crate) fn lock_terminal_grid(grid: &Mutex<Term>) -> MutexGuard<'_, Term> {
 }
 
 /// Resizes the grid when its size changes and drops the selection: reflow moves rows, so
-/// selection indices would point at the wrong text. Returns whether a resize happened.
+/// selection indices would point at the wrong text. The new content generation is published to
+/// `host_events` before the lock is released. Returns whether a resize happened.
 #[inline]
-pub(crate) fn resize_terminal_grid(grid: &mut Term, cols: usize, rows: usize) -> bool {
+pub(crate) fn resize_terminal_grid(
+    grid: &mut Term,
+    cols: usize,
+    rows: usize,
+    host_events: &crate::app::terminal_host_events::HostEventsSink,
+) -> bool {
     if grid.cols() == cols && grid.rows() == rows {
         return false;
     }
     grid.resize(cols, rows);
     grid.set_selection(None);
+    host_events.set_content_generation(grid.content_generation());
     true
 }
 
+/// Outcome of one UI-thread fallback replay of mode 2026 output.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SyncFallback {
+    /// No hold is past its grace period, so there is nothing to replay.
+    Idle,
+    /// The held output was replayed; `changed` tells whether the visible grid changed.
+    Replayed { changed: bool },
+    /// The parser holds the grid lock. The UI thread did not wait; it retries at `sync_wake_at`.
+    Busy,
+}
+
+impl SyncFallback {
+    /// Whether this outcome changed the visible grid and so needs a frame.
+    pub(crate) fn needs_redraw(&self) -> bool {
+        matches!(self, Self::Replayed { changed: true })
+    }
+}
+
 /// Replays the held mode 2026 output on `grid` with the same sink the parser thread uses, so
-/// replies, titles and host events produced by the replay are not dropped.
+/// replies, titles and host events produced by the replay are not dropped. Takes the grid lock
+/// with `try_lock`: the UI thread never blocks on a parser batch.
 fn flush_expired_sync_on_grid(
     grid: &Mutex<Term>,
     title_cache: &crate::app::terminal_process::TerminalTitleCache,
-    reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    write_queue: Option<crate::app::terminal_sink::PtyWriteQueue>,
     host_events: &crate::app::terminal_host_events::HostEventsSink,
     now: Instant,
-) -> bool {
+) -> SyncFallback {
+    let mut grid = match grid.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return SyncFallback::Busy,
+    };
     let mut sink =
-        crate::app::terminal_process::RriterTermSink::new(Some(title_cache.clone()), reply_tx)
+        crate::app::terminal_process::RriterTermSink::new(Some(title_cache.clone()), write_queue)
             .with_host_events(host_events.clone());
-    let mut grid = lock_terminal_grid(grid);
-    crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now)
+    SyncFallback::Replayed {
+        changed: crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now),
+    }
 }
 
 /// Builds a `Term` with the production config (scrollback, identity) and a fixed
@@ -133,6 +167,9 @@ pub struct Terminal {
     pub(crate) mouse: crate::app::mouse::TerminalMouseState,
     /// Focus state last reported to the PTY (DECSET 1004); reconciled by `sync_terminal_focus_reports`.
     pub(crate) focus_sent: bool,
+    /// Focus change not yet applied to the key encoder; taken by the next key press, which resets
+    /// the key protocol's sent set before encoding.
+    focus_key_reset: Option<bool>,
     /// Bytes passed to `write_input`, kept so headless tests can check the PTY stream.
     #[cfg(test)]
     pub(crate) written_input: Mutex<Vec<u8>>,
@@ -152,11 +189,16 @@ pub struct Terminal {
     host_events: crate::app::terminal_host_events::HostEventsSink,
 }
 
-fn write_terminal_spawn_error(term: &mut Term, error: &io::Error) {
+fn write_terminal_spawn_error(
+    term: &mut Term,
+    error: &io::Error,
+    host_events: &crate::app::terminal_host_events::HostEventsSink,
+) {
     let message = format!("RRiter terminal error: {error}\r\n");
     let mut sink = crate::app::terminal_process::RriterTermSink::new(None, None);
     term.advance(message.as_bytes(), Instant::now(), &mut sink);
     term.mark_presentation_ready();
+    host_events.set_content_generation(term.content_generation());
 }
 
 impl Terminal {
@@ -199,7 +241,7 @@ impl Terminal {
                 crate::platform::lock_recover(&title_cache)
                     .set_fallback("terminal error".to_string());
                 let mut term = crate::platform::lock_recover(&grid);
-                write_terminal_spawn_error(&mut term, &error);
+                write_terminal_spawn_error(&mut term, &error, &host_events);
                 None
             }
         };
@@ -212,6 +254,7 @@ impl Terminal {
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
             focus_sent: false,
+            focus_key_reset: None,
             #[cfg(test)]
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
@@ -237,6 +280,12 @@ impl Terminal {
         events.clipboard
     }
 
+    /// The tab's published parser state (hold deadline, focus reporting, content generation),
+    /// readable without the grid lock.
+    pub(crate) fn host_events(&self) -> &crate::app::terminal_host_events::HostEventsSink {
+        &self.host_events
+    }
+
     /// Hold deadline of a mode 2026 batch that has not been replayed yet. Read from the value the
     /// parser published, so it never waits for the grid lock.
     pub(crate) fn sync_deadline(&self) -> Option<Instant> {
@@ -244,34 +293,88 @@ impl Terminal {
     }
 
     /// When the UI thread should wake to replay a hold the parser has not replayed: the deadline
-    /// plus `SYNC_UI_FALLBACK_GRACE`.
-    pub(crate) fn sync_wake_at(&self) -> Option<Instant> {
-        self.sync_deadline()
-            .and_then(|deadline| deadline.checked_add(SYNC_UI_FALLBACK_GRACE))
+    /// plus `SYNC_UI_FALLBACK_GRACE`. Once that point has passed, the replay was blocked by the
+    /// grid lock, so the wake is `SYNC_UI_RETRY_INTERVAL` after `now`.
+    pub(crate) fn sync_wake_at(&self, now: Instant) -> Option<Instant> {
+        let at = self
+            .sync_deadline()
+            .and_then(|deadline| deadline.checked_add(SYNC_UI_FALLBACK_GRACE))?;
+        if at <= now {
+            return now.checked_add(SYNC_UI_RETRY_INTERVAL);
+        }
+        Some(at)
     }
 
     /// UI-thread fallback: replays a mode 2026 batch the parser has held past `SYNC_UI_FALLBACK_GRACE`
-    /// after its deadline. Returns whether the grid changed.
+    /// after its deadline. Returns `SyncFallback::Busy` without waiting when the parser holds the grid.
     /// Replies go to the same PTY queue as the parser thread, so the replay keeps their order.
-    pub(crate) fn flush_expired_sync(&self, now: Instant) -> bool {
+    pub(crate) fn flush_expired_sync(&self, now: Instant) -> SyncFallback {
         let Some(deadline) = self.sync_deadline() else {
-            return false;
+            return SyncFallback::Idle;
         };
         if !sync_ui_fallback_due(deadline, now) {
-            return false;
+            return SyncFallback::Idle;
         }
-        let reply_tx = self.process.as_ref().map(|process| process.reply_sender());
-        flush_expired_sync_on_grid(&self.grid, &self.title_cache, reply_tx, &self.host_events, now)
+        let write_queue = self.process.as_ref().map(|process| process.write_queue());
+        flush_expired_sync_on_grid(
+            &self.grid,
+            &self.title_cache,
+            write_queue,
+            &self.host_events,
+            now,
+        )
     }
 
-    /// Queues a terminal report (focus) without blocking. A full queue or a missing process drops it.
-    pub(crate) fn queue_report(&self, bytes: &[u8]) {
-        // Tests read the reports the way they read `write_input`, which records before queueing.
-        #[cfg(test)]
-        crate::platform::lock_recover(&self.written_input).extend_from_slice(bytes);
-        if let Some(process) = self.process.as_ref() {
-            process.queue_report(bytes);
+    /// Queues a terminal report without blocking. Returns `false` when there is no PTY process or
+    /// the writer has stopped.
+    pub(crate) fn queue_report(&self, bytes: &[u8]) -> bool {
+        self.write_input(bytes).is_ok()
+    }
+
+    /// Whether the grid reports a change for the next frame, read without waiting for the grid
+    /// lock. A held lock reads as "no change": the parser wakes the UI after it releases the lock
+    /// when a batch changed the grid.
+    pub(crate) fn grid_dirty_without_waiting(&self) -> bool {
+        match self.grid.try_lock() {
+            Ok(grid) => grid.dirty(),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner().dirty(),
+            Err(std::sync::TryLockError::WouldBlock) => false,
         }
+    }
+
+    /// Reconciles the DECSET 1004 report with the host focus: queues `CSI I` / `CSI O` when the
+    /// application enabled reporting. A refused report is not retried: both refusals (no process,
+    /// writer stopped) are permanent. The parser publishes DECSET 1004 at the end of its batch, so
+    /// a toggle inside a batch can read as "off" here and its report is lost.
+    pub(crate) fn report_focus(&mut self, focused: bool) {
+        if focused == self.focus_sent {
+            return;
+        }
+        let enabled = self.host_events.focus_reporting();
+        let queued = match ronsole_term::focus_report_sequence(enabled, focused) {
+            Some(bytes) => self.queue_report(bytes),
+            None => true,
+        };
+        self.focus_sent = focused;
+        if queued {
+            self.focus_key_reset = Some(focused);
+        }
+    }
+
+    /// Takes the focus change that the key encoder has not applied yet.
+    pub(crate) fn take_focus_key_reset(&mut self) -> Option<bool> {
+        self.focus_key_reset.take()
+    }
+
+    /// Locks the grid for encoding a key. A pending focus change is applied first, so it clears
+    /// the key protocol's sent set before this key is encoded.
+    pub(crate) fn lock_grid_for_key(&mut self) -> MutexGuard<'_, Term> {
+        let focus_reset = self.take_focus_key_reset();
+        let mut grid = lock_terminal_grid(&self.grid);
+        if let Some(focused) = focus_reset {
+            let _ = grid.focus_changed(focused);
+        }
+        grid
     }
 
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
@@ -285,6 +388,7 @@ impl Terminal {
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
             focus_sent: false,
+            focus_key_reset: None,
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
             hovered_link_miss: None,
@@ -364,12 +468,12 @@ mod tests {
             cursor: foreground,
             ansi: [background; 16],
         });
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
-        let mut sink = RriterTermSink::new(None, Some(reply_tx));
+        let (write_queue, write_rx) = crate::app::terminal_sink::pty_write_queue();
+        let mut sink = RriterTermSink::new(None, Some(write_queue));
         term.advance(b"\x1b]10;?\x07\x1b]11;?\x07", Instant::now(), &mut sink);
 
         // One batch of replies is sent as a single message, both queries in order.
-        let reply = String::from_utf8_lossy(&reply_rx.try_recv().unwrap_or_default()).into_owned();
+        let reply = String::from_utf8_lossy(&write_rx.try_next().unwrap_or_default()).into_owned();
         // xterm `rgb:` spec doubles each 8-bit channel (ronsole-term osc.rs `rgb_spec`).
         assert!(reply.contains("rgb:abab/cdcd/efef"), "{reply}");
         assert!(reply.contains("rgb:1212/3434/5656"), "{reply}");
@@ -379,19 +483,24 @@ mod tests {
     #[test]
     fn resize_terminal_grid_drops_selection_only_on_size_change() {
         let mut term = test_term(8, 2);
+        let host_events = crate::app::terminal_host_events::HostEventsSink::new(
+            crate::ui_waker::UiWaker::counting(),
+        );
         term.set_selection(Some((0, 0, 2, 0)));
 
-        assert!(!resize_terminal_grid(&mut term, 8, 2));
+        assert!(!resize_terminal_grid(&mut term, 8, 2, &host_events));
         assert_eq!(term.selection(), Some((0, 0, 2, 0)));
 
-        assert!(resize_terminal_grid(&mut term, 4, 2));
+        assert!(resize_terminal_grid(&mut term, 4, 2, &host_events));
         assert_eq!(term.selection(), None);
         assert_eq!((term.cols(), term.rows()), (4, 2));
+        assert_eq!(host_events.content_generation(), term.content_generation());
 
         term.set_selection(Some((0, 0, 1, 0)));
-        assert!(resize_terminal_grid(&mut term, 4, 3));
+        assert!(resize_terminal_grid(&mut term, 4, 3, &host_events));
         assert_eq!(term.selection(), None);
         assert_eq!(term.rows(), 3);
+        assert_eq!(host_events.content_generation(), term.content_generation());
     }
 
     #[test]
@@ -426,7 +535,7 @@ mod tests {
         let host_events = crate::app::terminal_host_events::HostEventsSink::new(
             crate::ui_waker::UiWaker::counting(),
         );
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let (write_queue, write_rx) = crate::app::terminal_sink::pty_write_queue();
         let now = Instant::now();
         // The parser thread holds this batch without a reply queue; the CPR is produced only by the replay.
         let mut parser_sink = RriterTermSink::new(None, None);
@@ -434,17 +543,14 @@ mod tests {
         let deadline = lock_terminal_grid(&grid)
             .sync_deadline()
             .expect("mode 2026 holds the output");
-        assert!(reply_rx.try_recv().is_err());
+        assert!(write_rx.try_next().is_none());
 
-        assert!(flush_expired_sync_on_grid(
-            &grid,
-            &title_cache,
-            Some(reply_tx),
-            &host_events,
-            deadline
-        ));
+        assert_eq!(
+            flush_expired_sync_on_grid(&grid, &title_cache, Some(write_queue), &host_events, deadline),
+            SyncFallback::Replayed { changed: true },
+        );
         // Cursor at home: CPR reply is CSI row;col R with 1-based coordinates (xterm ctlseqs).
-        assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[1;1R".to_vec()));
+        assert_eq!(write_rx.try_next(), Some(b"\x1b[1;1R".to_vec()));
     }
 
     use std::time::Duration;
@@ -468,10 +574,37 @@ mod tests {
         let deadline = hold_batch(&term);
 
         let inside_grace = deadline + SYNC_UI_FALLBACK_GRACE - Duration::from_millis(1);
-        assert!(!term.flush_expired_sync(inside_grace));
+        assert_eq!(term.flush_expired_sync(inside_grace), SyncFallback::Idle);
         assert_eq!(term.sync_deadline(), Some(deadline), "UI replayed inside the grace");
 
-        assert!(term.flush_expired_sync(deadline + SYNC_UI_FALLBACK_GRACE));
+        assert_eq!(
+            term.flush_expired_sync(deadline + SYNC_UI_FALLBACK_GRACE),
+            SyncFallback::Replayed { changed: true },
+        );
+        assert_eq!(term.sync_deadline(), None);
+    }
+
+    #[test]
+    fn ui_fallback_does_not_block_and_retries_when_parser_holds_the_grid() {
+        let term = Terminal::test_without_process(20, 2);
+        let deadline = hold_batch(&term);
+        let overdue = deadline + SYNC_UI_FALLBACK_GRACE;
+
+        let guard = lock_terminal_grid(&term.grid);
+        // This thread holds the guard: a blocking lock in the fallback would never return here.
+        assert_eq!(term.flush_expired_sync(overdue), SyncFallback::Busy);
+        assert_eq!(
+            term.sync_wake_at(overdue),
+            Some(overdue + SYNC_UI_RETRY_INTERVAL),
+            "a blocked replay retries shortly, not at once"
+        );
+        drop(guard);
+        assert_eq!(term.sync_deadline(), Some(deadline), "the hold stays held while busy");
+
+        assert_eq!(
+            term.flush_expired_sync(overdue),
+            SyncFallback::Replayed { changed: true },
+        );
         assert_eq!(term.sync_deadline(), None);
     }
 
@@ -491,7 +624,7 @@ mod tests {
         locked_rx.recv().expect("holder thread took the grid lock");
 
         let started = Instant::now();
-        let wake_at = term.sync_wake_at();
+        let wake_at = term.sync_wake_at(deadline);
         // A read that takes the grid lock would wait for the holder to release it.
         assert!(
             started.elapsed() < Duration::from_secs(1),
@@ -508,5 +641,63 @@ mod tests {
         let term = Terminal::test_without_process(20, 2);
         // Focus reports must never block the UI thread, even with no PTY behind the tab.
         term.queue_report(b"\x1b[O");
+    }
+
+    #[test]
+    fn refused_focus_report_is_not_retried() {
+        let mut term = Terminal::test_without_process(20, 2);
+        term.host_events.set_focus_reporting(true);
+        // No PTY behind the tab refuses the report (a permanent refusal), so the state is recorded
+        // without a key-protocol reset.
+        term.report_focus(true);
+        assert!(term.focus_sent);
+        assert_eq!(term.take_focus_key_reset(), None);
+
+        // The next reconcile with the same focus must not attempt the report again: only the
+        // first `CSI I` reached `write_input` (`written_input` records every attempt in tests).
+        term.report_focus(true);
+        assert_eq!(
+            crate::platform::lock_recover(&term.written_input).clone(),
+            b"\x1b[I".to_vec()
+        );
+    }
+
+    #[test]
+    fn grid_dirty_without_waiting_returns_without_grid_lock() {
+        let term = Terminal::test_without_process(20, 2);
+        assert!(term.grid_dirty_without_waiting(), "a fresh grid is dirty");
+
+        let grid = term.grid.clone();
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder = std::thread::spawn(move || {
+            let _guard = lock_terminal_grid(&grid);
+            let _ = locked_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(3));
+        });
+        locked_rx.recv().expect("holder thread took the grid lock");
+
+        let started = Instant::now();
+        let dirty = term.grid_dirty_without_waiting();
+        // The frame check must not wait for the parser's batch: a held lock reads as not dirty.
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "grid_dirty_without_waiting waited for the grid lock"
+        );
+        assert!(!dirty);
+
+        let _ = release_tx.send(());
+        holder.join().expect("holder thread");
+        assert!(term.grid_dirty_without_waiting());
+    }
+
+    #[test]
+    fn focus_change_without_report_still_resets_key_protocol_once() {
+        let mut term = Terminal::test_without_process(20, 2);
+        // Reporting is off, so nothing is queued, but the key encoder still has to reset its state.
+        term.report_focus(true);
+        assert!(term.focus_sent);
+        assert_eq!(term.take_focus_key_reset(), Some(true));
+        assert_eq!(term.take_focus_key_reset(), None);
     }
 }

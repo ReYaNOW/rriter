@@ -99,23 +99,137 @@ pub(crate) fn terminal_mouse_report(
     mouse_report(grid.mouse_tracking(), grid.mouse_sgr(), kind, cell.0, cell.1)
 }
 
+/// Mouse-side state transitions of one tab. The App routers pick the tab and the cell; the
+/// tab owns the held buttons, the last reported cell and the PTY writes.
+impl Terminal {
+    /// Whether the application enabled mouse tracking on this tab.
+    pub(crate) fn tracks_mouse(&self) -> bool {
+        lock_terminal_grid(&self.grid).mouse_tracking().enabled()
+    }
+
+    /// Whether the press of `btn` was forwarded to the PTY and its release is still owed.
+    pub(crate) fn holds_button(&self, btn: MouseButton) -> bool {
+        self.mouse.holds(btn)
+    }
+
+    /// Encodes a press or release at `cell` and writes it to the PTY. Returns `true` when the
+    /// event belongs to the terminal and must not start a local selection.
+    pub(crate) fn forward_mouse_button(
+        &mut self,
+        pressed: bool,
+        btn: MouseButton,
+        cell: (usize, usize),
+    ) -> bool {
+        let kind = if pressed {
+            MouseEventKind::Press(btn)
+        } else {
+            MouseEventKind::Release(btn)
+        };
+        let report = terminal_mouse_report(&lock_terminal_grid(&self.grid), kind, cell);
+        self.mouse.update_held(pressed, btn);
+        self.mouse.last_cell = Some(cell);
+        let forwarded = report.is_some();
+        if let Some(bytes) = report {
+            let _ = self.write_input(&bytes);
+        }
+        // A release that tracking no longer encodes (mode turned off mid-drag) falls through
+        // to the panel drag cleanup instead of being swallowed.
+        pressed || forwarded
+    }
+
+    /// Reports pointer motion at `cell` once per cell.
+    pub(crate) fn forward_mouse_motion(&mut self, cell: (usize, usize)) {
+        if self.mouse.last_cell == Some(cell) {
+            return;
+        }
+        self.mouse.last_cell = Some(cell);
+        let kind = MouseEventKind::Motion {
+            held: self.mouse.motion_button(),
+        };
+        // Encode under the grid lock; the report is queued after the lock is released.
+        let report = terminal_mouse_report(&lock_terminal_grid(&self.grid), kind, cell);
+        if let Some(bytes) = report {
+            let _ = self.write_input(&bytes);
+        }
+    }
+
+    /// Routes a wheel step at `cell` to the PTY when the application tracks the mouse or the
+    /// alternate screen is shown. Returns `false` when the step must scroll the scrollback.
+    pub(crate) fn forward_wheel(&mut self, dy: f32, cell: (usize, usize)) -> bool {
+        let grid = lock_terminal_grid(&self.grid);
+        let is_alt = grid.is_alt_screen();
+        let tracked = grid.mouse_tracking().enabled();
+        if !tracked && !is_alt {
+            return false;
+        }
+        let app_cursor = grid.app_cursor_keys();
+        let kind = if dy < 0.0 {
+            MouseEventKind::WheelUp
+        } else {
+            MouseEventKind::WheelDown
+        };
+        let report = terminal_mouse_report(&grid, kind, cell);
+        drop(grid);
+        let steps = terminal_wheel_steps(dy);
+        if tracked {
+            if let Some(report) = report {
+                let _ = self.write_input(&report.repeat(steps));
+            }
+        } else {
+            let _ = self.write_input(&terminal_wheel_arrow_bytes(dy < 0.0, app_cursor, steps));
+        }
+        true
+    }
+
+    /// Brings this tab's DECSET 1004 state to `desired`. Losing focus also drops the held buttons,
+    /// because the host will not deliver their releases. Returns `true` when this call took the
+    /// tab from focused to unfocused, so the App can drop the terminal keys held on it.
+    pub(crate) fn sync_focus_report(&mut self, desired: bool) -> bool {
+        let lost_focus = self.focus_sent && !desired;
+        if !desired {
+            self.mouse.clear_held();
+        }
+        self.report_focus(desired);
+        lost_focus
+    }
+}
+
 impl App {
-    /// Active terminal index when the pointer is over its body, the panel is focused,
-    /// and the application enabled mouse tracking. Tracking takes every pointer event, including
-    /// the link modifier over a link: a left press there is opened before this check runs
-    /// (see `forward_terminal_mouse_button`), and any other event belongs to the PTY.
-    fn terminal_tracking_target(&self, mx: f32, my: f32) -> Option<usize> {
+    /// Clears the search and file-tree keyboard focus, so that the terminal body takes the keyboard.
+    pub(crate) fn clear_non_terminal_focus(&mut self) {
+        self.search_focused = false;
+        self.ide_panel.term_search_focused = false;
+        self.ide_panel.file_tree_focused = false;
+    }
+
+    /// Active terminal index when the pointer is over its body in IDE mode with the terminal panel open.
+    fn terminal_body_target(&self, mx: f32, my: f32) -> Option<usize> {
         if !self.is_ide_mode
             || !self.ide_panel.is_open(PanelId::Terminal)
-            || !self.ide_panel.terminal_focused
             || self.ui_registry.find_at(mx, my) != Some(UiId::TerminalBody)
         {
             return None;
         }
         let active = self.ide_panel.active_terminal;
-        let term = self.ide_panel.terminals.get(active)?;
-        let tracking = lock_terminal_grid(&term.grid).mouse_tracking().enabled();
-        tracking.then_some(active)
+        self.ide_panel.terminals.get(active).map(|_| active)
+    }
+
+    /// Active terminal index when the pointer is over its body and the application enabled mouse
+    /// tracking, whether or not the panel has focus.
+    fn tracking_body_target(&self, mx: f32, my: f32) -> Option<usize> {
+        let active = self.terminal_body_target(mx, my)?;
+        self.ide_panel.terminals.get(active)?.tracks_mouse().then_some(active)
+    }
+
+    /// Active terminal index when the pointer is over a tracking terminal body and the panel is
+    /// focused. Tracking takes every pointer event, including the link modifier over a link: a
+    /// left press there is opened before this check runs (see `forward_terminal_mouse_button`),
+    /// and any other event belongs to the PTY.
+    fn terminal_tracking_target(&self, mx: f32, my: f32) -> Option<usize> {
+        if !self.ide_panel.terminal_focused {
+            return None;
+        }
+        self.tracking_body_target(mx, my)
     }
 
     /// Whether the link modifier (Ctrl, or Command on macOS) is held.
@@ -180,7 +294,7 @@ impl App {
         self.ide_panel
             .terminals
             .get(self.ide_panel.active_terminal)
-            .is_some_and(|term| lock_terminal_grid(&term.grid).mouse_tracking().enabled())
+            .is_some_and(|term| term.tracks_mouse())
     }
 
     /// Terminal that takes a release: the active one, only when it holds this button's press.
@@ -189,7 +303,7 @@ impl App {
         let btn = terminal_mouse_button(button)?;
         let active = self.ide_panel.active_terminal;
         let term = self.ide_panel.terminals.get(active)?;
-        term.mouse.holds(btn).then_some(active)
+        term.holds_button(btn).then_some(active)
     }
 
     /// Forwards a press or release over a tracking terminal to the PTY. Returns `true`
@@ -212,6 +326,19 @@ impl App {
             crate::platform::open_terminal_uri(self.external_requests.sink(), &uri);
             return true;
         }
+        // The first press on an unfocused tracking terminal only moves focus: the application
+        // does not see it and no local selection starts. The next press is forwarded.
+        if pressed
+            && !self.ide_panel.terminal_focused
+            && self.tracking_body_target(mx, my).is_some()
+        {
+            self.clear_non_terminal_focus();
+            self.ide_panel.terminal_focused = true;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
+        }
         let target = if pressed {
             self.terminal_tracking_target(mx, my)
         } else {
@@ -229,21 +356,7 @@ impl App {
         let Some(term) = self.ide_panel.terminals.get_mut(active) else {
             return true;
         };
-        let kind = if pressed {
-            MouseEventKind::Press(btn)
-        } else {
-            MouseEventKind::Release(btn)
-        };
-        let report = terminal_mouse_report(&lock_terminal_grid(&term.grid), kind, cell);
-        term.mouse.update_held(pressed, btn);
-        term.mouse.last_cell = Some(cell);
-        let forwarded = report.is_some();
-        if let Some(bytes) = report {
-            let _ = term.write_input(&bytes);
-        }
-        // A release that tracking no longer encodes (mode turned off mid-drag) falls through
-        // to the panel drag cleanup instead of being swallowed.
-        pressed || forwarded
+        term.forward_mouse_button(pressed, btn, cell)
     }
 
     /// Reports pointer motion over a tracking terminal, once per cell. Returns `true`
@@ -258,30 +371,20 @@ impl App {
         let Some(term) = self.ide_panel.terminals.get_mut(active) else {
             return true;
         };
-        if term.mouse.last_cell == Some(cell) {
-            return true;
-        }
-        term.mouse.last_cell = Some(cell);
-        let kind = MouseEventKind::Motion {
-            held: term.mouse.motion_button(),
-        };
-        // Encode under the grid lock, but write after it is released: a blocking PTY write
-        // must not hold the grid while the parser thread waits for it.
-        let report = terminal_mouse_report(&lock_terminal_grid(&term.grid), kind, cell);
-        if let Some(bytes) = report {
-            let _ = term.write_input(&bytes);
-        }
+        term.forward_mouse_motion(cell);
         true
     }
 
     /// Single point that reconciles every tab's DECSET 1004 state with the host focus.
     /// Sends `CSI I` / `CSI O` only on transitions, and only when the application enabled reporting.
+    /// A tab losing focus also drops the terminal keys the host still counts as held.
     pub(crate) fn sync_terminal_focus_reports(&mut self) {
         let window_focused = self.is_focused;
         let panel_focused = self.ide_panel.terminal_focused;
         let panel_open = self.ide_panel.is_open(PanelId::Terminal);
         let active = self.ide_panel.active_terminal;
         let is_ide_mode = self.is_ide_mode;
+        let mut lost_focus = false;
         for (index, term) in self.ide_panel.terminals.iter_mut().enumerate() {
             let desired = terminal_focus_desired(
                 window_focused,
@@ -290,33 +393,18 @@ impl App {
                 panel_open,
                 index == active,
             );
-            if !desired {
-                term.mouse.clear_held();
-            }
-            set_focus_report(term, desired);
+            lost_focus |= term.sync_focus_report(desired);
+        }
+        if lost_focus {
+            self.clear_terminal_held_keys();
         }
     }
 
     /// Sends focus-out to tab `index` before the tab is removed, so an application that asked for DECSET 1004 sees it leave.
     pub(crate) fn send_terminal_focus_out(&mut self, index: usize) {
         if let Some(term) = self.ide_panel.terminals.get_mut(index) {
-            set_focus_report(term, false);
+            term.report_focus(false);
         }
-    }
-}
-
-/// Queues `CSI I` / `CSI O` for one tab when its desired DECSET 1004 state changes and the application enabled reporting.
-/// The report goes through the PTY writer queue without blocking, so closing a tab never waits for the child.
-fn set_focus_report(term: &mut Terminal, desired: bool) {
-    if desired == term.focus_sent {
-        return;
-    }
-    term.focus_sent = desired;
-    let report = lock_terminal_grid(&term.grid)
-        .focus_changed(desired)
-        .map(<[u8]>::to_vec);
-    if let Some(bytes) = report {
-        term.queue_report(&bytes);
     }
 }
 

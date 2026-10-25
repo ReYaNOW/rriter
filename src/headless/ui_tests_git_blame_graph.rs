@@ -104,7 +104,9 @@ fn headless_git_blame_popup_reveals_commit_beyond_first_graph_page() {
     );
     assert!(session.app.ide_panel.git.graph_reveal.highlight_oid().is_none());
     session.app.reveal_commit_in_graph(&root, "missing-commit-oid");
-    assert!(!session.app.ide_panel.git.graph_reveal.is_searching());
+    wait_until(&mut session, 5000, "missing commit reveal finished", |session| {
+        !session.app.ide_panel.git.graph_reveal.is_searching()
+    });
     assert!(session.app.ide_panel.git.graph_snapshot.len() < 250);
     session.app.reveal_commit_in_graph(&root, &expected_oid);
     assert_eq!(

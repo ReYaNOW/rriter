@@ -23,7 +23,6 @@ struct RootFramePanelLayout<'a> {
         &'a crate::app::database::DatabaseQueryTabState,
     )>,
     git_blame_inline: bool,
-    database_query_modal_open: bool,
     database_query_results_h: f32,
     modal_overlay_open: bool,
     ui_mx: f32,
@@ -33,6 +32,15 @@ struct RootFramePanelLayout<'a> {
     status_progress_value: Option<f32>,
     editor_bottom_h: f32,
     is_ui_disabled: bool,
+}
+
+impl RootFramePanelLayout<'_> {
+    /// True while the active database query tab has a pending review modal.
+    /// Derived from `active_database_query`, so it is not stored separately.
+    fn database_query_review_open(&self) -> bool {
+        self.active_database_query
+            .is_some_and(|(_, state)| state.review.is_some())
+    }
 }
 
 /// Editor viewport geometry and rounded scroll of one root frame
@@ -307,7 +315,6 @@ impl Renderer {
             panel_left_w,
             panel_bottom_h,
             active_database_query,
-            database_query_modal_open,
             database_query_results_h,
             modal_overlay_open,
             ui_mx,

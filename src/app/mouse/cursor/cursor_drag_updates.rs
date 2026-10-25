@@ -12,7 +12,8 @@ impl App {
     }
 
     /// Grid cell under the pointer as `(column, row from the top of the visible area)`, the
-    /// coordinates a PTY mouse report uses; the row follows the same scroll offset as `terminal_mouse_cell`.
+    /// coordinates a PTY mouse report uses. Unlike `terminal_mouse_cell`, whose row counts scrollback,
+    /// this row is relative to the visible area.
     pub(crate) fn terminal_report_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
         self.terminal_pointer_cells(px, py)
             .map(|(col, _, visible_row)| (col, visible_row))

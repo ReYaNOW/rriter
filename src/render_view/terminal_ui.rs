@@ -590,7 +590,12 @@ impl Renderer {
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
             let new_rows = terminal_visible_rows(term_content_h, char_h, s);
 
-            if crate::app::terminal::resize_terminal_grid(&mut grid, new_cols, new_rows) {
+            if crate::app::terminal::resize_terminal_grid(
+                &mut grid,
+                new_cols,
+                new_rows,
+                term.host_events(),
+            ) {
                 term.resize_pty(
                     clamp_terminal_pty_dimension(new_cols),
                     clamp_terminal_pty_dimension(new_rows),
@@ -1520,15 +1525,64 @@ mod tests {
         let sel = [0.2, 0.3, 0.4, 1.0];
         let search_match = [0.6, 0.6, 0.6, 0.35];
         let search_match_active = [1.0, 0.6, 0.0, 0.5];
-        assert_eq!(terminal_cell_background(None, search_match, search_match_active, false, false, false, sel), None);
-        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, false, false, false, sel), cell_bg);
-        assert_eq!(terminal_cell_background(cell_bg, search_match, search_match_active, true, true, false, sel), Some(sel));
         assert_eq!(
-            terminal_cell_background(cell_bg, search_match, search_match_active, false, true, false, sel),
+            terminal_cell_background(
+                None,
+                search_match,
+                search_match_active,
+                false,
+                false,
+                false,
+                sel
+            ),
+            None
+        );
+        assert_eq!(
+            terminal_cell_background(
+                cell_bg,
+                search_match,
+                search_match_active,
+                false,
+                false,
+                false,
+                sel
+            ),
+            cell_bg
+        );
+        assert_eq!(
+            terminal_cell_background(
+                cell_bg,
+                search_match,
+                search_match_active,
+                true,
+                true,
+                false,
+                sel
+            ),
+            Some(sel)
+        );
+        assert_eq!(
+            terminal_cell_background(
+                cell_bg,
+                search_match,
+                search_match_active,
+                false,
+                true,
+                false,
+                sel
+            ),
             Some(search_match)
         );
         assert_eq!(
-            terminal_cell_background(cell_bg, search_match, search_match_active, true, true, true, sel),
+            terminal_cell_background(
+                cell_bg,
+                search_match,
+                search_match_active,
+                true,
+                true,
+                true,
+                sel
+            ),
             Some(search_match_active)
         );
     }

@@ -122,6 +122,39 @@ impl App {
         config: crate::Config,
         options: AppInitOptions,
     ) -> Self {
+        let highlighter = Highlighter::new();
+        highlighter.bind_ui_waker(&options.ui_waker);
+        let system_selection = crate::startup_environment::system_selection_color();
+        let markdown_media = crate::markdown_media::MarkdownMedia::from_platform();
+        let mut app = Self::from_parts(config, options, system_selection, highlighter, markdown_media);
+
+        app.highlighter.reset(
+            app.editor.version,
+            app.editor.get_full_text(),
+            app.file_extension.clone(),
+            app.editor.cursor,
+        );
+        app.last_sent_version = app.editor.version;
+        // After the empty reset above: the worker keeps only the last queued `Reset`.
+        app.preload_ide_startup();
+
+        if app.show_welcome {
+            app.base_title = "Добро пожаловать".to_string();
+        }
+
+        app.ide_panel.project_search.help_run_label = app.project_search_run_label.clone();
+        app
+    }
+
+    /// Assembles an `App` from prepared inputs. Reads of the window, GL, disk and
+    /// system settings stay with the caller, so tests can build the same struct.
+    pub(crate) fn from_parts(
+        config: crate::Config,
+        options: AppInitOptions,
+        system_selection: [f32; 4],
+        highlighter: Highlighter,
+        markdown_media: crate::markdown_media::MarkdownMedia,
+    ) -> Self {
         let editor = options
             .editor
             .unwrap_or_else(|| Self::initial_editor(""));
@@ -141,16 +174,13 @@ impl App {
         let empty_ide_open_label = format!("{}  — открыть файл", keymap.label(crate::keymap::Command::FileOpen));
         let project_search_run_label = format!("Literal-only. {} или кнопка запуска.", keymap.label(crate::keymap::Command::SearchProjectRun));
 
-        let highlighter = Highlighter::new();
-        highlighter.bind_ui_waker(&options.ui_waker);
-        let system_selection = crate::startup_environment::system_selection_color();
         let show_welcome = !options.has_file_arg && !options.run_ide_on_startup;
         let file_key = options
             .file_path
             .as_deref()
             .map(crate::platform::PathKey::new);
         let recent_files = options.recent_files.unwrap_or_default();
-        let mut app = App {
+        App {
             automation: options
                 .automation_options
                 .map(crate::app::automation::AutomationController::new),
@@ -188,7 +218,7 @@ impl App {
             file_extension: ext,
             markdown: Default::default(),
             markdown_toc: Default::default(),
-            markdown_media: crate::markdown_media::MarkdownMedia::from_platform(),
+            markdown_media,
             highlighter,
             closing_hint_state: Default::default(),
             closing_hint_settings: config.dart_settings.closing_hint_settings(),
@@ -368,24 +398,7 @@ impl App {
             ide_deferred: crate::app::IdeDeferred::None,
             startup_editor_pending: None,
             startup_editor_reveal_at: None,
-        };
-
-        app.highlighter.reset(
-            app.editor.version,
-            app.editor.get_full_text(),
-            app.file_extension.clone(),
-            app.editor.cursor,
-        );
-        app.last_sent_version = app.editor.version;
-        // After the empty reset above: the worker keeps only the last queued `Reset`.
-        app.preload_ide_startup();
-
-        if show_welcome {
-            app.base_title = "Добро пожаловать".to_string();
         }
-
-        app.ide_panel.project_search.help_run_label = app.project_search_run_label.clone();
-        app
     }
 }
 

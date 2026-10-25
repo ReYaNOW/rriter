@@ -32,9 +32,7 @@ impl App {
             UiId::StatusGitBlame => self.toggle_git_blame_inline(),
             UiId::TerminalBody => {
                 self.is_dragging = true;
-                self.search_focused = false;
-                self.ide_panel.term_search_focused = false;
-                self.ide_panel.file_tree_focused = false;
+                self.clear_non_terminal_focus();
                 let active = self.ide_panel.active_terminal;
                 let mouse = self
                     .renderer

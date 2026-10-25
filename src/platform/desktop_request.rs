@@ -277,6 +277,7 @@ fn shell_execute_open(target: &OsStr) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use super::with_com_apartment;
 
     let operation = OsStr::new("open")
         .encode_wide()
@@ -286,7 +287,7 @@ fn shell_execute_open(target: &OsStr) -> io::Result<()> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    let result = unsafe {
+    let result = with_com_apartment(|| unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
             operation.as_ptr(),
@@ -295,7 +296,7 @@ fn shell_execute_open(target: &OsStr) -> io::Result<()> {
             std::ptr::null(),
             SW_SHOWNORMAL,
         )
-    };
+    });
     if result as isize > 32 {
         return Ok(());
     }

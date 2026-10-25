@@ -224,14 +224,56 @@ where
     std::thread::Builder::new().name(name.into()).spawn(task)
 }
 
+/// Runs a Shell API call on a thread with a COM apartment: ShellExecute may delegate
+/// to shell extensions over COM. A negative HRESULT means COM is already set up in
+/// another mode; the call still runs, and that apartment is left alone.
+#[cfg(windows)]
+pub(crate) fn with_com_apartment<T>(action: impl FnOnce() -> T) -> T {
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+    };
+    let hr = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+    let result = action();
+    if hr >= 0 {
+        unsafe { CoUninitialize() };
+    }
+    result
+}
+
+/// How often the reaper re-checks workers that were still running.
+const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Joins the workers that have finished and keeps the rest in `pending`, so one
+/// hung worker never delays the join of a finished one.
+fn join_finished_workers(pending: &mut Vec<JoinHandle<()>>) {
+    let (finished, running): (Vec<_>, Vec<_>) =
+        std::mem::take(pending).into_iter().partition(JoinHandle::is_finished);
+    for worker in finished {
+        let _ = worker.join();
+    }
+    *pending = running;
+}
+
 pub(crate) fn reap_unit_thread(worker: JoinHandle<()>) {
     static REAPER: std::sync::OnceLock<std::sync::mpsc::SyncSender<JoinHandle<()>>> =
         std::sync::OnceLock::new();
     let sender = REAPER.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::sync_channel::<JoinHandle<()>>(32);
         let _ = spawn_named("rriter-thread-reaper", move || {
-            while let Ok(worker) = rx.recv() {
-                let _ = worker.join();
+            let mut pending = Vec::new();
+            loop {
+                // Block only when nothing is pending; otherwise poll so running workers are re-checked.
+                let received = if pending.is_empty() {
+                    rx.recv().map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected)
+                } else {
+                    rx.recv_timeout(REAPER_POLL_INTERVAL)
+                };
+                match received {
+                    Ok(worker) => pending.push(worker),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                join_finished_workers(&mut pending);
             }
         });
         tx

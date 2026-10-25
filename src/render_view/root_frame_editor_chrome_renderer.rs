@@ -339,7 +339,6 @@ impl Renderer {
             my,
             panel_bottom_h,
             active_database_query,
-            database_query_modal_open,
             ui_mx,
             ui_my,
             status_progress_label,
@@ -483,7 +482,7 @@ impl Renderer {
             || hover_blocked_by_database_query_results
             || file_tree_overlay_open
             || ide_panel.database.modal_open()
-            || database_query_modal_open
+            || layout.database_query_review_open()
             || ide_panel.project_search.help_open
             || ide_panel.api.mock_guide_open
             || ide_panel.api.mock_server_detail_open

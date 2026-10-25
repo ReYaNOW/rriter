@@ -20,6 +20,7 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
         for idx in closed_terminals.into_iter().rev() {
             let active = app.ide_panel.active_terminal;
             app.ide_panel.terminals.remove(idx);
+            app.clear_terminal_held_keys();
             needs_redraw = true;
             if app.ide_panel.terminals.is_empty() {
                 app.add_terminal();
@@ -41,7 +42,7 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
             }
-            if crate::app::terminal::lock_terminal_grid(&t.grid).dirty() {
+            if t.grid_dirty_without_waiting() {
                 needs_redraw = true;
             }
         }
