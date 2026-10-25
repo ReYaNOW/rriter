@@ -132,12 +132,14 @@ impl RriterTermSink {
         self
     }
 
-    /// Publishes the grid's mode 2026 hold deadline and DECSET 1004 state for the UI thread. Call
-    /// with the grid lock held, after every change to the grid, so the published values match it.
+    /// Publishes the grid's mode 2026 hold deadline, DECSET 1004 state and content generation for
+    /// the UI thread. Call with the grid lock held, after every change to the grid, so the published
+    /// values match it.
     pub(crate) fn publish_sync_deadline(&self, grid: &Term) {
         if let Some(host_events) = self.host_events.as_ref() {
             host_events.set_sync_deadline(grid.sync_deadline());
             host_events.set_focus_reporting(grid.focus_reporting());
+            host_events.set_content_generation(grid.content_generation());
         }
     }
 }
