@@ -1,0 +1,29 @@
+# l01: SGR 8 (conceal) and SGR 9 (strikethrough), checked on pixels.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l01_conceal.txt
+# Setup as in l01_sgr.txt: the click markers open RRiter's terminal panel (Ronsole skips them), both
+# shells cd to /tmp and are cleared. The printed row is found by the word `concealrow`; it is built
+# as conceal''row so the echoed command does not contain it. The printf ends with \012 (a newline),
+# not \n: `type` turns \n into Enter.
+# Concealed cells must match the empty cell of their own app. The strikethrough is put on four blank
+# cells (spaces, not glyphs: the fonts differ) and measured as a line by `#@line_of` (compare.py docstring).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[8mHID''DEN\033[0m \033[9m    \033[0m conceal''row\012'
+idle 300
+key enter
+idle 800
+#@pixel_bg_of concealrow 0 conceal-first
+#@pixel_bg_of concealrow 5 conceal-last
+#@line_of concealrow 8 strike

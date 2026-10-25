@@ -328,6 +328,21 @@ impl App {
     }
 }
 
+impl App {
+    /// Applies a change of the held modifiers. Called by the winit `ModifiersChanged` event and by
+    /// the headless `mods` command, so both update the same state and request a frame.
+    pub(crate) fn handle_main_modifiers_changed(&mut self, state: winit::keyboard::ModifiersState) {
+        self.modifiers = state;
+        self.sync_terminal_held_modifiers();
+        if !self.modifiers.control_key() {
+            self.clear_ctrl_definition();
+        }
+        if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
+        }
+    }
+}
+
 impl ApplicationHandler<crate::ui_waker::AppWake> for App {
     // Coverage rationale: OS window, GL context, swapchain, and renderer
     // initialization are isolated in the window runtime boundary.
@@ -514,16 +529,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                 }
                 self.handle_main_resized(size);
             }
-            WindowEvent::ModifiersChanged(mod_state) => {
-                self.modifiers = mod_state.state();
-                self.sync_terminal_held_modifiers();
-                if !self.modifiers.control_key() {
-                    self.clear_ctrl_definition();
-                }
-                if let Some(w) = self.window.as_ref() {
-                    w.request_redraw();
-                }
-            }
+            WindowEvent::ModifiersChanged(mod_state) => self.handle_main_modifiers_changed(mod_state.state()),
             WindowEvent::DroppedFile(path) => match window_runtime::dropped_path_kind(&path) {
                 Some(window_runtime::DroppedPathKind::File) => {
                     self.open_file_in_tab(path, true);

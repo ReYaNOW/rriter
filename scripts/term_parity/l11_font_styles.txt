@@ -1,0 +1,35 @@
+# l11: Bold, italic and bold-italic cells, compared as dump cells (ch, flags) per app.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l11_font_styles.txt
+# Setup as in l01_sgr.txt: the click markers open RRiter's terminal panel (Ronsole skips them), both
+# shells cd to /tmp and are cleared. The printed row is found by the word `stylerow`; the command
+# text uses stylerow with a quote split so the echoed command does not contain it.
+# The bold/italic flags are compared through `dump row`. Glyph weight is not compared across apps (the
+# fonts differ); within each app, `#@bolder` (bold L has more ink weight than regular L) and `#@drawn`
+# (the bold star, a symbol the bold face may not cover, is drawn: not checked against the fonts) read
+# the cell pixels (spec L11).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[1mBO''LD\033[0m \033[3mIT''AL\033[0m \033[1;3mBI''BI\033[0m \033[0mREG''ULAR\033[0m \033[1m★\033[0m style''row\012'
+idle 300
+key enter
+idle 800
+#@row_of stylerow
+# Cells of the printed row: BOLD 0-3, ITAL 5-8, BIBI 10-13, REGULAR 15-21 (L at 19 is regular, L at 2 bold),
+# the bold star at 23. L11 within each app: the bold L has more ink weight than the regular L; the star is drawn.
+#@ink_weight_of stylerow 2 bold_l
+#@ink_weight_of stylerow 19 regular_l
+#@bolder bold_l regular_l
+#@ink_weight_of stylerow 23 star_bold
+#@drawn star_bold

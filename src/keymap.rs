@@ -182,6 +182,11 @@ pub fn validate(platform: PlatformKind, chord: Chord) -> Result<(), ChordError> 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChordError { UnknownKey, Reserved, NeedsModifier }
 
+/// A key that only changes the held modifiers.
+pub(crate) fn is_modifier_key(key: PhysicalKey) -> bool {
+    matches!(key, PhysicalKey::Code(KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::AltLeft | KeyCode::AltRight | KeyCode::ShiftLeft | KeyCode::ShiftRight | KeyCode::SuperLeft | KeyCode::SuperRight))
+}
+
 pub fn is_reserved(platform: PlatformKind, chord: Chord) -> bool {
     let k = chord.key;
     let m = chord.mods;

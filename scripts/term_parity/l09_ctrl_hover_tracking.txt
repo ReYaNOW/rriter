@@ -1,0 +1,64 @@
+# l09: Ctrl-hover underline on a link of blank cells, and Ctrl+click on a link while the app has mouse
+# tracking on (ESC[?1000h): the link opens and the application gets no bytes.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l09_ctrl_hover_tracking.txt
+# Expected (Ronsole headless spec 2026-10-23, section 9, row L9): Ctrl+hover shows pointer `cursor_icon`
+# and an underline in the cell rect; with tracking on, Ctrl+click gives `external_request` and the
+# reader gets no bytes: its whole output is `78` (the `x` sent after `mods` releases Ctrl).
+# Part A: the link is on blank cells (four spaces) so the underline is measured as a line by `#@line_of`
+# (compare.py docstring). The printed row is screen row 0 (absolute CUP to 1;1), with the cursor moved
+# to 2;1 so that the shell prompt does not overwrite it. The marker word is split as `l9''row`.
+# Part B: the reader function (as in l08_kitty_keys.txt, `\r\n` written as `\015\012` so that `type`
+# does not turn it into Enter) also prints the link and enables tracking itself. Printing the link inside
+# the function keeps it on screen: a command entered after a plain print would scroll the 3-row panel.
+# The function is typed before the `clear`, so its long echo does not stay on the screen of the 30-row window.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[1;1H\033[2K\033]8;;https://example.com/l9\033\134    \033]8;;\033\134l9''row\033[2;1H'
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 1 0
+idle 300
+#@line_of l9row 2 ctrl-underline
+dump
+mods
+type r() { stty raw -echo min 1 time 0; printf '\033[?1000h\033[1;1H\033[2K\033]8;;https://example.com/l9b\033\134    \033]8;;\033\134\033[2;1HRE''ADY\015\012'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \012'; printf '\015\012'; stty sane; }
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type r
+idle 300
+key enter
+idle 1500
+mods ctrl
+mouse_cell 1 0
+idle 300
+click
+idle 800
+dump
+mods
+wait 1000
+key x
+idle 2500
+dump
+type printf '\033[?1000l'
+idle 300
+key enter
+idle 800

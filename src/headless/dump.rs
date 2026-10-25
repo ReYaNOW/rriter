@@ -7,6 +7,7 @@ use crate::editor::Editor;
 use crate::platform::ExternalRequest;
 use crate::renderer::Renderer;
 use crate::scroll::ScrollState;
+use super::dump_terminal;
 use crate::widgets::Button;
 use glow::HasContext;
 use serde_json::{Value, json};
@@ -87,11 +88,9 @@ pub(crate) fn draw_dialog(renderer: &mut Renderer, base_title: &str, action: Pen
 fn event_loop_json(app: &App, loop_state: &HeadlessLoopState, now: Instant) -> Value {
     let (control_flow, deadline_ms) =
         super::frame::control_flow_label(loop_state.last_control_flow.get(), now);
-    let redraw_requested = app
-        .window
-        .as_ref()
-        .and_then(|window| window.headless())
-        .is_some_and(|window| window.redraw_requested());
+    let headless = app.window.as_ref().and_then(|window| window.headless());
+    let redraw_requested = headless.is_some_and(|window| window.redraw_requested());
+    let frame_requests = headless.map_or(0, |window| window.frame_requests());
     json!({
         "control_flow": control_flow,
         "deadline_ms": deadline_ms,
@@ -99,6 +98,7 @@ fn event_loop_json(app: &App, loop_state: &HeadlessLoopState, now: Instant) -> V
         "wake_pending": app.ui_waker.is_pending(),
         "wake_events": app.ui_waker.queued_events(),
         "redraw_requested": redraw_requested,
+        "frame_requests": frame_requests,
     })
 }
 
@@ -112,6 +112,9 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             (size.width, size.height)
         });
     let dialog = dialog_json(app, w, h);
+    // Computed before the renderer borrow: the terminal geometry needs `&mut App`.
+    let terminal = dump_terminal::terminal_json(app);
+    let terminal_tabs = dump_terminal::tabs_json(app);
     let Some(renderer) = app.renderer.as_ref() else {
         return json!(null);
     };
@@ -233,6 +236,8 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "alpha_fill_y": atlas_stats.2,
         },
         "tabs": tabs_json(app),
+        "terminal_tabs": terminal_tabs,
+        "terminal": terminal,
         "markdown_media_stats": {
             "media_gen": app.markdown_media.media_gen(),
             "loads_started": media_stats.loads_started,

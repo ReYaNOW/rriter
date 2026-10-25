@@ -1,0 +1,28 @@
+# l17: colour emoji share the Regular entry: the same emoji in bold and in regular is drawn the same.
+# Cells: EMOJI17 occupies cols 0-6, the regular emoji is cols 8-9 (wide), the bold emoji cols 11-12.
+# Emoji are written as octal UTF-8 bytes (U+1F600 = F0 9F 98 80) so the file stays ASCII.
+# Measured by compare.py: ink rows and centre pixels of both cells, per app (report-only across apps).
+# The spec check (L17: bold cell == regular cell) is `#@same_glyph`, per app; the regular and bold
+# markers share one label each for their ink and pixel measurement.
+# Needs the system NotoColorEmoji.ttf (renderer.rs:364-366).
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l17_emoji_weight.txt
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type printf 'EMO''JI17 \360\237\230\200 \033[1m\360\237\230\200\033[0m'
+idle 300
+key enter
+idle 800
+#@ink_rows_of EMOJI17 8 emoji_regular
+#@ink_rows_of EMOJI17 11 emoji_bold
+#@pixel_of EMOJI17 8 emoji_regular
+#@pixel_of EMOJI17 11 emoji_bold
+#@same_glyph emoji_regular emoji_bold
+dump

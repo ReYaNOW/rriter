@@ -1,0 +1,25 @@
+# l14: strikethrough sits at the centre of the x-height. The strike is on four blank cells (SGR 9 around
+# spaces: glyph ink differs between the fonts, the cell box does not); the glyph `x` is plain, in the same row.
+# Measured by compare.py: `#@line_of` (strike thickness, centre relative to baseline) and `#@ink_rows_of`
+# (top, bottom and centre of the x ink). The spec check (L14: strike centre within 1 px of the x ink
+# centre, in the same app) is `#@centre_within strike glyph_x 1`, a DIFF per app when it fails.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l14_strike_centre.txt
+# Marker word is split in the typed command (STR''IKE14) so the echoed command row does not match it.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type printf 'STR''IKE14 \033[9m    \033[0mx'
+idle 300
+key enter
+idle 800
+#@line_of STRIKE14 10 strike
+#@ink_rows_of STRIKE14 13 glyph_x
+#@centre_within strike glyph_x 1
+dump

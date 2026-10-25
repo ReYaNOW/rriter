@@ -1,0 +1,42 @@
+# l08c: Kitty flag 8 with held modifiers: `mods ctrl`, then `key ctrl+a`, then `mods` (release).
+# Reader: function `r` as in l08_kitty_keys.txt (raw mode, READY, hex of the bytes until 1 s of silence, END).
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l08c_kitty_flag8_mods.txt
+#
+# What is compared: the PTY bytes the reader prints, on both apps; they must be equal. The expected bytes
+# below are from the Kitty protocol for the key, not from either app's output:
+#   flags 8, `key ctrl+a` with Ctrl held: CSI 97;5 u = 1b5b39373b3575 (key code 97, Ctrl = modifier 5)
+#   `mods` release: no bytes (release events are reported only with flag 2, as in l08b_kitty_flag8_repeat_char.txt)
+# Modifier-key reports at flag 8 (the press of Ctrl itself) are not in the spec table (see l08b), so the
+# scenario does not state their bytes: it expects the two apps to print the same bytes, whatever they are.
+# A difference here is the held-modifier gap of the headless protocol (review finding M1 in the Task 8 final review).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type r() { stty raw -echo min 1 time 0; printf 'RE''ADY\r\n'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \012'; printf '\r\n'; stty sane; }
+idle 300
+key enter
+idle 800
+# flags 8 (push at flags 0: Enter is still CR here, so `key enter` runs the command)
+type printf '\033[>8u'
+idle 300
+key enter
+idle 800
+type r\n
+idle 300
+mods ctrl
+idle 300
+key ctrl+a
+idle 300
+mods
+idle 1500
+dump
+# pop flag 8 (flags 8 is active: the command is submitted with LF)
+type printf '\033[<u'\n
+idle 800

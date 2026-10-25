@@ -1,0 +1,29 @@
+# l13: An underlined blank row, with a row below it that must carry no underline pixels.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l13_underline_clip.txt
+# Also run with --scale 1.333 (spec L13 names both scales).
+# Setup as in l01_sgr.txt. Row `ulrow` is underlined; the row below (`belowrow`) starts with four
+# blank cells that carry no attribute. Both rows are placed by absolute cursor positions on the
+# cleared screen. RRiter's panel is 3 rows tall, and the shell prompt drawn after the printf output
+# scrolls it (probes: `ulrow` lost each time the prompt followed the output). The command therefore
+# ends with `sleep 60`: no prompt is drawn, and the output stays on screen while the scenario runs.
+# The `#@line_of belowrow ... absent` probe expects no line in either app (MATCH).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[1;1H\033[4m    \033[0m ul''row\033[2;1H    below''row\033[3;1H'; sleep 60
+idle 300
+key enter
+idle 800
+#@line_of ulrow 1 underline
+#@line_of belowrow 1 below-row absent

@@ -1,0 +1,44 @@
+# l04: OSC 8 hyperlink survives scrollback and reflow. A link is printed, then 60 lines push it into the
+# scrollback (2 x the Ronsole window height). `wheel` up to the top of the scrollback brings the link row
+# into both panels (RRiter shows 3 rows, Ronsole 30; the top row is row 2 in both). A narrower resize
+# wraps the link line; the row that starts the link must still carry the link.
+# Expected (spec §5.5, protocol ref §4): `link` of the cells is the URI in both apps, before and after.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l04_osc8_scrollback.txt --size 1280x800 --scale 1.0
+# `type` turns `\n` into a newline and `\\` into `\`. The link word is split as `lin''k-l4` so that the
+# echoed command line does not match the `#@row_of` marker `link-l4`. Filler is typed literally.
+# The `#@click_ui` markers enter IDE mode and open the terminal panel on RRiter; Ronsole skips them.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033]8;;https://example.com/l4\033\\\\lin''k-l4xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\033]8;;\033\\\\'; echo
+idle 300
+key enter
+idle 500
+type seq 1 60
+idle 300
+key enter
+idle 800
+mouse_move 640 700
+wheel 0 100 lines
+wheel 0 100 lines
+idle 3000
+#@row_of link-l4
+resize 640x800
+idle 800
+# After the resize RRiter's 3-row panel shows only the wrapped tail of the link line: the link row is one
+# line above it. One wheel line up brings that row into view (probed on RRiter, 1 wheel line -> top 2).
+mouse_move 320 700
+wheel 0 1 lines
+idle 3000
+#@link_of link-l4

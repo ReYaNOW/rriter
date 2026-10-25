@@ -1,0 +1,42 @@
+# l01: SGR attributes and colours printed by the shell, then the cells of the printed row.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l01_sgr.txt
+# The `#@click_ui` markers enter IDE mode and open the terminal panel on RRiter; Ronsole starts with
+# a terminal tab, so it skips them (compare.py prints the skip). Both shells cd to /tmp and are
+# cleared first, so the prompt rows match. Waits are `idle`, not `settle`: in a probe on RRiter, after
+# `settle` the typed commands had not run and the dump showed the old screen; with `idle` they ran.
+# `idle` steps the strict loop model (docs/headless.md, "Strict loop model").
+# The OSC 2 printf is overwritten by zsh's precmd title hook, so the title follows the cwd; both apps
+# are in /tmp, so the titles match.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033]2;T\007'
+idle 300
+key enter
+idle 800
+type printf '\033[1;31mbold-red\033[0m \033[4;32munder-green\033[0m \033[7minverse\033[0m \033[38;5;208m256\033[0m \033[38;2;10;200;30mtrue\033[0m \033[48;2;255;0;128mbg\033[0m'
+idle 300
+key enter
+idle 800
+dump
+#@row_of bold-red under-green
+#@row_of /tmp
+dump row 99999
+# OSC 11 query last, so the colour rows above stay in the 3-row RRiter panel. The palette self-check
+# reads this reply from the last dump and compares it with the inverse cell's fg (compare.py).
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033]11;?\033\\\\'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump

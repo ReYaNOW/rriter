@@ -2,8 +2,13 @@
 
 use crate::headless::tests_support::{
     click_ui, dump, has_ui, run_script, run_terminal_command, scratch_dir, session_for_test,
-    shell_failed, terminal_has_line, terminal_session, ui_rect, wait_until,
+    shell_failed, terminal_has_line, terminal_session, ui_rect, wait_until, written,
 };
+
+/// Whether `needle` occurs in `haystack`.
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
 
 #[test]
 fn headless_terminal_types_command_and_shows_its_output() {
@@ -202,5 +207,103 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
         );
         assert!(grid.selection().is_some());
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_mods_and_key_modifiers_reach_pty_at_kitty_flags_8() {
+    let (dir, mut session) = terminal_session("ui-terminal-mods-kitty");
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    // Kitty flags 8 (report all keys as escape codes) make modifier key events visible on the PTY.
+    run_terminal_command(&mut session, "printf '\\033[>8u'");
+    wait_until(&mut session, 5000, "kitty flags 8", |session| {
+        dump(session)["terminal"]["modes"]["kitty_flags"] == 8
+    });
+    click_ui(&mut session, "TerminalBody");
+    written(&session, 0);
+
+    let lines = run_script(&mut session, b"mods ctrl\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    // Left Control is functional key 57442 of the kitty keyboard protocol.
+    assert!(contains_bytes(&written(&session, 0), b"\x1b[57442"));
+
+    let lines = run_script(&mut session, b"key ctrl+a\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    // `a` with the Ctrl modifier: 1 + 4 = 5.
+    assert!(contains_bytes(&written(&session, 0), b"\x1b[97;5u"));
+
+    let lines = run_script(&mut session, b"mods\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_key_text_follows_effective_modifiers() {
+    let (dir, mut session) = terminal_session("ui-terminal-key-text");
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    click_ui(&mut session, "TerminalBody");
+    written(&session, 0);
+
+    // Legacy keyboard mode writes the text of a key as typed.
+    run_script(&mut session, b"key a\n");
+    assert_eq!(written(&session, 0), b"a");
+
+    // Held Shift upper-cases the text; the modifier events write nothing in this mode.
+    run_script(&mut session, b"mods shift\n");
+    written(&session, 0);
+    run_script(&mut session, b"key a\n");
+    assert_eq!(written(&session, 0), b"A");
+    run_script(&mut session, b"mods\n");
+    written(&session, 0);
+
+    // `--char` sets the layout character; Shift in the combo upper-cases it.
+    run_script(&mut session, "key --char с shift+a\n".as_bytes());
+    assert_eq!(written(&session, 0), "С".as_bytes());
+
+    // Held Ctrl gives no text: the PTY gets no plain `a`.
+    run_script(&mut session, b"mods ctrl\n");
+    written(&session, 0);
+    run_script(&mut session, b"key a\n");
+    let out = written(&session, 0);
+    assert!(!contains_bytes(&out, b"a") && !contains_bytes(&out, b"A"), "{out:?}");
+    run_script(&mut session, b"mods\n");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dump_terminal_modes() {
+    let (dir, mut session) = terminal_session("ui-dump-terminal-modes");
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    // DECCKM (1), bracketed paste (2004) and kitty keyboard flags 1, set through the PTY.
+    run_terminal_command(&mut session, "printf '\\033[?1h\\033[?2004h\\033[>1u'");
+    wait_until(&mut session, 5000, "terminal modes in dump", |session| {
+        dump(session)["terminal"]["modes"]["kitty_flags"] == 1
+    });
+    let state = dump(&mut session);
+    let modes = &state["terminal"]["modes"];
+    assert_eq!(modes["app_cursor_keys"], true);
+    assert_eq!(modes["bracketed_paste"], true);
+    assert_eq!(modes["kitty_flags"], 1);
+
+    let lines = run_script(&mut session, b"dump row 0\n");
+    assert!(lines.iter().any(|line| line.starts_with("ok {")), "{lines:?}");
+    let lines = run_script(&mut session, b"dump row 100000\n");
+    assert!(lines.iter().any(|line| line.starts_with("err row out of range")), "{lines:?}");
+
+    session.app.ide_panel.terminals.clear();
+    let state = dump(&mut session);
+    assert!(state["terminal"].is_null(), "{state}");
+    assert_eq!(state["terminal_tabs"], serde_json::json!([]));
+    let lines = run_script(&mut session, b"dump row 0\n");
+    assert!(lines.iter().any(|line| line.starts_with("err no terminal tab")), "{lines:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

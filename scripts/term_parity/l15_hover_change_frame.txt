@@ -1,0 +1,33 @@
+# l15: a change of the hovered link requests a frame, including a Ctrl press with the pointer not moving.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l15_hover_change_frame.txt
+# Expected (Ronsole headless spec 2026-10-23, section 9, row L15): the pointer over a link without Ctrl,
+# then `dump`; then `mods ctrl` without `mouse_move` gives `hovered_link` not null and `frame_requests`
+# grown. The hovered link here is on screen row 0 (absolute CUP to 1;1), the cursor is then moved to 2;1
+# so that the shell prompt does not overwrite it. The marker word is split as `l15''link`.
+# The frame part is the `#@frames_grew` marker at the end: `event_loop.frame_requests` of the two dumps.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[1;1H\033[2K\033]8;;https://example.com/l15\033\134l15''link\033]8;;\033\134\033[2;1H'
+idle 300
+key enter
+idle 800
+mouse_cell 1 0
+idle 300
+dump
+mods ctrl
+idle 300
+dump
+mods
+#@frames_grew 1 2

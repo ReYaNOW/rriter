@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use winit::dpi::{PhysicalSize, Size};
 use winit::raw_window_handle::{HandleError, HasWindowHandle, WindowHandle};
@@ -17,6 +17,7 @@ pub struct HeadlessWindow {
     ime_allowed: AtomicBool,
     cursor_icon: Mutex<CursorIcon>,
     redraw_requested: AtomicBool,
+    frame_requests: AtomicU64,
     id: WindowId,
 }
 
@@ -30,6 +31,7 @@ impl HeadlessWindow {
             ime_allowed: AtomicBool::new(false),
             cursor_icon: Mutex::new(CursorIcon::Default),
             redraw_requested: AtomicBool::new(false),
+            frame_requests: AtomicU64::new(0),
             id: WindowId::dummy(),
         }
     }
@@ -41,6 +43,11 @@ impl HeadlessWindow {
     /// Headless `dump`: `take_redraw_request` without consuming.
     pub fn redraw_requested(&self) -> bool {
         self.redraw_requested.load(Ordering::Acquire)
+    }
+
+    /// Frame requests made through `WindowHost::request_redraw` since the window was created.
+    pub fn frame_requests(&self) -> u64 {
+        self.frame_requests.load(Ordering::Relaxed)
     }
 
     pub fn set_size(&self, size: PhysicalSize<u32>) {
@@ -82,7 +89,10 @@ impl WindowHost {
     pub fn request_redraw(&self) {
         match self {
             Self::Native(window) => window.request_redraw(),
-            Self::Headless(window) => window.redraw_requested.store(true, Ordering::Release),
+            Self::Headless(window) => {
+                window.redraw_requested.store(true, Ordering::Release);
+                window.frame_requests.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 

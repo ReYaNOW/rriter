@@ -1,0 +1,53 @@
+# l10: bracketed paste (mode 2004) through the terminal's Ctrl+V path. The clipboard is set with OSC 52
+# (no selection: the drag-select + ctrl+c path is not in this file). Reader: function `r` from
+# l08_kitty_keys.txt, same §9.1 hex protocol.
+# Expected (spec 9.2 L10, parity spec 5.x `terminal_bracketed_paste_bytes`): with 2004 set, pasting "hi"
+# sends ESC[200~ hi ESC[201~ = 1b5b3230307e 6869 1b5b3230317e.
+# The reader sets mode 2004 itself: zsh's line editor clears it when a command starts, so a mode set
+# in an earlier prompt is off while the reader runs.
+# Mouse reports (modes 1000 + SGR 1006) follow the paste, read by the same reader. 1004 focus
+# reporting is not in this file (Q26: Ronsole-only test).
+# `type` turns `\n` into a newline, so the printf calls use `\012` for LF.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l10_paste_mouse.txt
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type printf '\033]52;c;aGk=\007'
+idle 300
+key enter
+idle 800
+type printf '\033[?2004h'
+idle 300
+key enter
+idle 800
+type r() { printf '\033[?2004h'; stty raw -echo min 1 time 0; printf 'RE''ADY\r\012'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \012'; printf '\r\012'; stty sane; }
+idle 300
+key enter
+idle 800
+type r
+idle 300
+key enter
+idle 1000
+key ctrl+v
+idle 1500
+dump
+type printf '\033[?1000h\033[?1006h'
+idle 300
+key enter
+idle 800
+type r
+idle 300
+key enter
+idle 1000
+mouse_cell 3 1
+idle 300
+click
+idle 1500
+dump

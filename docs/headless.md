@@ -63,10 +63,12 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `resize WxH` | Resize the framebuffer; on failure size and context stay. | `ok <w>x<h>` |
 | `scale S` | Change the scale factor, 0.5 … 4.0. | `ok` |
 | `mouse_move x y` | Move the cursor (hover). | `ok` |
+| `mouse_cell col row` | Move the cursor to the centre of a visible terminal cell (same geometry as `dump.terminal.layout`). `err cell out of range` if the cell is outside the visible area, its centre is outside `layout.body`, or no frame has drawn the terminal yet. | `ok <x> <y>` |
+| `mods [ctrl] [shift] [alt] [super]` | Modifiers held until the next `mods`; no arguments releases all. Names as in Ronsole (`mod` = Ctrl, `cmd`/`meta` = Super). Applied to `key`, `click`, `dblclick`, `mouse_move`, `mouse_cell`, `wheel`; not to `type`. A change sends press or release events of the left modifier key (Ctrl, Shift, Alt, Super; presses in that order, releases reversed), each followed by the held set, then requests a frame, so Ctrl hover on a link updates without mouse motion. Unknown → `err unknown modifier '<m>'`, repeated → `err duplicate modifier '<m>'`. | `ok` |
 | `click [left\|right\|middle] [down\|up] [alt]` | Press+release, or one phase. Default `left`; `alt` synthesizes Alt/Option for this click. | `ok` |
 | `dblclick [btn]` | Two clicks with no pause. | `ok` |
 | `wheel dx dy [lines\|px]` | Scroll; default `lines`. | `ok` |
-| `key [--repeat N] <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`, `pause`, `numpadenter`; `key --repeat N <combo>` sends N repeated press events before release (N ≤ 1000). Unknown token → `err unknown key token '<t>'`. | `ok` |
+| `key [--repeat N] [--char C] <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`, `pause`, `numpadenter`; `key --repeat N <combo>` sends N repeated press events before release (N ≤ 1000). `--char C` (one character) sets the layout character of the key: `unshifted` is C, the keycode stays with the key name. Logical text and text follow the effective modifiers (held by `mods` plus the combo's): Shift upper-cases, Ctrl or Super give no text. Modifiers the combo adds to the held ones are pressed as left-modifier key events before the key and released after it. Unknown token → `err unknown key token '<t>'`. | `ok` |
 | `type <text>` | Commit text as IME input. Escapes `\n`, `\t`, `\\`. | `ok` |
 | `settle [ms]` | Run frames until idle or the budget ends (default 500). | `ok frames=<n> settled=<bool>` |
 | `wait <ms>` | Run frames for real time `ms` (≤ 60000). | `ok frames=<n>` |
@@ -74,6 +76,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `idle <ms>` | `wake` repeated for `ms` of input-free time. | `ok frames=<n> redraws=<n> polls=<n> wakes=<n> deadlines=<n> flow=<f> deadline_ms=<n\|none>` |
 | `screenshot <out.png>` | Draw one frame and save a PNG; the directory is created. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
+| `dump row <n>` | Exactly `row <digits>` addresses a row; any other rest of the line is a dump path. One visible row of the active terminal tab: `{row, cells}`, cells listed only when they are not plain (`col`, `ch`, `fg`, `bg`, `flags`, `underline`, `underline_color`, `link`). `err row out of range` outside the visible area, `err no terminal tab` without a tab. | `ok <json>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
 | `picker_answer [<path> ...]` | Queue the paths for the next native picker (`picker_answer` alone answers cancel). | `ok` |
 | `bench <frames> [csv=<path>] [action]` | Measure frame cost (see Bench). | `ok <json summary>` |
@@ -92,6 +95,15 @@ quiescent server status, `_unopened` also diagnoses a sibling `.rs` file, and
 server start.
 
 IDE image tabs appear in `dump` with `kind: "image"` and an `image` object containing `phase`, `natural_w`, `natural_h`, `zoom`, and `texture`.
+
+Terminal keys of `dump` follow Ronsole's `dump` (spec §5), so one comparison script can read both apps:
+
+- `terminal`: the active terminal tab, or `null` without one. Keys `cols`, `rows`, `viewport` (`top`, `scrollback`, `total`), `text`, `cursor` (`{row, col}` or `null`), `title`, `modes` (`app_cursor_keys`, `bracketed_paste`, `mouse_tracking`, `mouse_sgr`, `focus_reporting`, `kitty_flags`, `sync_pending`), `selection` (`{start, last}` or `null`), `hovered_link` (`{uri, ranges}` or `null`), `layout` (`body`, `cell0`, `char_w`, `char_h`, `baseline`, `x_height`, or `null`).
+- `terminal_tabs`: `[{index, title, active, rect}]` for every terminal tab. The editor's `tabs` key is unchanged. Ronsole's `tabs` is the same list as `terminal_tabs`.
+- `layout` is recomputed from app state on each `dump`, not stored per frame. It is `null` before the first frame that drew the terminal. `baseline` and `x_height` come from the renderer metrics used for the terminal text.
+- `viewport.top` follows the visible-window formula of spec §5.1; before the first frame it is the bottom view, `total − rows`.
+
+`scripts/term_parity/compare.py` runs one scenario file on both apps and compares these keys; its docstring has the format.
 
 Rules:
 
@@ -124,7 +136,7 @@ requests one. Input commands still run as usual. Headless has no cursor blink,
 so an idle app ends in `flow=wait deadline_ms=none`. In Rust tests
 `HeadlessSession::native_wake` returns the same with the pass start time.
 
-`dump` → `event_loop`: `control_flow` (`wait`/`poll`/`wait_until`),
+`dump` → `event_loop`: `frame_requests` (frame requests since the session started, counted in `WindowHost::request_redraw`), `control_flow` (`wait`/`poll`/`wait_until`),
 `deadline_ms` (ms left to the `WaitUntil`, else `null`), `awaiting_background`,
 `wake_pending` (a wake not yet drained), `wake_events` (`UiWaker` events not
 yet taken by the driver), `redraw_requested`.

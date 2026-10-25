@@ -470,13 +470,17 @@ fn headless_editor_idle_without_input_sleeps_and_draws_nothing() {
     let dir = scratch_dir("ui-editor-idle-loop");
     let file = sample_file(&dir);
     let mut session = open_file_session(900, 600, 1.0, &file);
+    let requests_before = dump(&mut session)["event_loop"]["frame_requests"].clone();
     let lines = run_script(&mut session, b"idle 400\n");
     assert_eq!(
         lines,
         ["ok frames=0 redraws=0 polls=0 wakes=0 deadlines=0 flow=wait deadline_ms=none"],
         "an idle loop woke up or drew"
     );
-    let event_loop = dump(&mut session)["event_loop"].clone();
+    let mut event_loop = dump(&mut session)["event_loop"].clone();
+    // The frame-request counter is cumulative since the window was created; idle must not advance it.
+    assert_eq!(event_loop["frame_requests"], requests_before, "an idle loop requested a frame");
+    event_loop.as_object_mut().expect("event_loop object").remove("frame_requests");
     assert_eq!(
         event_loop,
         serde_json::json!({

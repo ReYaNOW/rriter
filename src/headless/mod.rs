@@ -4,6 +4,8 @@
 
 pub(crate) mod bench;
 pub(crate) mod dump;
+mod dump_terminal;
+mod modifier_keys;
 pub(crate) mod frame;
 pub(crate) mod profile;
 pub(crate) mod protocol;
@@ -500,6 +502,11 @@ impl HeadlessSession {
                 self.app.handle_main_cursor_moved(PhysicalPosition::new(x, y));
                 self.frame_ok()
             }
+            Command::Mods(mods) => {
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), mods);
+                self.frame_ok()
+            }
+            Command::MouseCell { col, row } => self.mouse_cell(col, row),
             Command::Click { button, phase, alt } => {
                 let button = mouse_button(button);
                 let saved_modifiers = self.app.modifiers;
@@ -528,8 +535,14 @@ impl HeadlessSession {
                 });
                 self.frame_ok()
             }
-            Command::Key { input, mods, repeats, .. } => {
-                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input.clone(), mods);
+            Command::Key { mut input, mods, repeats, .. } => {
+                // The effective modifiers are the held ones plus the combo's, as in Ronsole's `key`;
+                // the text follows them, and the added modifiers are pressed and released as events.
+                let base = self.app.modifiers;
+                let target = base | mods;
+                input.apply_mods(target);
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), target);
+                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input.clone(), target);
                 self.step(true);
                 let mut repeated = input.clone();
                 repeated.repeat = true;
@@ -538,8 +551,9 @@ impl HeadlessSession {
                     self.step(true);
                 }
                 self.app.release_key_combo(&HostLoop::headless(&self.loop_state), &hold);
-                self.step(true);
                 self.app.end_key_combo(hold);
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), base);
+                self.step(true);
                 Response::Ok(None)
             }
             Command::Type(text) => {
@@ -567,6 +581,7 @@ impl HeadlessSession {
             Command::Screenshot(path) => self.screenshot(&path),
             Command::Quit => Response::Ok(None),
             Command::Dump(path) => self.dump(path.as_deref()),
+            Command::DumpRow(row) => self.dump_row(row),
             Command::PickerAnswer(paths) => {
                 self.app.external_requests.queue_picker_answer(paths);
                 Response::Ok(None)
@@ -692,6 +707,25 @@ impl HeadlessSession {
         frame::flip_rows_in_place(&mut self.frame_buf, w as usize, h as usize);
         frame::force_opaque(&mut self.frame_buf);
         frame::write_png(path, &self.frame_buf, w, h).map_err(|error| format!("io: {error}"))
+    }
+
+    /// `mouse_cell <col> <row>`: moves the pointer as `mouse_move` does, to the centre of a visible cell.
+    fn mouse_cell(&mut self, col: usize, row: usize) -> Response {
+        let Some((x, y)) = dump_terminal::cell_center_at(&mut self.app, col, row) else {
+            return Response::Err("cell out of range".to_string());
+        };
+        self.app.handle_main_cursor_moved(PhysicalPosition::new(f64::from(x), f64::from(y)));
+        match self.frame_ok() {
+            Response::Ok(_) => Response::Ok(Some(format!("{x} {y}"))),
+            error => error,
+        }
+    }
+
+    fn dump_row(&mut self, row: usize) -> Response {
+        match dump_terminal::dump_row_json(&mut self.app, row) {
+            Ok(json) => Response::Ok(Some(json.to_string())),
+            Err(reason) => Response::Err(reason),
+        }
     }
 
     fn dump(&mut self, path: Option<&Path>) -> Response {

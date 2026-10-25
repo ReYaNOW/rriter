@@ -1,0 +1,38 @@
+# l07: OSC 7 sets the working directory of the active terminal tab; a new tab starts in that directory.
+# Expected (spec parity 5.8, Q12(a), decision 21): `pwd` in the new tab prints /tmp/tp8b-W2-l07 on both
+# apps. Without OSC 7 the new tab would start in $HOME (Ronsole) or the project folder (RRiter).
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l07_osc7_new_tab.txt
+# Preamble copied from l01_sgr.txt: the `#@click_ui` markers open the terminal panel on RRiter.
+# RRiter has no new-tab key: its new tab is the TerminalAdd button. The key line is for Ronsole. The
+# key also reaches RRiter's shell, where ctrl+t starts fzf, so the shell first unbinds ^T.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type mkdir -p /tmp/tp8b-W2-l07 && cd /tmp/tp8b-W2-l07
+idle 300
+key enter
+idle 800
+type bindkey -r '^T'
+idle 300
+key enter
+idle 800
+type printf '\033]7;file://localhost/tmp/tp8b-W2-l07\007'
+idle 300
+key enter
+idle 800
+key ctrl+shift+t
+#@click_ui TerminalAdd
+idle 3000
+type pwd
+idle 300
+key enter
+idle 800
+# The pointer stays over the TerminalAdd button on RRiter (Pointer). Move it over the terminal text,
+# where both apps report Default (probe: RRiter over TerminalBody and Ronsole at 640 720 -> Default);
+# the window corner is RRiter's SidebarSlot(Explorer), a Pointer element.
+mouse_move 640 720
+idle 300
+dump

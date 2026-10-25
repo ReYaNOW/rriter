@@ -34,7 +34,7 @@ impl App {
         let (term_content_y, term_content_h) =
             crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
         let char_h = line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-        let panel_x = terminal_panel_x + 10.0 * s;
+        let panel_x = crate::render_view::terminal_ui::terminal_text_x(terminal_panel_x, s);
         let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
         let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
         let total_lines = grid.total_rows();

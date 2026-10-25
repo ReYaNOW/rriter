@@ -1,0 +1,75 @@
+# l20: Ctrl+click on file:// links to an executable, a .desktop file, a plain file and a directory.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l20_file_links.txt
+# Expected (spec parity 2026-10-21 section on opening, O2 option, line 241): xdg-open gets the
+# directory for an executable file or a .desktop file, the path itself for a plain file or a
+# directory. So external_request.arg is `file:///tmp/tp8b-W3-l20` for the first two targets,
+# `file:///tmp/tp8b-W3-l20/plain.txt` for the plain file and `file:///tmp/tp8b-W3-l20` for the
+# directory. The directory is a fixed path, not mktemp: the two apps' args are compared exactly.
+# Each target is printed on grid row index 1 with absolute CUP positioning, then Ctrl+clicked at (5,1).
+# `; read x` holds each output on screen until `key enter` (see l16_link_ranges.txt).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type rm -rf /tmp/tp8b-W3-l20 && mkdir /tmp/tp8b-W3-l20 && cd /tmp/tp8b-W3-l20 && printf '#!/bin/sh\012' > prog && chmod +x prog && printf '[Desktop Entry]\012' > app.desktop && printf 'x\012' > plain.txt && cd /tmp && clear
+idle 300
+key enter
+idle 1500
+type printf '\033[2;1H\033[2Kfile:///tmp/tp8b-W3-l20/prog\033[1;1H'; read x
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 1
+idle 300
+click
+idle 800
+dump
+mods
+key enter
+idle 800
+type printf '\033[2;1H\033[2Kfile:///tmp/tp8b-W3-l20/app.desktop\033[1;1H'; read x
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 1
+idle 300
+click
+idle 800
+dump
+mods
+key enter
+idle 800
+type printf '\033[2;1H\033[2Kfile:///tmp/tp8b-W3-l20/plain.txt\033[1;1H'; read x
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 1
+idle 300
+click
+idle 800
+dump
+mods
+key enter
+idle 800
+type printf '\033[2;1H\033[2Kfile:///tmp/tp8b-W3-l20\033[1;1H'; read x
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 1
+idle 300
+click
+idle 800
+dump
+mods
+key enter
+idle 800
+type rm -rf /tmp/tp8b-W3-l20
+idle 300
+key enter
+idle 800
