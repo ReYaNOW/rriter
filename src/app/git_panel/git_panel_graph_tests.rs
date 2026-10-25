@@ -332,33 +332,19 @@
             crate::platform::next_operation_id()
         ));
         std::fs::create_dir_all(&repo_root).unwrap();
-        let git = |args: &[&str]| -> String {
-            let output = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&repo_root)
-                .args([
-                    "-c",
-                    "user.name=RRiter Test",
-                    "-c",
-                    "user.email=test@example.invalid",
-                    "-c",
-                    "commit.gpgsign=false",
-                ])
-                .args(args)
-                .output()
-                .expect("run git");
-            assert!(
-                output.status.success(),
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        };
-        git(&["init", "-q"]);
-        git(&["commit", "-q", "--allow-empty", "-m", "first"]);
-        let first = git(&["rev-parse", "HEAD"]);
-        git(&["commit", "-q", "--allow-empty", "-m", "second"]);
-        let head = git(&["rev-parse", "HEAD"]);
+        let repo = git2::Repository::init(&repo_root).unwrap();
+        let signature = git2::Signature::now("RRiter Test", "test@example.invalid").unwrap();
+        let tree = repo
+            .find_tree(repo.treebuilder(None).unwrap().write().unwrap())
+            .unwrap();
+        let first_id = repo
+            .commit(Some("HEAD"), &signature, &signature, "first", &tree, &[])
+            .unwrap();
+        let first_commit = repo.find_commit(first_id).unwrap();
+        let head_id = repo
+            .commit(Some("HEAD"), &signature, &signature, "second", &tree, &[&first_commit])
+            .unwrap();
+        let (first, head) = (first_id.to_string(), head_id.to_string());
 
         // Known hashes must resolve first, so a broken git call fails here, not on the miss below.
         assert_eq!(git_graph_commit_position(&repo_root, &head), Some(0));
