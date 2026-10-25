@@ -693,7 +693,8 @@ mod terminal_face_tests {
     use crate::render_view::terminal_decoration::{TERMINAL_FACE_BOLD, TERMINAL_FACE_REGULAR};
 
     const TEST_PIXEL_SIZE: f32 = 16.0;
-    const SYSTEM_MONO: &str = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
+    /// Vertices pushed per quad by `push_quad` and `push_decoration_quad`.
+    const VERTICES_PER_QUAD: usize = 6;
     /// CJK ideograph that the bundled JetBrains Mono faces do not map.
     const UNMAPPED: char = '中';
     /// Colour emoji: drawn by the Regular chain only.
@@ -717,11 +718,24 @@ mod terminal_face_tests {
 
     #[test]
     fn terminal_regular_face_is_editor_chain() {
-        if !std::path::Path::new(SYSTEM_MONO).exists() {
-            return;
-        }
         let (_context, mut renderer) = test_renderer();
-        assert!(!matches!(renderer.fonts[0].source, FontSource::Static(_)));
+        // Same selection as the runtime: the chain leads with the system font when one is
+        // installed and with the bundled fallback otherwise. Each run checks only the branch
+        // that matches the current machine, so the expectation is taken from the font files.
+        let has_system_font = editor_system_font_path().is_some();
+        assert_eq!(
+            !matches!(renderer.fonts[0].source, FontSource::Static(_)),
+            has_system_font,
+            "chain head is the system font exactly when one is installed"
+        );
+        let any_installed = EDITOR_SYSTEM_FONT_PATHS
+            .iter()
+            .any(|path| std::path::Path::new(path).exists());
+        assert_eq!(
+            !matches!(renderer.fonts[0].source, FontSource::Static(_)),
+            any_installed,
+            "chain head is a system font exactly when one of the listed files exists"
+        );
         let (first_image, first_advance) = rasterize_font_data_glyph(
             &mut renderer.fonts[0],
             &mut renderer.scale_context,
@@ -790,7 +804,10 @@ mod terminal_face_tests {
             let regular = renderer
                 .get_terminal_glyph_at_size(c, None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
                 .expect("glyph under Regular");
-            assert_eq!((styled.u, styled.v, styled.uw, styled.vh), (regular.u, regular.v, regular.uw, regular.vh));
+            assert_eq!(
+                (styled.u, styled.v, styled.uw, styled.vh),
+                (regular.u, regular.v, regular.uw, regular.vh)
+            );
             assert!(renderer.glyphs.contains_key(&(c, bold_presentation, size_key)));
         }
     }
@@ -811,5 +828,43 @@ mod terminal_face_tests {
         assert!(!super::terminal_styled_face_applies('😀', None));
         assert!(!super::terminal_styled_face_applies('▶', None));
         assert!(!super::terminal_styled_face_applies('\u{2801}', None));
+    }
+
+    #[test]
+    fn terminal_row_decorations_emit_one_quad_per_line() {
+        // Expected counts come from the SGR rules: one quad per underline, one per strikethrough,
+        // and a curly underline (SGR 4:3) is one wave quad. Plain cells add nothing.
+        let theme = crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4]);
+        let palette = crate::render_view::terminal_colors::terminal_palette(&theme);
+        let row = [
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"\x1b[4mA"),
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"\x1b[9mB"),
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"\x1b[4;9mC"),
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"\x1b[4:3mD"),
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"E"),
+        ];
+        let (_context, mut renderer) = test_renderer();
+        renderer.vertices.clear();
+        renderer.push_terminal_row_decorations(
+            &row, 0, 0.0, 0.0, 8.0, 16.0, 1.0, 1.0, row.len(), &palette, None, 0,
+        );
+        // underline 1 + strike 1 + underline with strike 2 + wave 1 + plain 0
+        assert_eq!(renderer.vertices.len(), 5 * VERTICES_PER_QUAD);
+    }
+
+    #[test]
+    fn terminal_row_without_decoration_emits_no_quads() {
+        let theme = crate::renderer::Theme::for_id(crate::theme::ThemeId::Dracula, [0.0; 4]);
+        let palette = crate::render_view::terminal_colors::terminal_palette(&theme);
+        let row = [
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"a"),
+            crate::render_view::terminal_decoration::tests::parsed_cell(b"b"),
+        ];
+        let (_context, mut renderer) = test_renderer();
+        renderer.vertices.clear();
+        renderer.push_terminal_row_decorations(
+            &row, 0, 0.0, 0.0, 8.0, 16.0, 1.0, 1.0, row.len(), &palette, None, 0,
+        );
+        assert!(renderer.vertices.is_empty());
     }
 }

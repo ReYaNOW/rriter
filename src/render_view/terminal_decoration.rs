@@ -209,8 +209,8 @@ pub(crate) fn terminal_row_ranges_contain(
         .is_some_and(|(_, range)| range.start <= col)
 }
 
-/// Whether a cell is concealed (SGR 8) or hidden by the host. Such a cell gets neither glyph
-/// nor decoration.
+/// Whether a cell is concealed by SGR 8 (`CONCEAL`) or hidden by the host (`HOST_HIDDEN`, the only
+/// flag `Cell::is_hidden` reports). Such a cell gets neither glyph nor decoration.
 #[inline]
 pub(crate) fn terminal_cell_is_hidden(cell: &Cell) -> bool {
     let flags = cell.flags();
@@ -315,7 +315,7 @@ impl Renderer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::render_view::terminal_colors::terminal_palette;
     use crate::renderer::Theme;
@@ -485,7 +485,7 @@ mod tests {
 
     /// First cell of `bytes` after parsing them with the real terminal, so SGR sequences such as
     /// 58 (underline colour) are applied.
-    fn parsed_cell(bytes: &[u8]) -> Cell {
+    pub(crate) fn parsed_cell(bytes: &[u8]) -> Cell {
         let theme = Theme::for_id(ThemeId::Dracula, [0.0; 4]);
         let mut term = Term::new(TermConfig {
             cols: 4,
@@ -514,7 +514,9 @@ mod tests {
     #[test]
     fn decoration_thickness_follows_ui_scale() {
         // Thickness is max(1, round(ui_scale)), the rule of the brief.
-        for (ui_scale, expected) in [(1.0_f32, 1.0), (1.333, 1.0), (1.5, 2.0), (1.75, 2.0), (2.0, 2.0)] {
+        for (ui_scale, expected) in
+            [(1.0_f32, 1.0), (1.333, 1.0), (1.5, 2.0), (1.75, 2.0), (2.0, 2.0)]
+        {
             let (quads, len) = terminal_decoration_quads(
                 &decoration(UnderlineStyle::Single, false),
                 0.0,
@@ -537,13 +539,20 @@ mod tests {
         // INVERSE paints the foreground in the background colour, ANSI 4 here.
         let inverse = parsed_cell(b"\x1b[31;44;7;4mx");
         let deco = terminal_cell_decoration(&inverse, &palette, false).expect("underlined");
-        assert_rgb_close(deco.underline_color, [theme.terminal[4][0], theme.terminal[4][1], theme.terminal[4][2]]);
+        assert_rgb_close(
+            deco.underline_color,
+            [theme.terminal[4][0], theme.terminal[4][1], theme.terminal[4][2]],
+        );
         assert_eq!(deco.strike_color, deco.underline_color);
 
-        // DIM scales the rendered foreground RGB by 0.66 (Ronsole decoration test of the same name).
+        // DIM scales the rendered foreground RGB by 0.66
+        // (Ronsole decoration test of the same name).
         let dim = parsed_cell(b"\x1b[2;4;38;2;150;120;90mx");
         let deco = terminal_cell_decoration(&dim, &palette, false).expect("underlined");
-        assert_rgb_close(deco.underline_color, [150.0 * 0.66 / 255.0, 120.0 * 0.66 / 255.0, 90.0 * 0.66 / 255.0]);
+        assert_rgb_close(
+            deco.underline_color,
+            [150.0 * 0.66 / 255.0, 120.0 * 0.66 / 255.0, 90.0 * 0.66 / 255.0],
+        );
         assert_eq!(deco.strike_color, deco.underline_color);
     }
 
