@@ -584,7 +584,9 @@ impl App {
             .is_some();
         if self.editor.has_extra_cursors() {
             let plain_navigation = !shift && (!self.modifiers.alt_key() || word);
-            let multi_cursor_action = has_text_insert
+            // A bare modifier press (Ctrl before V) must not drop the extra carets.
+            let multi_cursor_action = crate::keymap::is_modifier_key(physical_key)
+                || has_text_insert
                 || (physical_key == PhysicalKey::Code(KeyCode::Space)
                     && crate::platform::text_input_modifiers_allowed(self.modifiers))
                 || (!ctrl && !self.modifiers.alt_key()

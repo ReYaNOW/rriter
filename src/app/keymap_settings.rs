@@ -263,7 +263,7 @@ impl KeymapSettingsState {
             self.cancel_recording();
             return RecordResult::Cancelled;
         }
-        if matches!(key, PhysicalKey::Code(KeyCode::ControlLeft | KeyCode::ControlRight | KeyCode::AltLeft | KeyCode::AltRight | KeyCode::ShiftLeft | KeyCode::ShiftRight | KeyCode::SuperLeft | KeyCode::SuperRight)) {
+        if crate::keymap::is_modifier_key(key) {
             return RecordResult::Ignored;
         }
         chord.map_or(RecordResult::Rejected, |chord| self.record(chord, keymap))
