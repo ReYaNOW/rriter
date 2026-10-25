@@ -1,0 +1,40 @@
+# l12: Underline, underline colour (SGR 58), strikethrough, inverse and dim decorations on blank cells.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l12_decoration.txt
+# Setup as in l01_sgr.txt. All five decorated segments sit on one printed row, so the row stays in
+# RRiter's short panel. Segment k covers cells 5k..5k+3 (its first cell is 5k); the cell separator
+# is a plain space. The row is found by the word `decorow`, built as deco''row in the command.
+# Line geometry (thickness, centre offset from baseline / char_h) is compared per segment; the
+# colours are compared by `dump row` (fg, bg, underline_color; inverse cells skip fg/bg as palette).
+# Each line reports its top and bottom edge against the baseline (px); labels with `underline` also
+# check the spec L12 rule that the underline top is not above `layout.baseline`.
+# Underline colour falls back to fg when SGR 58 is absent (spec L12).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[4m    \033[0m \033[4;58;2;255;0;0m    \033[0m \033[9;38;2;0;160;255m    \033[0m \033[7;4m    \033[0m \033[2;4m    \033[0m deco''row\012'
+idle 300
+key enter
+idle 800
+#@line_of decorow 1 underline
+#@line_of decorow 6 underline-colour
+#@line_of decorow 11 strike
+#@line_of decorow 16 inverse-underline
+#@line_of decorow 21 dim-underline
+#@row_of decorow
+# OSC 11 query last, as in l01_sgr.txt: the palette self-check reads the reply from the last dump.
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033]11;?\033\\\\'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump

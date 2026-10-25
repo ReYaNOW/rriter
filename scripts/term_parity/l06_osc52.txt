@@ -1,0 +1,30 @@
+# l06: OSC 52 clipboard write. The shell writes "hello" (base64 aGVsbG8=) to the clipboard selection,
+# then sends a read request (`?`), which must not change the clipboard or send a reply.
+# Expected (spec §5.7, protocol ref §5): `clipboard.text` is "hello" after the write and stays "hello"
+# after the read request; the read request sends no bytes (the shell reads nothing back here).
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l06_osc52.txt --size 1280x800 --scale 1.0
+# The `#@click_ui` markers enter IDE mode and open the terminal panel on RRiter; Ronsole skips them.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033]52;c;aGVsbG8=\007'
+idle 300
+key enter
+idle 800
+dump
+type printf '\033]52;c;?\007'
+idle 300
+key enter
+idle 800
+dump

@@ -204,3 +204,35 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn dump_terminal_modes() {
+    let (dir, mut session) = terminal_session("ui-dump-terminal-modes");
+    if shell_failed(&session, 0) {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    // DECCKM (1), bracketed paste (2004) and kitty keyboard flags 1, set through the PTY.
+    run_terminal_command(&mut session, "printf '\\033[?1h\\033[?2004h\\033[>1u'");
+    wait_until(&mut session, 5000, "terminal modes in dump", |session| {
+        dump(session)["terminal"]["modes"]["kitty_flags"] == 1
+    });
+    let state = dump(&mut session);
+    let modes = &state["terminal"]["modes"];
+    assert_eq!(modes["app_cursor_keys"], true);
+    assert_eq!(modes["bracketed_paste"], true);
+    assert_eq!(modes["kitty_flags"], 1);
+
+    let lines = run_script(&mut session, b"dump row 0\n");
+    assert!(lines.iter().any(|line| line.starts_with("ok {")), "{lines:?}");
+    let lines = run_script(&mut session, b"dump row 100000\n");
+    assert!(lines.iter().any(|line| line.starts_with("err row out of range")), "{lines:?}");
+
+    session.app.ide_panel.terminals.clear();
+    let state = dump(&mut session);
+    assert!(state["terminal"].is_null(), "{state}");
+    assert_eq!(state["terminal_tabs"], serde_json::json!([]));
+    let lines = run_script(&mut session, b"dump row 0\n");
+    assert!(lines.iter().any(|line| line.starts_with("err no terminal tab")), "{lines:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

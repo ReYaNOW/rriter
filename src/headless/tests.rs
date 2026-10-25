@@ -1229,7 +1229,7 @@ mod session_cases {
             [
                 "atlas", "blame_column", "blame_inline", "blame_status_visible", "clipboard", "cursor_icon", "diagnostics", "dialog", "editor", "event_loop", "external_request", "graph_highlight_oid", "hover",
                 "ide_panel", "markdown_media_stats", "markdown_toc", "mode",
-                "overlays", "scale", "size", "tabs", "themes", "ui", "writes_allowed"
+                "overlays", "scale", "size", "tabs", "terminal", "terminal_tabs", "themes", "ui", "writes_allowed"
             ]
         );
         assert_eq!(dump["mode"], "welcome");
@@ -1516,5 +1516,53 @@ mod protocol_fd_cases {
         stray_read.read_to_string(&mut stray).expect("read stray");
         assert_eq!(replies, "ok\n");
         assert_eq!(stray, "[GIT status] ok\n");
+    }
+}
+
+/// Terminal input of the headless protocol (`mods`, `mouse_cell`, `key --char`), as Ronsole has it.
+mod terminal_input_cases {
+    use crate::headless::tests_support::{dump, run_script, run_terminal_command, shell_failed, terminal_session, wait_until};
+
+    #[test]
+    fn terminal_mods_mouse_cell_and_layout_char() {
+        let (dir, mut session) = terminal_session("ui-terminal-input-protocol");
+        if shell_failed(&session, 0) {
+            let _ = std::fs::remove_dir_all(dir);
+            return;
+        }
+        // An OSC 8 link "link" at cell (0, 0) of the cleared screen.
+        run_terminal_command(&mut session, "printf '\\033[2J\\033[H\\033]8;;https://example.test/a\\033\\\\link\\033]8;;\\033\\\\'");
+        wait_until(&mut session, 5000, "osc 8 link at cell 0,0", |session| {
+            dump(session)["terminal"]["text"][0].as_str().is_some_and(|row| row.starts_with("link"))
+        });
+
+        // Pointing at the link without a modifier gives no hover.
+        let lines = run_script(&mut session, b"mouse_cell 1 0\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok ")), "{lines:?}");
+        assert!(dump(&mut session)["terminal"]["hovered_link"].is_null());
+
+        // `mods ctrl` alone recomputes the hover and requests a frame, with no mouse motion.
+        let before = dump(&mut session)["event_loop"]["frame_requests"].as_u64().unwrap_or(0);
+        let lines = run_script(&mut session, b"mods ctrl\n");
+        assert_eq!(lines, ["ok"]);
+        let state = dump(&mut session);
+        assert!(!state["terminal"]["hovered_link"].is_null(), "{state}");
+        assert!(state["event_loop"]["frame_requests"].as_u64().unwrap_or(0) > before, "{state}");
+
+        // Negative inputs answer with Ronsole's error texts.
+        let lines = run_script(&mut session, b"mods\nmouse_cell 500 0\nmods hyper\n");
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[1].starts_with("err cell out of range"), "{lines:?}");
+        assert!(lines[2].starts_with("err unknown modifier 'hyper'"), "{lines:?}");
+
+        // `key --char` sends the layout character: the shell echoes it onto the cleared row.
+        let lines = run_script(&mut session, "mods\nkey --char \u{441} a\n".as_bytes());
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        wait_until(&mut session, 5000, "layout character typed", |session| {
+            dump(session)["terminal"]["text"]
+                .as_array()
+                .is_some_and(|rows| rows.iter().any(|row| row.as_str().is_some_and(|row| row.contains('\u{441}'))))
+        });
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

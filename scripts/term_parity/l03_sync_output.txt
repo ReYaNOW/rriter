@@ -1,0 +1,31 @@
+# l03: synchronized output (DEC 2026). The shell opens a sync block, prints a line, and never closes
+# the block: the line must reach the screen by the 150 ms deadline, without any new bytes.
+# Expected (spec §5.4, protocol ref §2): sync_pending true right after the open, the line visible within
+# 150 ms + 100 ms of that first dump, and sync_pending false afterwards.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l03_sync_output.txt --size 1280x800 --scale 1.0
+# `type` turns `\n` into a newline, so the shell's `\n` is typed as `\\n`. The marker word is split as `vis''ible`
+# so that the echoed command line does not contain the visible text.
+# The `#@click_ui` markers enter IDE mode and open the terminal panel on RRiter; Ronsole skips them.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type printf '\033[?2026h'; printf 'vis''ible\\n'; sleep 1
+idle 300
+key enter
+idle 50
+dump
+idle 200
+dump
+idle 400
+dump

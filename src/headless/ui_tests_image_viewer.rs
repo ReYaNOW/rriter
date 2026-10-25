@@ -154,7 +154,8 @@ fn left_shift_wheel_zooms_but_right_shift_does_not() {
     );
     let after_right_shift = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
     assert_eq!(after_right_shift, zoomed, "aggregate Shift must not zoom image");
-    run_script(&mut session, b"key 0\n");
+    // Release the Shift held above: `key` adds held modifiers to the combo, so `0` would be Shift+0.
+    run_script(&mut session, b"mods\nkey 0\n");
     let fit = dump(&mut session)["tabs"][0]["image"]["zoom"].as_f64().unwrap_or(0.0);
     assert!((fit - f64::from(before)).abs() <= f64::EPSILON, "0 should restore first-open fit {before}: {fit}");
 }

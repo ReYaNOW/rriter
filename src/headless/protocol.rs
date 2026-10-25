@@ -1,6 +1,6 @@
 use crate::app::keyboard::KeyInput;
 use std::path::PathBuf;
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{ModifiersState, SmolStr};
 
 pub(crate) const SIZE_MIN: (u32, u32) = (320, 200);
 pub(crate) const SIZE_MAX: (u32, u32) = (8192, 8192);
@@ -56,10 +56,14 @@ pub(crate) enum Command {
     Resize { w: u32, h: u32 },
     Scale(f64),
     MouseMove { x: f64, y: f64 },
+    /// `mouse_cell <col> <row>`: pointer to the centre of a visible terminal cell.
+    MouseCell { col: usize, row: usize },
     Click { button: MouseButtonArg, phase: ClickPhase, alt: bool },
     DblClick { button: MouseButtonArg },
     Wheel { dx: f64, dy: f64, unit: WheelUnit },
     Key { input: KeyInput, mods: ModifiersState, combo: String, repeats: u32 },
+    /// `mods [ctrl] [shift] [alt] [super]`: modifiers held until the next `mods`.
+    Mods(ModifiersState),
     Type(String),
     Settle { ms: u64 },
     Wait { ms: u64 },
@@ -69,6 +73,8 @@ pub(crate) enum Command {
     Idle { ms: u64 },
     Screenshot(PathBuf),
     Dump(Option<PathBuf>),
+    /// `dump row <n>`: one row of the active terminal's visible area.
+    DumpRow(usize),
     Dialog(DialogAnswer),
     PickerAnswer(Vec<PathBuf>),
     Bench { frames: u32, csv: Option<PathBuf>, action: BenchAction },
@@ -147,8 +153,16 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
         "workspace" => Command::Workspace(path_rest(&mut args)?),
         "screenshot" => Command::Screenshot(path_rest(&mut args)?),
         "dump" => {
-            let rest = args.remainder().trim_end();
-            Command::Dump((!rest.is_empty()).then(|| PathBuf::from(rest)))
+            // `Args` is `Copy`, so the probe leaves `args` at the path when it is not `row`.
+            let mut probe = args;
+            if probe.token() == Some("row") {
+                let row = parse_uint::<usize>(probe.required("row number")?)?;
+                probe.finish()?;
+                Command::DumpRow(row)
+            } else {
+                let rest = args.remainder().trim_end();
+                Command::Dump((!rest.is_empty()).then(|| PathBuf::from(rest)))
+            }
         }
         "type" => Command::Type(unescape_text(args.remainder())),
         "picker_answer" => {
@@ -171,6 +185,13 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             args.finish()?;
             Command::MouseMove { x, y }
         }
+        "mouse_cell" => {
+            let col = parse_uint::<usize>(args.required("column")?)?;
+            let row = parse_uint::<usize>(args.required("row")?)?;
+            args.finish()?;
+            Command::MouseCell { col, row }
+        }
+        "mods" => Command::Mods(parse_mods(&mut args)?),
         "click" => parse_click(&mut args)?,
         "dblclick" => {
             let button = match args.token() {
@@ -191,21 +212,7 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             args.finish()?;
             Command::Wheel { dx, dy, unit }
         }
-        "key" => {
-            let first = args.required("key combo or --repeat")?;
-            let (combo, repeats) = if first == "--repeat" {
-                let repeats = parse_uint::<u32>(args.required("repeat count")?)?;
-                if repeats > MAX_KEY_REPEATS {
-                    return Err(format!("repeat count exceeds {MAX_KEY_REPEATS}"));
-                }
-                (args.required("key combo")?, repeats)
-            } else {
-                (first, 0)
-            };
-            let (input, mods) = KeyInput::parse_combo(combo)?;
-            args.finish()?;
-            Command::Key { input, mods, combo: combo.to_string(), repeats }
-        }
+        "key" => parse_key(&mut args)?,
         "settle" => {
             let ms = match args.token() {
                 None => DEFAULT_SETTLE_MS,
@@ -371,6 +378,71 @@ fn parse_click(args: &mut Args) -> Result<Command, String> {
     })
 }
 
+/// `key [--repeat N] [--char C] <combo>`; options may come in either order.
+fn parse_key(args: &mut Args) -> Result<Command, String> {
+    let mut repeats = None;
+    let mut layout_char = None;
+    let mut token = args.required("key combo or --repeat")?;
+    loop {
+        match token {
+            "--repeat" => {
+                if repeats.is_some() {
+                    return Err("duplicate --repeat".to_string());
+                }
+                let count = parse_uint::<u32>(args.required("repeat count")?)?;
+                if count > MAX_KEY_REPEATS {
+                    return Err(format!("repeat count exceeds {MAX_KEY_REPEATS}"));
+                }
+                repeats = Some(count);
+            }
+            "--char" => {
+                if layout_char.is_some() {
+                    return Err("duplicate --char".to_string());
+                }
+                let value = args.required("character")?;
+                let mut chars = value.chars();
+                let (Some(c), None) = (chars.next(), chars.next()) else {
+                    return Err(format!("--char expects one character, got '{}'", clip(value)));
+                };
+                layout_char = Some(c);
+            }
+            _ => break,
+        }
+        token = args.required("key combo")?;
+    }
+    let (mut input, mods) = KeyInput::parse_combo(token)?;
+    if let Some(c) = layout_char {
+        // The layout character replaces the symbol of the key; the keycode stays with the key name.
+        // The terminal encoder reads `logical_text`, so it carries the character too.
+        let mut buf = [0u8; 4];
+        let symbol = SmolStr::new(c.encode_utf8(&mut buf));
+        input.unshifted = Some(c);
+        input.logical_text = Some(symbol.clone());
+        input.text = Some(symbol);
+    }
+    args.finish()?;
+    Ok(Command::Key { input, mods, combo: token.to_string(), repeats: repeats.unwrap_or(0) })
+}
+
+/// `mods [ctrl] [shift] [alt] [super]`; no names releases every held modifier.
+fn parse_mods(args: &mut Args) -> Result<ModifiersState, String> {
+    let mut mods = ModifiersState::empty();
+    while let Some(token) = args.token() {
+        let flag = match token.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" | "mod" => ModifiersState::CONTROL,
+            "alt" => ModifiersState::ALT,
+            "shift" => ModifiersState::SHIFT,
+            "super" | "cmd" | "meta" => ModifiersState::SUPER,
+            _ => return Err(format!("unknown modifier '{}'", clip(token))),
+        };
+        if mods.contains(flag) {
+            return Err(format!("duplicate modifier '{}'", clip(token)));
+        }
+        mods |= flag;
+    }
+    Ok(mods)
+}
+
 fn parse_action(args: &mut Args) -> Result<BenchAction, String> {
     let action = match args.token() {
         None | Some("none") => BenchAction::None,
@@ -461,6 +533,7 @@ mod tests {
         assert_eq!(cmd("screenshot /tmp/a b.png"), Command::Screenshot(PathBuf::from("/tmp/a b.png")));
         assert_eq!(cmd("dump"), Command::Dump(None));
         assert_eq!(cmd("dump   "), Command::Dump(None));
+        assert_eq!(cmd("dump row 3"), Command::DumpRow(3));
         assert_eq!(cmd("dump /tmp/d.json"), Command::Dump(Some(PathBuf::from("/tmp/d.json"))));
         assert_eq!(err("open"), "missing path");
         assert_eq!(err("workspace   "), "missing path");
@@ -532,6 +605,15 @@ mod tests {
         assert!(parse("wheel 0 1 px 2").is_err());
         assert!(parse("dblclick up").is_err());
         assert!(parse("dblclick left right").is_err());
+        // Expected texts are Ronsole's (src/headless/protocol.rs, its `err` assertions).
+        assert!(parse("mouse_cell 3").is_err());
+        assert!(parse("mouse_cell a 4").is_err());
+        assert!(parse("mouse_cell 3 4 5").is_err());
+        assert_eq!(err("mods hyper"), "unknown modifier 'hyper'");
+        assert_eq!(err("mods ctrl ctrl"), "duplicate modifier 'ctrl'");
+        assert_eq!(err("key --char ab a"), "--char expects one character, got 'ab'");
+        assert_eq!(err("key --char"), "missing character");
+        assert_eq!(err("key --char a --char b c"), "duplicate --char");
     }
 
     #[test]
@@ -544,6 +626,17 @@ mod tests {
         assert_eq!(err("key ctrl+foo"), "unknown key token 'foo'");
         assert!(parse("key").is_err());
         assert!(parse("key a b").is_err());
+        assert_eq!(cmd("mouse_cell 3 4"), Command::MouseCell { col: 3, row: 4 });
+        assert_eq!(cmd("mods"), Command::Mods(ModifiersState::empty()));
+        assert_eq!(cmd("mods ctrl shift"), Command::Mods(ModifiersState::CONTROL | ModifiersState::SHIFT));
+        assert_eq!(cmd("mods Mod"), Command::Mods(ModifiersState::CONTROL));
+        // `--char` replaces the symbol of the key; the keycode and the combo's modifiers stay.
+        let (mut input, mods) = combo("a");
+        input.unshifted = Some('с');
+        input.logical_text = Some(SmolStr::new("с"));
+        input.text = Some(SmolStr::new("с"));
+        assert_eq!(cmd("key --char с a"), Command::Key { input, mods, combo: "a".to_string(), repeats: 0 });
+        assert_eq!(cmd("key --char с --repeat 2 a"), cmd("key --repeat 2 --char с a"));
         assert_eq!(cmd("type hello world  "), Command::Type("hello world  ".to_string()));
         assert_eq!(cmd("type"), Command::Type(String::new()));
         assert_eq!(cmd("type   "), Command::Type(String::new()));

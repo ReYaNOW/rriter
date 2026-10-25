@@ -1,0 +1,65 @@
+# l05: plain URLs (not OSC 8) of http, https and file schemes: Ctrl+hover and Ctrl+click.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l05_plain_urls.txt
+# Expected (Ronsole headless spec 2026-10-23, section 9, row L5): `mods ctrl` + `mouse_cell` on the URL
+# gives `hovered_link` (uri and ranges); `click` gives `external_request` with kind `open_url` and the URL.
+# The file target is a plain file created by the scenario at a fixed path, so the two apps' args are
+# compared exactly. Each URL is printed on screen row 0 (absolute CUP to 1;1), the cursor is then moved to
+# 2;1 so that the shell prompt does not overwrite it, and Ctrl+clicked at cell (5,0). The row must be 0:
+# the prompt draws below the screen row and scrolls a 3-row panel, so other rows are not stable.
+# The URL words are split as `l5-''https` so that the echoed command line does not match the text of
+# the printed URL; the echoed line is on row 0 and is not hovered.
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type rm -rf /tmp/tp-l5 && mkdir /tmp/tp-l5 && printf 'x\012' > /tmp/tp-l5/plain.txt && clear
+idle 300
+key enter
+idle 1500
+type printf '\033[1;1H\033[2Khttps://example.com/l5-''https\033[2;1H'
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 0
+idle 300
+click
+idle 800
+dump
+mods
+type printf '\033[1;1H\033[2Khttp://example.com/l5-''http\033[2;1H'
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 0
+idle 300
+click
+idle 800
+dump
+mods
+type printf '\033[1;1H\033[2Kfile:///tmp/tp-l5/plain.txt\033[2;1H'
+idle 300
+key enter
+idle 800
+mods ctrl
+mouse_cell 5 0
+idle 300
+click
+idle 800
+dump
+mods
+type rm -rf /tmp/tp-l5
+idle 300
+key enter
+idle 800

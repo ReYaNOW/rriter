@@ -1,0 +1,55 @@
+# l02: DA2, XTVERSION, DECRQM and OSC colour queries. Each block puts the tty in raw mode, sends one
+# query, and prints the bytes the terminal answered (reader of spec §9.1). One query per block: the
+# RRiter panel shows 3 rows, so a reply must fit one row between the markers. Waits are `idle`.
+# Run: python3 scripts/term_parity/compare.py scripts/term_parity/l02_queries.txt --size 1280x800 --scale 1.0
+# The `#@click_ui` markers enter IDE mode and open the terminal panel on RRiter; Ronsole skips them.
+# `type` turns `\n` into a newline, so the CR-LF markers are typed as `\\r\\n` (the shell sees `\r\n`).
+#@click_ui WelcomeIdeMode
+idle 300
+#@click_ui SidebarSlot(Terminal)
+idle 3000
+#@click_ui TerminalBody
+idle 800
+type cd /tmp
+idle 300
+key enter
+idle 800
+type clear
+idle 300
+key enter
+idle 800
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033[>c'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033[>q'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033[?2026$p'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033[4$p'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033]10;?\007'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033]11;?\033\\\\'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
+type stty raw -echo min 1 time 0; printf 'RE''ADY\\r\\n'; printf '\033]4;1;?\007'; { dd bs=1 count=1; stty min 0 time 10; dd bs=1; } 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; printf 'EN''D\\r\\n'; stty sane
+idle 300
+key enter
+idle 2500
+dump
