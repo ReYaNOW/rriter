@@ -331,9 +331,21 @@ impl Terminal {
         self.write_input(bytes).is_ok()
     }
 
+    /// Whether the grid reports a change for the next frame, read without waiting for the grid
+    /// lock. A held lock reads as "no change": the parser wakes the UI after it releases the lock
+    /// when a batch changed the grid.
+    pub(crate) fn grid_dirty_without_waiting(&self) -> bool {
+        match self.grid.try_lock() {
+            Ok(grid) => grid.dirty(),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner().dirty(),
+            Err(std::sync::TryLockError::WouldBlock) => false,
+        }
+    }
+
     /// Reconciles the DECSET 1004 report with the host focus: queues `CSI I` / `CSI O` when the
-    /// application enabled reporting. The new state is recorded only once the report is queued,
-    /// so a refused report is retried by the next reconcile.
+    /// application enabled reporting. A refused report is not retried: both refusals (no process,
+    /// writer stopped) are permanent. The parser publishes DECSET 1004 at the end of its batch, so
+    /// a toggle inside a batch can read as "off" here and its report is lost.
     pub(crate) fn report_focus(&mut self, focused: bool) {
         if focused == self.focus_sent {
             return;
@@ -343,8 +355,8 @@ impl Terminal {
             Some(bytes) => self.queue_report(bytes),
             None => true,
         };
+        self.focus_sent = focused;
         if queued {
-            self.focus_sent = focused;
             self.focus_key_reset = Some(focused);
         }
     }
@@ -632,20 +644,51 @@ mod tests {
     }
 
     #[test]
-    fn refused_focus_report_is_retried_by_next_reconcile() {
+    fn refused_focus_report_is_not_retried() {
         let mut term = Terminal::test_without_process(20, 2);
         term.host_events.set_focus_reporting(true);
-        // No PTY behind the tab refuses the report, so the focus state stays unsent.
+        // No PTY behind the tab refuses the report (a permanent refusal), so the state is recorded
+        // without a key-protocol reset.
         term.report_focus(true);
-        assert!(!term.focus_sent);
+        assert!(term.focus_sent);
         assert_eq!(term.take_focus_key_reset(), None);
 
-        // The next reconcile attempts the same report again (`CSI I`, ronsole-term input.rs).
+        // The next reconcile with the same focus must not attempt the report again: only the
+        // first `CSI I` reached `write_input` (`written_input` records every attempt in tests).
         term.report_focus(true);
         assert_eq!(
             crate::platform::lock_recover(&term.written_input).clone(),
-            b"\x1b[I\x1b[I".to_vec()
+            b"\x1b[I".to_vec()
         );
+    }
+
+    #[test]
+    fn grid_dirty_without_waiting_returns_without_grid_lock() {
+        let term = Terminal::test_without_process(20, 2);
+        assert!(term.grid_dirty_without_waiting(), "a fresh grid is dirty");
+
+        let grid = term.grid.clone();
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder = std::thread::spawn(move || {
+            let _guard = lock_terminal_grid(&grid);
+            let _ = locked_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(3));
+        });
+        locked_rx.recv().expect("holder thread took the grid lock");
+
+        let started = Instant::now();
+        let dirty = term.grid_dirty_without_waiting();
+        // The frame check must not wait for the parser's batch: a held lock reads as not dirty.
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "grid_dirty_without_waiting waited for the grid lock"
+        );
+        assert!(!dirty);
+
+        let _ = release_tx.send(());
+        holder.join().expect("holder thread");
+        assert!(term.grid_dirty_without_waiting());
     }
 
     #[test]

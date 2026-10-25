@@ -42,7 +42,7 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
             }
-            if crate::app::terminal::lock_terminal_grid(&t.grid).dirty() {
+            if t.grid_dirty_without_waiting() {
                 needs_redraw = true;
             }
         }
