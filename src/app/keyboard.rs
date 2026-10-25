@@ -687,7 +687,7 @@ impl App {
         let mut host_consumed = false;
         let mut redraw = false;
         if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-            let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+            let mut grid = term.lock_grid_for_key();
             let input = match physical {
                 PhysicalKey::Code(KeyCode::KeyC) if pressed && (primary || terminal_ctrl) => {
                     if primary && grid.selection().is_some() {
@@ -1451,6 +1451,74 @@ mod tests {
         assert_eq!(
             ronsole_term::bracketed_paste_bytes(b"ls".to_vec(), term.bracketed_paste()),
             b"\x1b[200~ls\x1b[201~".to_vec()
+        );
+    }
+
+    /// Encodes `input` against the terminal's grid, the way the key handler does under its lock.
+    fn terminal_key_bytes_on(
+        term: &crate::app::terminal::Terminal,
+        input: &KeyInput,
+        modifiers: ModifiersState,
+    ) -> Option<Vec<u8>> {
+        let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+        terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, input, modifiers)
+    }
+
+    /// A focus change clears the kitty sent set before the key handler encodes the next key, so the
+    /// release of a key pressed before the change is ignored (ronsole-term tests/keys.rs,
+    /// `focus_loss_clears_sent_set`).
+    #[test]
+    fn focus_loss_drops_release_of_key_pressed_before_it() {
+        let mut term = crate::app::terminal::Terminal::test_without_process(80, 24);
+        {
+            let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+            // Kitty flags 3: disambiguate and report event types.
+            crate::app::terminal::advance_test_output(&mut grid, b"\x1b[>3u");
+        }
+        let press = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
+        let release = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Released, false);
+
+        term.report_focus(true);
+        let _ = term.take_focus_key_reset();
+        // Ctrl+A press, CSI u with modifier 5 (ronsole-term tests/keys.rs, `c` case: `CSI 99;5u`).
+        assert_eq!(
+            terminal_key_bytes_on(&term, &press, ModifiersState::CONTROL),
+            Some(b"\x1b[97;5u".to_vec())
+        );
+
+        term.report_focus(false);
+        // Release of the key pressed before the focus loss is not sent.
+        {
+            let mut grid = term.lock_grid_for_key();
+            assert_eq!(
+                terminal_key_bytes(crate::platform::CURRENT_PLATFORM, &mut grid, &release, ModifiersState::empty()),
+                None
+            );
+        }
+    }
+
+    /// Control for `focus_loss_drops_release_of_key_pressed_before_it`: without a focus change the
+    /// release of the same press is sent, so the ignored release above comes from the cleared set.
+    /// Expected form `CSI 97;1:3u` (ronsole-term tests/keys.rs, release of `q`: `CSI 113;1:3u`).
+    #[test]
+    fn release_without_focus_change_is_sent() {
+        let mut term = crate::app::terminal::Terminal::test_without_process(80, 24);
+        {
+            let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+            crate::app::terminal::advance_test_output(&mut grid, b"\x1b[>3u");
+        }
+        let press = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Pressed, false);
+        let release = host_key(KeyCode::KeyA, Some('a'), Some("a"), ElementState::Released, false);
+
+        term.report_focus(true);
+        let _ = term.take_focus_key_reset();
+        assert_eq!(
+            terminal_key_bytes_on(&term, &press, ModifiersState::CONTROL),
+            Some(b"\x1b[97;5u".to_vec())
+        );
+        assert_eq!(
+            terminal_key_bytes_on(&term, &release, ModifiersState::empty()),
+            Some(b"\x1b[97;1:3u".to_vec())
         );
     }
 }

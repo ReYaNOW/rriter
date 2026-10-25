@@ -4,7 +4,7 @@
 
 use crate::app::PanelId;
 use crate::app::App;
-use crate::app::terminal::{Terminal, lock_terminal_grid};
+use crate::app::terminal::lock_terminal_grid;
 use crate::ui_system::UiId;
 use ronsole_term::{MouseButton, MouseEventKind, Term, mouse_report};
 use winit::event::ElementState;
@@ -293,30 +293,15 @@ impl App {
             if !desired {
                 term.mouse.clear_held();
             }
-            set_focus_report(term, desired);
+            term.report_focus(desired);
         }
     }
 
     /// Sends focus-out to tab `index` before the tab is removed, so an application that asked for DECSET 1004 sees it leave.
     pub(crate) fn send_terminal_focus_out(&mut self, index: usize) {
         if let Some(term) = self.ide_panel.terminals.get_mut(index) {
-            set_focus_report(term, false);
+            term.report_focus(false);
         }
-    }
-}
-
-/// Queues `CSI I` / `CSI O` for one tab when its desired DECSET 1004 state changes and the application enabled reporting.
-/// The report goes through the PTY writer queue without blocking, so closing a tab never waits for the child.
-fn set_focus_report(term: &mut Terminal, desired: bool) {
-    if desired == term.focus_sent {
-        return;
-    }
-    term.focus_sent = desired;
-    let report = lock_terminal_grid(&term.grid)
-        .focus_changed(desired)
-        .map(<[u8]>::to_vec);
-    if let Some(bytes) = report {
-        term.queue_report(&bytes);
     }
 }
 
