@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(cmd("dump   "), Command::Dump(None));
         assert_eq!(cmd("dump row 3"), Command::DumpRow(3));
         assert_eq!(cmd("dump /tmp/d.json"), Command::Dump(Some(PathBuf::from("/tmp/d.json"))));
-        // Same asserts as Ronsole's `dump_forms` (ronsole src/headless/protocol.rs:587-594):
+        // Same asserts as Ronsole's `dump_forms` test:
         // only exactly `row <uint>` addresses a row, the rest of the line is a path.
         assert_eq!(cmd("dump row"), Command::Dump(Some(PathBuf::from("row"))));
         assert_eq!(cmd("dump row 5 x"), Command::Dump(Some(PathBuf::from("row 5 x"))));
