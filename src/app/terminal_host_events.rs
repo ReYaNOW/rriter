@@ -7,6 +7,7 @@
 
 use crate::ui_waker::UiWaker;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -29,6 +30,7 @@ pub(crate) struct PendingHostEvents {
 pub(crate) struct HostEventsSink {
     pending: Arc<Mutex<PendingHostEvents>>,
     published_sync_deadline: Arc<Mutex<Option<Instant>>>,
+    published_focus_reporting: Arc<AtomicBool>,
     waker: UiWaker,
 }
 
@@ -37,6 +39,7 @@ impl HostEventsSink {
         Self {
             pending: Arc::new(Mutex::new(PendingHostEvents::default())),
             published_sync_deadline: Arc::new(Mutex::new(None)),
+            published_focus_reporting: Arc::new(AtomicBool::new(false)),
             waker,
         }
     }
@@ -50,6 +53,16 @@ impl HostEventsSink {
     /// for the grid lock.
     pub(crate) fn sync_deadline(&self) -> Option<Instant> {
         *crate::platform::lock_recover(&self.published_sync_deadline)
+    }
+
+    /// Parser side: publishes whether the application enabled focus reporting (DECSET 1004).
+    pub(crate) fn set_focus_reporting(&self, enabled: bool) {
+        self.published_focus_reporting.store(enabled, Ordering::Release);
+    }
+
+    /// Any thread: the last published DECSET 1004 state, read without the grid lock.
+    pub(crate) fn focus_reporting(&self) -> bool {
+        self.published_focus_reporting.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_clipboard(&self, text: String) {

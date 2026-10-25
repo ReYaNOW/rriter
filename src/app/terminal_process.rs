@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::app::terminal_host_events::HostEventsSink;
 pub(crate) use crate::app::terminal_sink::RriterTermSink;
-use crate::app::terminal_sink::try_queue_report;
+use crate::app::terminal_sink::{PtyWriteQueue, PtyWriteReceiver, pty_write_queue};
 use crate::app::terminal_sync_output::{
     advance_terminal_output_batch, receive_terminal_chunk, wait_out_sync_deadline,
 };
@@ -137,15 +137,14 @@ struct TerminalShellCandidate {
 }
 
 pub(crate) struct TerminalProcess {
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     tree: ProcessTree,
     title_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     title_worker: Option<JoinHandle<()>>,
     finished: bool,
-    /// Clone of the PTY reply queue sender, so a replay on the UI thread queues replies in order.
-    reply_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
+    /// Producer side of the PTY writer queue: input, and replies replayed on the UI thread.
+    write_queue: PtyWriteQueue,
 }
 
 impl TerminalProcess {
@@ -206,7 +205,6 @@ impl TerminalProcess {
             .master
             .take_writer()
             .map_err(|error| io::Error::other(format!("failed to take PTY writer: {error}")))?;
-        let writer = Arc::new(Mutex::new(writer));
         let master_pty = Arc::new(Mutex::new(pair.master));
         let (title_stop_tx, title_worker) = match install_terminal_title_refresh(
             master_pty.clone(),
@@ -224,17 +222,15 @@ impl TerminalProcess {
                 return Err(error);
             }
         };
-        let reply_channel =
-            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
-        let reply_tx = reply_channel.0.clone();
+        let (write_queue, write_rx) = pty_write_queue();
         if let Err(error) = install_terminal_io_threads(
             &grid,
             reader,
-            writer.clone(),
+            writer,
             window,
             title_cache,
             host_events,
-            reply_channel,
+            (write_queue.clone(), write_rx),
         ) {
             if let Some(stop_tx) = title_stop_tx {
                 let _ = stop_tx.send(());
@@ -251,37 +247,27 @@ impl TerminalProcess {
 
         Ok((
             Self {
-                writer,
                 master_pty,
                 child,
                 tree,
                 title_stop_tx,
                 title_worker,
                 finished: false,
-                reply_tx,
+                write_queue,
             },
             shell,
         ))
     }
 
-    /// Sender of the PTY reply queue that the writer thread drains.
-    pub(crate) fn reply_sender(&self) -> std::sync::mpsc::SyncSender<Vec<u8>> {
-        self.reply_tx.clone()
+    /// Producer side of the PTY writer queue, for replies produced on the UI thread.
+    pub(crate) fn write_queue(&self) -> PtyWriteQueue {
+        self.write_queue.clone()
     }
 
+    /// Queues `bytes` for the PTY writer thread. Never blocks and never drops input; fails only
+    /// when the writer thread has stopped.
     pub(crate) fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
-        let mut writer = self
-            .writer
-            .lock()
-            .map_err(|_| io::Error::other("terminal writer lock is poisoned"))?;
-        writer.write_all(bytes)?;
-        writer.flush()
-    }
-
-    /// Queues a terminal report behind the parser replies without taking the writer lock, so a
-    /// stalled child cannot block the caller. Returns `false` when the report was dropped.
-    pub(crate) fn queue_report(&self, bytes: &[u8]) -> bool {
-        try_queue_report(&self.reply_tx, bytes)
+        self.write_queue.input(bytes)
     }
 
     pub(crate) fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -650,21 +636,18 @@ fn finish_terminal_output_stream(grid: &mut Term, sink: &mut RriterTermSink) -> 
 pub(crate) fn install_terminal_io_threads(
     grid: &Arc<Mutex<Term>>,
     reader: Box<dyn Read + Send>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    writer: Box<dyn Write + Send>,
     window: Option<Arc<crate::platform::WindowHost>>,
     title_cache: TerminalTitleCache,
     host_events: HostEventsSink,
-    (reply_tx, reply_rx): (
-        std::sync::mpsc::SyncSender<Vec<u8>>,
-        std::sync::mpsc::Receiver<Vec<u8>>,
-    ),
+    (write_queue, write_rx): (PtyWriteQueue, PtyWriteReceiver),
 ) -> io::Result<()> {
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let reader_finished = Arc::new(AtomicBool::new(false));
 
     let parser_grid = grid.clone();
     let parser_reader_finished = reader_finished.clone();
-    let mut sink = RriterTermSink::new(Some(title_cache), Some(reply_tx))
+    let mut sink = RriterTermSink::new(Some(title_cache), Some(write_queue))
         .with_host_events(host_events.clone());
     crate::platform::spawn_named("rriter-terminal-parser", move || {
         let request_redraw = || {
@@ -724,16 +707,7 @@ pub(crate) fn install_terminal_io_threads(
         )
     })?;
 
-    crate::platform::spawn_named("rriter-terminal-writer", move || {
-        while let Ok(message) = reply_rx.recv() {
-            let Ok(mut writer) = writer.lock() else {
-                break;
-            };
-            if writer.write_all(&message).is_err() || writer.flush().is_err() {
-                break;
-            }
-        }
-    })
+    crate::platform::spawn_named("rriter-terminal-writer", move || write_rx.run(writer))
     .map_err(|error| {
         io::Error::new(
             error.kind(),
@@ -1085,17 +1059,15 @@ mod tests {
     fn terminal_io_threads_write_device_attributes_reply_to_writer() {
         let grid = Arc::new(Mutex::new(crate::app::terminal::test_term(8, 2)));
         let recorded = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(RecordingWriter(recorded.clone()))));
+        let writer: Box<dyn Write + Send> = Box::new(RecordingWriter(recorded.clone()));
         let title_cache: TerminalTitleCache =
             Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
 
-        let reply_channel =
-            std::sync::mpsc::sync_channel::<Vec<u8>>(TERMINAL_REPLY_QUEUE_CAPACITY);
+        let write_channel = pty_write_queue();
         let host_events = crate::app::terminal_host_events::HostEventsSink::new(
             crate::ui_waker::UiWaker::counting(),
         );
-        // The reader yields one DA1 query; the reply must travel parser -> channel -> writer.
+        // The reader yields one DA1 query; the reply must travel parser -> queue -> writer.
         install_terminal_io_threads(
             &grid,
             Box::new(std::io::Cursor::new(b"\x1b[c".to_vec())),
@@ -1103,7 +1075,7 @@ mod tests {
             None,
             title_cache,
             host_events,
-            reply_channel,
+            write_channel,
         )
         .expect("terminal io threads spawn");
 

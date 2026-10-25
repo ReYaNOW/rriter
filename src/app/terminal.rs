@@ -36,12 +36,12 @@ pub(crate) fn resize_terminal_grid(grid: &mut Term, cols: usize, rows: usize) ->
 fn flush_expired_sync_on_grid(
     grid: &Mutex<Term>,
     title_cache: &crate::app::terminal_process::TerminalTitleCache,
-    reply_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    write_queue: Option<crate::app::terminal_sink::PtyWriteQueue>,
     host_events: &crate::app::terminal_host_events::HostEventsSink,
     now: Instant,
 ) -> bool {
     let mut sink =
-        crate::app::terminal_process::RriterTermSink::new(Some(title_cache.clone()), reply_tx)
+        crate::app::terminal_process::RriterTermSink::new(Some(title_cache.clone()), write_queue)
             .with_host_events(host_events.clone());
     let mut grid = lock_terminal_grid(grid);
     crate::app::terminal_sync_output::flush_expired_terminal_output(&mut grid, &mut sink, now)
@@ -133,6 +133,9 @@ pub struct Terminal {
     pub(crate) mouse: crate::app::mouse::TerminalMouseState,
     /// Focus state last reported to the PTY (DECSET 1004); reconciled by `sync_terminal_focus_reports`.
     pub(crate) focus_sent: bool,
+    /// Focus change not yet applied to the key encoder; taken by the next key press, which resets
+    /// the key protocol's sent set before encoding.
+    focus_key_reset: Option<bool>,
     /// Bytes passed to `write_input`, kept so headless tests can check the PTY stream.
     #[cfg(test)]
     pub(crate) written_input: Mutex<Vec<u8>>,
@@ -212,6 +215,7 @@ impl Terminal {
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
             focus_sent: false,
+            focus_key_reset: None,
             #[cfg(test)]
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
@@ -260,18 +264,54 @@ impl Terminal {
         if !sync_ui_fallback_due(deadline, now) {
             return false;
         }
-        let reply_tx = self.process.as_ref().map(|process| process.reply_sender());
-        flush_expired_sync_on_grid(&self.grid, &self.title_cache, reply_tx, &self.host_events, now)
+        let write_queue = self.process.as_ref().map(|process| process.write_queue());
+        flush_expired_sync_on_grid(
+            &self.grid,
+            &self.title_cache,
+            write_queue,
+            &self.host_events,
+            now,
+        )
     }
 
-    /// Queues a terminal report (focus) without blocking. A full queue or a missing process drops it.
-    pub(crate) fn queue_report(&self, bytes: &[u8]) {
-        // Tests read the reports the way they read `write_input`, which records before queueing.
-        #[cfg(test)]
-        crate::platform::lock_recover(&self.written_input).extend_from_slice(bytes);
-        if let Some(process) = self.process.as_ref() {
-            process.queue_report(bytes);
+    /// Queues a terminal report without blocking. Returns `false` when there is no PTY process or
+    /// the writer has stopped.
+    pub(crate) fn queue_report(&self, bytes: &[u8]) -> bool {
+        self.write_input(bytes).is_ok()
+    }
+
+    /// Reconciles the DECSET 1004 report with the host focus: queues `CSI I` / `CSI O` when the
+    /// application enabled reporting. The new state is recorded only once the report is queued,
+    /// so a refused report is retried by the next reconcile.
+    pub(crate) fn report_focus(&mut self, focused: bool) {
+        if focused == self.focus_sent {
+            return;
         }
+        let enabled = self.host_events.focus_reporting();
+        let queued = match ronsole_term::focus_report_sequence(enabled, focused) {
+            Some(bytes) => self.queue_report(bytes),
+            None => true,
+        };
+        if queued {
+            self.focus_sent = focused;
+            self.focus_key_reset = Some(focused);
+        }
+    }
+
+    /// Takes the focus change that the key encoder has not applied yet.
+    pub(crate) fn take_focus_key_reset(&mut self) -> Option<bool> {
+        self.focus_key_reset.take()
+    }
+
+    /// Locks the grid for encoding a key. A pending focus change is applied first, so it clears
+    /// the key protocol's sent set before this key is encoded.
+    pub(crate) fn lock_grid_for_key(&mut self) -> MutexGuard<'_, Term> {
+        let focus_reset = self.take_focus_key_reset();
+        let mut grid = lock_terminal_grid(&self.grid);
+        if let Some(focused) = focus_reset {
+            let _ = grid.focus_changed(focused);
+        }
+        grid
     }
 
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
@@ -285,6 +325,7 @@ impl Terminal {
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
             focus_sent: false,
+            focus_key_reset: None,
             written_input: Mutex::new(Vec::new()),
             hovered_link: None,
             hovered_link_miss: None,
@@ -364,12 +405,12 @@ mod tests {
             cursor: foreground,
             ansi: [background; 16],
         });
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
-        let mut sink = RriterTermSink::new(None, Some(reply_tx));
+        let (write_queue, write_rx) = crate::app::terminal_sink::pty_write_queue();
+        let mut sink = RriterTermSink::new(None, Some(write_queue));
         term.advance(b"\x1b]10;?\x07\x1b]11;?\x07", Instant::now(), &mut sink);
 
         // One batch of replies is sent as a single message, both queries in order.
-        let reply = String::from_utf8_lossy(&reply_rx.try_recv().unwrap_or_default()).into_owned();
+        let reply = String::from_utf8_lossy(&write_rx.try_next().unwrap_or_default()).into_owned();
         // xterm `rgb:` spec doubles each 8-bit channel (ronsole-term osc.rs `rgb_spec`).
         assert!(reply.contains("rgb:abab/cdcd/efef"), "{reply}");
         assert!(reply.contains("rgb:1212/3434/5656"), "{reply}");
@@ -426,7 +467,7 @@ mod tests {
         let host_events = crate::app::terminal_host_events::HostEventsSink::new(
             crate::ui_waker::UiWaker::counting(),
         );
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let (write_queue, write_rx) = crate::app::terminal_sink::pty_write_queue();
         let now = Instant::now();
         // The parser thread holds this batch without a reply queue; the CPR is produced only by the replay.
         let mut parser_sink = RriterTermSink::new(None, None);
@@ -434,17 +475,17 @@ mod tests {
         let deadline = lock_terminal_grid(&grid)
             .sync_deadline()
             .expect("mode 2026 holds the output");
-        assert!(reply_rx.try_recv().is_err());
+        assert!(write_rx.try_next().is_none());
 
         assert!(flush_expired_sync_on_grid(
             &grid,
             &title_cache,
-            Some(reply_tx),
+            Some(write_queue),
             &host_events,
             deadline
         ));
         // Cursor at home: CPR reply is CSI row;col R with 1-based coordinates (xterm ctlseqs).
-        assert_eq!(reply_rx.try_recv().ok(), Some(b"\x1b[1;1R".to_vec()));
+        assert_eq!(write_rx.try_next(), Some(b"\x1b[1;1R".to_vec()));
     }
 
     use std::time::Duration;
@@ -508,5 +549,32 @@ mod tests {
         let term = Terminal::test_without_process(20, 2);
         // Focus reports must never block the UI thread, even with no PTY behind the tab.
         term.queue_report(b"\x1b[O");
+    }
+
+    #[test]
+    fn refused_focus_report_is_retried_by_next_reconcile() {
+        let mut term = Terminal::test_without_process(20, 2);
+        term.host_events.set_focus_reporting(true);
+        // No PTY behind the tab refuses the report, so the focus state stays unsent.
+        term.report_focus(true);
+        assert!(!term.focus_sent);
+        assert_eq!(term.take_focus_key_reset(), None);
+
+        // The next reconcile attempts the same report again (`CSI I`, ronsole-term input.rs).
+        term.report_focus(true);
+        assert_eq!(
+            crate::platform::lock_recover(&term.written_input).clone(),
+            b"\x1b[I\x1b[I".to_vec()
+        );
+    }
+
+    #[test]
+    fn focus_change_without_report_still_resets_key_protocol_once() {
+        let mut term = Terminal::test_without_process(20, 2);
+        // Reporting is off, so nothing is queued, but the key encoder still has to reset its state.
+        term.report_focus(true);
+        assert!(term.focus_sent);
+        assert_eq!(term.take_focus_key_reset(), Some(true));
+        assert_eq!(term.take_focus_key_reset(), None);
     }
 }

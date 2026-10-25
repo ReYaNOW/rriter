@@ -226,10 +226,9 @@ mod tests {
     #[test]
     fn sync_hold_flushed_during_continuous_output() {
         let grid = Arc::new(Mutex::new(test_term(40, 4)));
-        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(std::io::sink())));
+        let writer: Box<dyn std::io::Write + Send> = Box::new(std::io::sink());
         let title_cache = Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let write_channel = crate::app::terminal_sink::pty_write_queue();
         let stop = Arc::new(AtomicBool::new(false));
         // The hold never ends by reset, and the stream never gaps: only the deadline can replay it.
         install_terminal_io_threads(
@@ -242,7 +241,7 @@ mod tests {
             None,
             title_cache,
             HostEventsSink::new(UiWaker::counting()),
-            (reply_tx, reply_rx),
+            write_channel,
         )
         .expect("terminal io threads spawn");
 
@@ -261,10 +260,9 @@ mod tests {
     #[test]
     fn held_output_is_shown_after_stream_ends() {
         let grid = Arc::new(Mutex::new(test_term(20, 2)));
-        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(std::io::sink())));
+        let writer: Box<dyn std::io::Write + Send> = Box::new(std::io::sink());
         let title_cache = Arc::new(Mutex::new(TerminalTitleState::new("shell".to_string())));
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+        let write_channel = crate::app::terminal_sink::pty_write_queue();
         // The reader yields a held batch and then EOF: the replay must happen at the deadline.
         install_terminal_io_threads(
             &grid,
@@ -273,7 +271,7 @@ mod tests {
             None,
             title_cache,
             HostEventsSink::new(UiWaker::counting()),
-            (reply_tx, reply_rx),
+            write_channel,
         )
         .expect("terminal io threads spawn");
 
