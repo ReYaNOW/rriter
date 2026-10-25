@@ -7,7 +7,7 @@
 #            Escape press -> CSI 27u = 1b5b323775
 #   flags 3 (1+2): Escape press CSI 27u = 1b5b323775, Escape release CSI 27;1:3u = 1b5b32373b313a3375
 #   IME text "привет" -> UTF-8 text path at any flags: d0bfd180d0b8d0b2d0b5d182
-# `key --char` (Ctrl by physical key with a Cyrillic layout) is not in RRiter's protocol: not tested here.
+# `key --char` (Ctrl by physical key with a Cyrillic layout) is in l08b_kitty_flag8_repeat_char.txt.
 # Run: python3 scripts/term_parity/compare.py scripts/term_parity/l08_kitty_keys.txt
 #@click_ui WelcomeIdeMode
 idle 300

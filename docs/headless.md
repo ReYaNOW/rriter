@@ -64,11 +64,11 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `scale S` | Change the scale factor, 0.5 … 4.0. | `ok` |
 | `mouse_move x y` | Move the cursor (hover). | `ok` |
 | `mouse_cell col row` | Move the cursor to the centre of a visible terminal cell (same geometry as `dump.terminal.layout`). `err cell out of range` if the cell is outside the visible area, its centre is outside `layout.body`, or no frame has drawn the terminal yet. | `ok <x> <y>` |
-| `mods [ctrl] [shift] [alt] [super]` | Modifiers held until the next `mods`; no arguments releases all. Names as in Ronsole (`mod` = Ctrl, `cmd`/`meta` = Super). Applied to `key`, `click`, `dblclick`; not to `type`. A change requests a frame, so Ctrl hover on a link updates without mouse motion. Unknown → `err unknown modifier '<m>'`, repeated → `err duplicate modifier '<m>'`. | `ok` |
+| `mods [ctrl] [shift] [alt] [super]` | Modifiers held until the next `mods`; no arguments releases all. Names as in Ronsole (`mod` = Ctrl, `cmd`/`meta` = Super). Applied to `key`, `click`, `dblclick`, `mouse_move`, `mouse_cell`, `wheel`; not to `type`. A change sends press or release events of the left modifier key (Ctrl, Shift, Alt, Super; presses in that order, releases reversed), each followed by the held set, then requests a frame, so Ctrl hover on a link updates without mouse motion. Unknown → `err unknown modifier '<m>'`, repeated → `err duplicate modifier '<m>'`. | `ok` |
 | `click [left\|right\|middle] [down\|up] [alt]` | Press+release, or one phase. Default `left`; `alt` synthesizes Alt/Option for this click. | `ok` |
 | `dblclick [btn]` | Two clicks with no pause. | `ok` |
 | `wheel dx dy [lines\|px]` | Scroll; default `lines`. | `ok` |
-| `key [--repeat N] [--char C] <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`, `pause`, `numpadenter`; `key --repeat N <combo>` sends N repeated press events before release (N ≤ 1000). `--char C` (one character) sets the layout character of the key: `unshifted`, logical text and text are C, the keycode stays with the key name. Modifiers held by `mods` are added to the combo. Unknown token → `err unknown key token '<t>'`. | `ok` |
+| `key [--repeat N] [--char C] <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`, `pause`, `numpadenter`; `key --repeat N <combo>` sends N repeated press events before release (N ≤ 1000). `--char C` (one character) sets the layout character of the key: `unshifted` is C, the keycode stays with the key name. Logical text and text follow the effective modifiers (held by `mods` plus the combo's): Shift upper-cases, Ctrl or Super give no text. Modifiers the combo adds to the held ones are pressed as left-modifier key events before the key and released after it. Unknown token → `err unknown key token '<t>'`. | `ok` |
 | `type <text>` | Commit text as IME input. Escapes `\n`, `\t`, `\\`. | `ok` |
 | `settle [ms]` | Run frames until idle or the budget ends (default 500). | `ok frames=<n> settled=<bool>` |
 | `wait <ms>` | Run frames for real time `ms` (≤ 60000). | `ok frames=<n>` |
@@ -76,7 +76,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `idle <ms>` | `wake` repeated for `ms` of input-free time. | `ok frames=<n> redraws=<n> polls=<n> wakes=<n> deadlines=<n> flow=<f> deadline_ms=<n\|none>` |
 | `screenshot <out.png>` | Draw one frame and save a PNG; the directory is created. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
-| `dump row <n>` | One visible row of the active terminal tab: `{row, cells}`, cells listed only when they are not plain (`col`, `ch`, `fg`, `bg`, `flags`, `underline`, `underline_color`, `link`). `err row out of range` outside the visible area, `err no terminal tab` without a tab. | `ok <json>` |
+| `dump row <n>` | Exactly `row <digits>` addresses a row; any other rest of the line is a dump path. One visible row of the active terminal tab: `{row, cells}`, cells listed only when they are not plain (`col`, `ch`, `fg`, `bg`, `flags`, `underline`, `underline_color`, `link`). `err row out of range` outside the visible area, `err no terminal tab` without a tab. | `ok <json>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
 | `picker_answer [<path> ...]` | Queue the paths for the next native picker (`picker_answer` alone answers cancel). | `ok` |
 | `bench <frames> [csv=<path>] [action]` | Measure frame cost (see Bench). | `ok <json summary>` |

@@ -5,6 +5,7 @@
 pub(crate) mod bench;
 pub(crate) mod dump;
 mod dump_terminal;
+mod modifier_keys;
 pub(crate) mod frame;
 pub(crate) mod profile;
 pub(crate) mod protocol;
@@ -502,7 +503,7 @@ impl HeadlessSession {
                 self.frame_ok()
             }
             Command::Mods(mods) => {
-                self.app.handle_main_modifiers_changed(mods);
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), mods);
                 self.frame_ok()
             }
             Command::MouseCell { col, row } => self.mouse_cell(col, row),
@@ -534,9 +535,14 @@ impl HeadlessSession {
                 });
                 self.frame_ok()
             }
-            Command::Key { input, mods, repeats, .. } => {
-                // Modifiers held by `mods` are added to the combo's own, as Ronsole's `key` does.
-                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input.clone(), self.app.modifiers | mods);
+            Command::Key { mut input, mods, repeats, .. } => {
+                // The effective modifiers are the held ones plus the combo's, as in Ronsole's `key`;
+                // the text follows them, and the added modifiers are pressed and released as events.
+                let base = self.app.modifiers;
+                let target = base | mods;
+                input.apply_mods(target);
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), target);
+                let hold = self.app.press_key_combo(&HostLoop::headless(&self.loop_state), input.clone(), target);
                 self.step(true);
                 let mut repeated = input.clone();
                 repeated.repeat = true;
@@ -545,8 +551,9 @@ impl HeadlessSession {
                     self.step(true);
                 }
                 self.app.release_key_combo(&HostLoop::headless(&self.loop_state), &hold);
-                self.step(true);
                 self.app.end_key_combo(hold);
+                modifier_keys::move_modifiers(&mut self.app, &HostLoop::headless(&self.loop_state), base);
+                self.step(true);
                 Response::Ok(None)
             }
             Command::Type(text) => {

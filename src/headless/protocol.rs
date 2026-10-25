@@ -1,6 +1,6 @@
 use crate::app::keyboard::KeyInput;
 use std::path::PathBuf;
-use winit::keyboard::{ModifiersState, SmolStr};
+use winit::keyboard::ModifiersState;
 
 pub(crate) const SIZE_MIN: (u32, u32) = (320, 200);
 pub(crate) const SIZE_MAX: (u32, u32) = (8192, 8192);
@@ -153,15 +153,10 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
         "workspace" => Command::Workspace(path_rest(&mut args)?),
         "screenshot" => Command::Screenshot(path_rest(&mut args)?),
         "dump" => {
-            // `Args` is `Copy`, so the probe leaves `args` at the path when it is not `row`.
-            let mut probe = args;
-            if probe.token() == Some("row") {
-                let row = parse_uint::<usize>(probe.required("row number")?)?;
-                probe.finish()?;
-                Command::DumpRow(row)
-            } else {
-                let rest = args.remainder().trim_end();
-                Command::Dump((!rest.is_empty()).then(|| PathBuf::from(rest)))
+            let rest = args.remainder().trim_end();
+            match dump_row(rest) {
+                Some(row) => Command::DumpRow(row),
+                None => Command::Dump((!rest.is_empty()).then(|| PathBuf::from(rest))),
             }
         }
         "type" => Command::Type(unescape_text(args.remainder())),
@@ -378,6 +373,20 @@ fn parse_click(args: &mut Args) -> Result<Command, String> {
     })
 }
 
+/// `dump row <uint>` addresses a row; any other rest of the line is a path. Exactly two
+/// whitespace-separated tokens, the second made of ASCII digits, match.
+fn dump_row(rest: &str) -> Option<usize> {
+    let mut parts = rest.split_whitespace();
+    if parts.next()? != "row" {
+        return None;
+    }
+    let row = parts.next()?;
+    if parts.next().is_some() || !row.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    row.parse().ok()
+}
+
 /// `key [--repeat N] [--char C] <combo>`; options may come in either order.
 fn parse_key(args: &mut Args) -> Result<Command, String> {
     let mut repeats = None;
@@ -413,12 +422,11 @@ fn parse_key(args: &mut Args) -> Result<Command, String> {
     let (mut input, mods) = KeyInput::parse_combo(token)?;
     if let Some(c) = layout_char {
         // The layout character replaces the symbol of the key; the keycode stays with the key name.
-        // The terminal encoder reads `logical_text`, so it carries the character too.
-        let mut buf = [0u8; 4];
-        let symbol = SmolStr::new(c.encode_utf8(&mut buf));
+        // Logical and text are derived when the key runs, from the effective modifiers, so no
+        // ready text is stored here.
         input.unshifted = Some(c);
-        input.logical_text = Some(symbol.clone());
-        input.text = Some(symbol);
+        input.logical_text = None;
+        input.text = None;
     }
     args.finish()?;
     Ok(Command::Key { input, mods, combo: token.to_string(), repeats: repeats.unwrap_or(0) })
@@ -535,6 +543,12 @@ mod tests {
         assert_eq!(cmd("dump   "), Command::Dump(None));
         assert_eq!(cmd("dump row 3"), Command::DumpRow(3));
         assert_eq!(cmd("dump /tmp/d.json"), Command::Dump(Some(PathBuf::from("/tmp/d.json"))));
+        // Same asserts as Ronsole's `dump_forms` (ronsole src/headless/protocol.rs:587-594):
+        // only exactly `row <uint>` addresses a row, the rest of the line is a path.
+        assert_eq!(cmd("dump row"), Command::Dump(Some(PathBuf::from("row"))));
+        assert_eq!(cmd("dump row 5 x"), Command::Dump(Some(PathBuf::from("row 5 x"))));
+        assert_eq!(cmd("dump row -1"), Command::Dump(Some(PathBuf::from("row -1"))));
+        assert_eq!(cmd("dump row +5"), Command::Dump(Some(PathBuf::from("row +5"))));
         assert_eq!(err("open"), "missing path");
         assert_eq!(err("workspace   "), "missing path");
         assert_eq!(err("screenshot"), "missing path");
@@ -633,8 +647,8 @@ mod tests {
         // `--char` replaces the symbol of the key; the keycode and the combo's modifiers stay.
         let (mut input, mods) = combo("a");
         input.unshifted = Some('с');
-        input.logical_text = Some(SmolStr::new("с"));
-        input.text = Some(SmolStr::new("с"));
+        input.logical_text = None;
+        input.text = None;
         assert_eq!(cmd("key --char с a"), Command::Key { input, mods, combo: "a".to_string(), repeats: 0 });
         assert_eq!(cmd("key --char с --repeat 2 a"), cmd("key --repeat 2 --char с a"));
         assert_eq!(cmd("type hello world  "), Command::Type("hello world  ".to_string()));

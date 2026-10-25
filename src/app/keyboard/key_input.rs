@@ -76,30 +76,23 @@ impl KeyInput {
             modifiers |= modifier;
         };
         let (code, logical) = parse_key_token(key)?;
-        let logical_text = logical.map(str::to_string).or_else(|| {
-            if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() {
-                Some(if modifiers.contains(ModifiersState::SHIFT) && key.as_bytes()[0].is_ascii_alphabetic() {
-                    key.to_ascii_uppercase()
-                } else {
-                    key.to_ascii_lowercase()
-                })
-            } else {
-                None
-            }
-        }).map(SmolStr::new);
-        let text = if modifiers.intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
-            || matches!(code, KeyCode::Escape | KeyCode::Backspace)
-        {
-            None
-        } else {
-            logical_text.clone()
-        };
-        // Combos have no layout: the unshifted character is the logical text without Shift.
-        let unshifted = logical_text
-            .as_deref()
-            .and_then(|text| text.chars().next())
-            .and_then(|c| c.to_lowercase().next());
-        Ok((Self { physical_key: PhysicalKey::Code(code), logical_text, unshifted, text, state: ElementState::Pressed, repeat: false }, modifiers))
+        // Combos have no layout: the plain character is the key's logical text, or the ASCII
+        // letter or digit itself, lowercased.
+        let plain = logical.and_then(|text| text.chars().next()).or_else(|| {
+            (key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric()).then(|| key.as_bytes()[0].to_ascii_lowercase() as char)
+        });
+        let physical_key = PhysicalKey::Code(code);
+        let (logical_text, text) = key_texts(physical_key, plain, modifiers);
+        Ok((Self { physical_key, logical_text, unshifted: plain, text, state: ElementState::Pressed, repeat: false }, modifiers))
+    }
+
+    /// Derives `logical_text` and `text` from `unshifted` for a press under `mods`, the effective
+    /// modifiers (held plus combo). Used by the headless `key` command, whose text is not known
+    /// until the modifiers it runs under are.
+    pub(crate) fn apply_mods(&mut self, mods: ModifiersState) {
+        let (logical_text, text) = key_texts(self.physical_key, self.unshifted, mods);
+        self.logical_text = logical_text;
+        self.text = text;
     }
 
 }
@@ -112,6 +105,38 @@ fn modifier_token(token: &str) -> Option<ModifiersState> {
         "super" | "meta" => Some(ModifiersState::SUPER),
         _ => None,
     }
+}
+
+/// Logical text and text of a key pressed under `mods`, the effective modifiers (held plus
+/// combo). `plain` is the key's character without Shift. Shift upper-cases it when the uppercase
+/// form is one character. Ctrl and Super give no text, as Ronsole's `should_emit_xkb_text` does,
+/// and Escape and Backspace never give text.
+pub(crate) fn key_texts(
+    physical_key: PhysicalKey,
+    plain: Option<char>,
+    mods: ModifiersState,
+) -> (Option<SmolStr>, Option<SmolStr>) {
+    let logical = plain.map(|c| {
+        let shifted = if mods.contains(ModifiersState::SHIFT) {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        } else {
+            c
+        };
+        let mut buf = [0u8; 4];
+        SmolStr::new(shifted.encode_utf8(&mut buf))
+    });
+    let text = if mods.intersects(ModifiersState::CONTROL | ModifiersState::SUPER)
+        || matches!(physical_key, PhysicalKey::Code(KeyCode::Escape | KeyCode::Backspace))
+    {
+        None
+    } else {
+        logical.clone()
+    };
+    (logical, text)
 }
 
 /// A key combo held down by [`App::press_key_combo`]: the matching release and the modifiers
@@ -187,6 +212,30 @@ mod tests {
         assert_eq!(modifiers, ModifiersState::SUPER);
         assert_eq!(input.physical_key, PhysicalKey::Code(KeyCode::KeyQ));
         assert_eq!(input.text, None);
+    }
+
+    #[test]
+    fn key_texts_follow_effective_modifiers() {
+        // Expected values follow spec §4.2 and Ronsole's `should_emit_xkb_text`: Shift
+        // upper-cases, Ctrl and Super give no text, Alt does not block it.
+        let key = PhysicalKey::Code(KeyCode::KeyA);
+        let cases = [
+            (Some('a'), ModifiersState::empty(), Some("a"), Some("a")),
+            (Some('a'), ModifiersState::SHIFT, Some("A"), Some("A")),
+            (Some('с'), ModifiersState::SHIFT, Some("С"), Some("С")),
+            (Some('a'), ModifiersState::CONTROL, Some("a"), None),
+            (Some('a'), ModifiersState::SUPER, Some("a"), None),
+            (Some('a'), ModifiersState::ALT, Some("a"), Some("a")),
+        ];
+        for (plain, mods, logical, text) in cases {
+            let (got_logical, got_text) = key_texts(key, plain, mods);
+            assert_eq!(got_logical.as_deref(), logical, "{plain:?} {mods:?}");
+            assert_eq!(got_text.as_deref(), text, "{plain:?} {mods:?}");
+        }
+        let (logical, text) = key_texts(PhysicalKey::Code(KeyCode::Escape), Some('\x1b'), ModifiersState::empty());
+        assert_eq!((logical.as_deref(), text), (Some("\x1b"), None));
+        let (input, _) = KeyInput::parse_combo("alt+a").unwrap();
+        assert_eq!(input.text.as_deref(), Some("a"));
     }
 
     #[test]

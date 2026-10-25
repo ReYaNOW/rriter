@@ -124,6 +124,13 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
     (content_y + body_offset, (content_h - body_offset).max(0.0))
 }
 
+/// Left edge of the terminal text in the panel. The frame draw, the dump and the cursor drag
+/// mapping all call it, so they agree on where the text starts.
+#[inline]
+pub(crate) fn terminal_text_x(panel_x: f32, scale: f32) -> f32 {
+    panel_x + 10.0 * scale
+}
+
 #[inline(always)]
 pub(crate) fn terminal_tab_body_width(
     tab_x: f32,
@@ -607,7 +614,7 @@ impl Renderer {
                 max_scroll,
                 is_alt,
             );
-            let draw_x = panel_x + 10.0 * s;
+            let draw_x = terminal_text_x(panel_x, s);
             let (_, term_pad_bottom) = terminal_text_padding(s);
 
             self.flush();

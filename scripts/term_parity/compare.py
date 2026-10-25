@@ -15,8 +15,8 @@ both drivers), `#` starts a comment. Two markers are common to both apps:
   #@row_of <marker>   Replaced by `dump row N`, N being the index in the terminal `text` of the first
                       visible row containing <marker>. The index comes from a probe run per app, so
                       it is right for each app's panel. The row's cells are compared only when that
-                      row has the same right-stripped text in both apps (the `dump row` reply itself
-                      carries no text).
+                      row has the same right-stripped text in both apps; a different text is a DIFF
+                      (the `dump row` reply itself carries no text).
   #@link_of <marker>  Like `#@row_of`, but the row is compared by its hyperlink only: for rows whose
                       text differs between the apps (a wrapped line after a resize). In each app the
                       cells with `link` in that row must be one run of one URI that covers the whole row
@@ -85,18 +85,21 @@ row indexes, then in full. Both apps get the same `--size` and `--scale`.
 
 Compared, per reply:
   * `dump row <n>` (cells): `ch`, `flags`, `underline`, `link` exact; `fg`, `bg`, `underline_color`
-    within 2/255 per channel. Rows with different text are skipped and listed. Cells are placed by
-    column in the left half of the row and by distance from the right edge in the right half (see
-    `cell_place`), so a right-aligned prompt segment lines up when the widths differ.
-    Cells with `inverse` skip `fg`/`bg` (EXPECTED `palette`): they show the host palette. Each app's
-    inverse `fg` must equal its own OSC 11 colour (self-check, DIFF otherwise).
+    within 2/255 per channel. Cells are placed by column in the left half of the row and by distance
+    from the right edge in the right half (see `cell_place`), so a right-aligned prompt segment lines up
+    when the widths differ. Inverse cells skip `fg`/`bg` only when each side is the host default (null or
+    the app's own OSC 11 colour, EXPECTED `palette`); explicit colours and `underline_color` are compared.
+    Each app's inverse `fg` must equal its own OSC 11 colour (self-check on the first inverse cell, DIFF
+    otherwise).
   * `dump` (paths in PATH_MAP):
-    - `text`: the sequence of non-empty rows, right-stripped, runs of spaces collapsed (a prompt pads
-      to the width). Blank rows are dropped and the rows are aligned at the bottom, because the RRiter
-      panel shows fewer rows than the Ronsole window; the number of rows is counted as expected.
+    - `text`: the sequence of non-empty rows, right-stripped; runs of spaces collapse on shell-prompt rows
+      only (`PROMPT_GLYPHS`, a prompt pads to the width). Blank rows are dropped and the rows are aligned
+      at the bottom, because the RRiter panel shows fewer rows than the Ronsole window; the number of rows
+      is expected only when the shorter side's panel is full (`panel_full`), otherwise a DIFF.
     - `cursor`: `col` exact, and the row relative to the last non-empty row of `text`. The absolute
       row cannot match across different heights; the relative one can. Empty `text` gives row 0.
-    - `modes`, `selection`, `hovered_link`, `title`, `cursor_icon`, `clipboard`, `external_request` exact;
+    - `modes`, `selection`, `hovered_link`, `title`, `cursor_icon`, `clipboard` exact; `external_request`
+      exact after the Q22 normalisation (`external_request_key`);
       `terminal_tabs` (RRiter) vs `tabs` (Ronsole) exact on index, title, active. Tab rects are not
       compared (panel vs window).
     - `cols`, `rows`, `viewport`, `layout`: EXPECTED_DIFF. Counted with their reason, not DIFF lines.
@@ -108,13 +111,14 @@ Compared, per reply:
 Path differences between the two `dump` shapes live in PATH_MAP, not in the scenario files.
 New scenarios: copy l01_sgr.txt and change the commands; no per-app copies.
 
-An OSC 11 reply inside `text` is masked before the comparison (its colour differs by design, see the
-`palette` entry of EXPECTED_DIFF); the colours of both apps are printed as expected differences.
+An OSC 11 reply inside `text` (`rgb:` with three 1-4 digit hex components) has its components masked
+before the comparison, the `/` separators stay compared (the colour differs by design, see the `palette`
+entry of EXPECTED_DIFF); the colours of both apps are printed as expected differences.
 An XTVERSION reply inside `text` (ESC P > | name ( version ) ESC backslash) has only its name masked:
 the names are an expected difference (`xtversion`), the version and the framing are compared exactly.
 
 Output: the summary line and the path of the full report, `/tmp/term_parity/<scenario>.diff`, which
-holds every DIFF, expected difference, skipped row and pixel measurement.
+holds every DIFF, expected difference and pixel measurement.
 
 Exit status: 0 when nothing differs, 1 otherwise, 2 when a driver fails to start.
 """
@@ -123,6 +127,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import struct
@@ -132,6 +137,7 @@ import tempfile
 import zlib
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import unquote
 
 REPO = Path(__file__).resolve().parents[2]
 COLOR_TOLERANCE = 2
@@ -186,9 +192,13 @@ LINE_COVER = 0.8
 LINE_TOLERANCE_PX = 1
 UNDERLINE_LABEL = "underline"
 LINE_KINDS = ("line", "line_absent")
-# OSC 11 reply as printed by the hex reader: ESC ] 1 1 ; r g b : then `xxxx/xxxx/xxxx` as ASCII hex.
-OSC11_COLOUR_HEX = re.compile(r"(?<=1b5d31313b7267623a)[0-9a-f]{28}")
-OSC11_MASK = "0" * 28
+# OSC 11 reply as printed by the hex reader: ESC ] 1 1 ; r g b : then `rrrr/gggg/bbbb` as ASCII hex, each
+# component 1-4 hex digits. Each ASCII hex digit is two hex digits: 30-39 (0-9), 41-46 (A-F), 61-66 (a-f).
+# Only the three components are captured; the `/` separators (2f) are left to be compared.
+ASCII_HEX_DIGIT = r"(?:3[0-9]|[46][1-6])"
+OSC11_COLOUR_HEX = re.compile(
+    rf"(?<=1b5d31313b7267623a)((?:{ASCII_HEX_DIGIT}){{1,4}})2f((?:{ASCII_HEX_DIGIT}){{1,4}})2f((?:{ASCII_HEX_DIGIT}){{1,4}})(?!{ASCII_HEX_DIGIT})"
+)
 # XTVERSION reply as printed by the hex reader: ESC P > | (1b 50 3e 7c) then the app name in hex, then
 # ( version ) and ESC backslash (1b 5c). Group 1 is the name; only the name is masked.
 XTVERSION_NAME_HEX = re.compile(r"(?<=1b503e7c)((?:[0-9a-f]{2})+?)(?=28(?:[0-9a-f]{2})+?291b5c)")
@@ -560,9 +570,21 @@ def cell_place(col: int, cols: int | None) -> tuple[str, int]:
     return ("from right", cols - 1 - col)
 
 
+def is_host_default(value: str | None, osc11: str | None) -> bool:
+    """True when a cell colour is the host default: no colour (null) or the app's own OSC 11 background."""
+    return value is None or (osc11 is not None and value.lower() == osc11)
+
+
 def compare_row(
-    name: str, rriter: dict, ronsole: dict, rriter_cols: int | None, ronsole_cols: int | None, expected: dict[str, tuple[int, str]]
+    name: str,
+    rriter: dict,
+    ronsole: dict,
+    rriter_cols: int | None,
+    ronsole_cols: int | None,
+    expected: dict[str, tuple[int, str]],
+    osc11: tuple[str | None, str | None],
 ) -> list[str]:
+    """Cell comparison of one `dump row` reply. `osc11` is each app's host background colour (`#rrggbb`) or None."""
     diffs: list[str] = []
     rriter_cells = {cell_place(cell["col"], rriter_cols): cell for cell in rriter.get("cells", [])}
     ronsole_cells = {cell_place(cell["col"], ronsole_cols): cell for cell in ronsole.get("cells", [])}
@@ -576,13 +598,14 @@ def compare_row(
         for key in ROW_EXACT:
             if left.get(key) != right.get(key):
                 diffs.append(f"{label} {key}: rriter={left.get(key)!r} ronsole={right.get(key)!r}")
-        if "inverse" in (left.get("flags") or []) or "inverse" in (right.get("flags") or []):
-            # Inverse cells take the host palette's default colours; checked per app by the self-check.
-            count, first = expected.get("palette", (0, f"{label}: inverse colours not compared"))
-            expected["palette"] = (count + 1, first)
-            continue
+        inverse = "inverse" in (left.get("flags") or []) or "inverse" in (right.get("flags") or [])
         for key in ROW_COLOR:
             a, b = left.get(key), right.get(key)
+            if inverse and key != "underline_color" and is_host_default(a, osc11[0]) and is_host_default(b, osc11[1]):
+                # Inverse fg/bg show the host palette, checked per app by the self-check; explicit colours are compared.
+                count, first = expected.get("palette", (0, f"{label} {key}: host default not compared"))
+                expected["palette"] = (count + 1, first)
+                continue
             if a is None or b is None:
                 if a != b:
                     diffs.append(f"{label} {key}: rriter={a!r} ronsole={b!r}")
@@ -641,9 +664,17 @@ def get_path(value, path: tuple[str, ...]):
     return value
 
 
+# Glyphs of the shell prompt in the dumps (l01_sgr.diff): the `❯` command marker, the powerline separators
+# and the check mark of the right-aligned segment.
+PROMPT_GLYPHS = ("❯", "", "", "✔")
+
+
 def norm_row(row: str) -> str:
-    """Right-stripped row with runs of spaces collapsed: a right-aligned prompt pads to the width."""
-    return re.sub(r" {2,}", " ", row.rstrip())
+    """Right-stripped row; on a shell-prompt row runs of spaces collapse, because a right-aligned prompt pads to the width."""
+    row = row.rstrip()
+    if any(glyph in row for glyph in PROMPT_GLYPHS):
+        return re.sub(r" {2,}", " ", row)
+    return row
 
 
 def xtversion_names(rows: list[str]) -> list[str]:
@@ -651,15 +682,35 @@ def xtversion_names(rows: list[str]) -> list[str]:
     return [match.group(1) for row in rows for match in XTVERSION_NAME_HEX.finditer(row)]
 
 
+def external_request_key(request):
+    """Comparable form of an `external_request` (spec Q22): reveal_path(p) is open_url(file://<parent of p>),
+    open_path(p) is open_url(file://p). Both sides become the realpath of the file they open; other requests
+    stay as they are and are compared literally."""
+    if not isinstance(request, dict) or not isinstance(request.get("arg"), str):
+        return request
+    kind, arg = request.get("kind"), request["arg"]
+    if kind == "open_url" and arg.startswith("file://"):
+        path = unquote(arg[len("file://"):])
+    elif kind == "reveal_path":
+        path = os.path.dirname(arg)
+    elif kind == "open_path":
+        path = arg
+    else:
+        return request
+    return {"file": os.path.realpath(path)}
+
+
 def dump_view(name: str, dump: dict, path: tuple[str, ...]):
     """The value of one PATH_MAP entry in the form that is compared between the two apps."""
     value = get_path(dump, path)
     if name == "text":
         return [
-            XTVERSION_NAME_HEX.sub(XTVERSION_MASK, OSC11_COLOUR_HEX.sub(OSC11_MASK, norm_row(row)))
+            XTVERSION_NAME_HEX.sub(XTVERSION_MASK, OSC11_COLOUR_HEX.sub(mask_osc11, norm_row(row)))
             for row in value or []
             if row.strip()
         ]
+    if name == "external_request":
+        return external_request_key(value)
     if name == "cursor" and value is not None:
         rows = get_path(dump, ("terminal", "text")) or []
         last = max((i for i, row in enumerate(rows) if row.strip()), default=0)
@@ -667,6 +718,13 @@ def dump_view(name: str, dump: dict, path: tuple[str, ...]):
     if name == "terminal_tabs":
         return [{k: tab.get(k) for k in TABS_EXACT} for tab in value or []]
     return value
+
+
+def panel_full(dump: dict) -> bool:
+    """True when the terminal's visible area is filled: its first text row has content, or the viewport is scrolled."""
+    rows = get_path(dump, ("terminal", "text")) or []
+    top = get_path(dump, ("terminal", "viewport", "top")) or 0
+    return bool(rows and rows[0].strip()) or top > 0
 
 
 def compare_dump(rriter: dict, ronsole: dict, keys: set[str] | None, expected: dict[str, tuple[int, str]]) -> list[str]:
@@ -680,7 +738,12 @@ def compare_dump(rriter: dict, ronsole: dict, keys: set[str] | None, expected: d
         message = f"dump {name}: rriter={json.dumps(left)} ronsole={json.dumps(right)}"
         if name == "text" and len(left) != len(right):
             # The shorter panel shows the bottom rows of the same content: compare those, count the rest.
+            # That is only expected when the shorter side's visible area is full; otherwise rows are missing.
             shown = min(len(left), len(right))
+            short = rriter if len(left) < len(right) else ronsole
+            if shown == 0 or not panel_full(short):
+                diffs.append(message)
+                continue
             count, first = expected.get(name, (0, message))
             expected[name] = (count + 1, first)
             left, right = left[len(left) - shown:], right[len(right) - shown:]
@@ -846,15 +909,27 @@ def frame_checks(lines: list[str], replies: dict[str, list[tuple[str, object, Ro
     return diffs, info
 
 
+def mask_osc11(match: re.Match) -> str:
+    """An OSC 11 reply with its colour components zeroed, same lengths; the `/` separators stay as they are."""
+    red, green, blue = match.groups()
+    return "0" * len(red) + "2f" + "0" * len(green) + "2f" + "0" * len(blue)
+
+
 def osc11_colour(rows: list[str]) -> str | None:
     """Colour of the OSC 11 reply printed in a dump's text, as `#rrggbb`; None when no reply is in the rows."""
     for row in rows:
         match = OSC11_COLOUR_HEX.search(row)
         if match:
             # The reply's colour is ASCII `rrrr/gggg/bbbb`; the first two digits of each part are the 8-bit value.
-            parts = bytes.fromhex(match.group(0)).decode("ascii", "replace").split("/")
+            parts = [bytes.fromhex(part).decode("ascii", "replace") for part in match.groups()]
             return "#" + "".join(part[:2] for part in parts)
     return None
+
+
+def last_osc11_colour(replies: list[tuple[str, object, RowRef | None]]) -> str | None:
+    """OSC 11 colour in the last full `dump` of one app's replies; None without a dump or a reply in it."""
+    last_dump = next((reply for _, reply, _ in reversed(replies) if isinstance(reply, dict) and "terminal" in reply), None)
+    return osc11_colour(get_path(last_dump, ("terminal", "text")) or []) if last_dump else None
 
 
 def inverse_fg(replies: list[tuple[str, object, str | None]]) -> str | None:
@@ -907,13 +982,14 @@ def main(argv: list[str]) -> int:
         ]
 
     diffs: list[str] = []
-    skipped: list[str] = []
     link_info: list[str] = []
     expected: dict[str, tuple[int, str]] = {}
     left_all = replies["rriter"]
     right_all = replies["ronsole"]
     if len(left_all) != len(right_all):
         diffs.append(f"reply count: rriter={len(left_all)} ronsole={len(right_all)}")
+    # Each app's host background from its last dump: the default colour that inverse cells show.
+    colours = {app: last_osc11_colour(replies[app]) for app in ("rriter", "ronsole")}
     # Widths from the latest `dump` of each app; a row reply is placed by them.
     left_cols = right_cols = None
     for index, ((command, left, left_ref), (_, right, right_ref)) in enumerate(zip(left_all, right_all)):
@@ -924,9 +1000,11 @@ def main(argv: list[str]) -> int:
                 diffs += row_diffs
                 link_info += row_info
             elif left_text != right_text:
-                skipped.append(f"reply {index}: row text differs, cells not compared (rriter={left_text!r} ronsole={right_text!r})")
+                # A row_of row must be the same line in both apps; a different line is a DIFF, never a silent skip.
+                diffs.append(f"reply {index}: row text differs, cells not compared (rriter={left_text!r} ronsole={right_text!r})")
             else:
-                diffs += compare_row(f"reply {index}", left, right, left_cols, right_cols, expected)
+                host_colours = (colours["rriter"], colours["ronsole"])
+                diffs += compare_row(f"reply {index}", left, right, left_cols, right_cols, expected, host_colours)
         elif isinstance(left, dict) and isinstance(right, dict) and "terminal" in left and "terminal" in right:
             diffs += compare_dump(left, right, keys, expected)
             left_cols = get_path(left, ("terminal", "cols"))
@@ -947,12 +1025,9 @@ def main(argv: list[str]) -> int:
 
     # Palette: each app's inverse default colour must be its own OSC 11 colour; across apps it differs by design.
     palette_info: list[str] = []
-    colours: dict[str, str | None] = {}
     for app in ("rriter", "ronsole"):
-        last_dump = next((reply for _, reply, _ in reversed(replies[app]) if isinstance(reply, dict) and "terminal" in reply), None)
-        colour = osc11_colour(get_path(last_dump, ("terminal", "text")) or []) if last_dump else None
+        colour = colours[app]
         inverse = inverse_fg(replies[app])
-        colours[app] = colour
         palette_info.append(f"palette {app}: OSC 11 {colour}, inverse fg {inverse}")
         if colour is None and inverse is not None:
             diffs.append(f"palette {app}: inverse cell present but no OSC 11 reply in the last dump to check it against")
@@ -965,15 +1040,14 @@ def main(argv: list[str]) -> int:
     report = [*palette_info, *pixel_info]
     report += [f"expected: {name} x{count} ({EXPECTED_DIFF[name]}); first: {first}" for name, (count, first) in expected.items()]
     report += link_info
-    report += [f"skipped: {line}" for line in skipped]
     report += [f"DIFF: {line}" for line in diffs]
     DIFF_DIR.mkdir(parents=True, exist_ok=True)
     report_path = DIFF_DIR / f"{ns.scenario.stem}.diff"
     report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
     print(
         f"{ns.scenario.name}: compared {min(len(left_all), len(right_all))} replies, {len(diffs)} DIFF, "
-        f"{sum(count for count, _ in expected.values())} expected, {len(pixel_info)} pixel lines, "
-        f"{len(skipped)} skipped; full report: {report_path}"
+        f"{sum(count for count, _ in expected.values())} expected, {len(pixel_info)} pixel lines; "
+        f"full report: {report_path}"
     )
     return 0 if not diffs else 1
 

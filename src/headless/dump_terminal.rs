@@ -9,7 +9,7 @@ use crate::app::{App, PanelId};
 use crate::render_view::terminal_colors::{rgb_to_rgba, terminal_cell_render_colors, terminal_palette};
 use crate::render_view::terminal_ui::{
     TERMINAL_TEXT_SCALE, terminal_body_rect, terminal_max_scroll, terminal_render_scroll_offset,
-    terminal_text_padding, terminal_text_viewport_height,
+    terminal_text_padding, terminal_text_viewport_height, terminal_text_x,
 };
 use ronsole_term::{
     Cell, CellFlags, MouseTrackingMode, Term, TermPalette, UnderlineStyle,
@@ -117,7 +117,7 @@ fn frame_layout(app: &mut App, grid: &Term) -> Option<TerminalFrame> {
         scale,
         char_w,
         char_h,
-        text_x: panel_x + 10.0 * scale,
+        text_x: terminal_text_x(panel_x, scale),
         scroll_offset: terminal_render_scroll_offset(scroll, max_scroll, is_alt),
         max_scroll,
     })

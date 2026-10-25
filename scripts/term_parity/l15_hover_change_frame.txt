@@ -4,7 +4,7 @@
 # then `dump`; then `mods ctrl` without `mouse_move` gives `hovered_link` not null and `frame_requests`
 # grown. The hovered link here is on screen row 0 (absolute CUP to 1;1), the cursor is then moved to 2;1
 # so that the shell prompt does not overwrite it. The marker word is split as `l15''link`.
-# compare.py does not compare `event_loop.frame_requests` (PATH_MAP), so the frame part is not checked here.
+# The frame part is the `#@frames_grew` marker at the end: `event_loop.frame_requests` of the two dumps.
 #@click_ui WelcomeIdeMode
 idle 300
 #@click_ui SidebarSlot(Terminal)
@@ -29,7 +29,5 @@ dump
 mods ctrl
 idle 300
 dump
-mods
-idle 300
 mods
 #@frames_grew 1 2
