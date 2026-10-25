@@ -1497,3 +1497,30 @@ fn headless_app_paths_for_root() {
     assert_eq!(paths.cache, root.join("cache"));
     assert_eq!(paths.state, root.join("state"));
 }
+
+#[test]
+fn reaper_joins_finished_worker_queued_after_a_hung_one() {
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let hung = spawn_named("rriter-test-hung-worker", move || {
+        let _ = release_rx.recv();
+    })
+    .expect("hung test worker should start");
+    let finished = spawn_named("rriter-test-finished-worker", || {})
+        .expect("finished test worker should start");
+    while !finished.is_finished() {
+        std::thread::yield_now();
+    }
+
+    let mut pending = vec![hung, finished];
+    join_finished_workers(&mut pending);
+
+    // The finished worker was joined and dropped; only the hung one stays queued.
+    assert_eq!(pending.len(), 1);
+    assert!(!pending[0].is_finished());
+    release_tx.send(()).expect("hung test worker should still be waiting");
+    pending
+        .pop()
+        .expect("hung worker stays pending")
+        .join()
+        .expect("hung test worker should exit cleanly");
+}

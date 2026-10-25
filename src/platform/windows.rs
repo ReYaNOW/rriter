@@ -290,6 +290,7 @@ pub(super) fn run_elevated_helper(executable: &Path, request: &Path) -> std::io:
         SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    use super::with_com_apartment;
 
     fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
         value.encode_wide().chain(std::iter::once(0)).collect()
@@ -311,8 +312,12 @@ pub(super) fn run_elevated_helper(executable: &Path, request: &Path) -> std::io:
     info.lpParameters = parameter_units.as_ptr();
     info.nShow = SW_HIDE;
 
-    if unsafe { ShellExecuteExW(&mut info) } == 0 {
-        let error = std::io::Error::last_os_error();
+    // Read the last error inside the apartment: CoUninitialize may overwrite it.
+    let (launched, error) = with_com_apartment(|| {
+        let launched = unsafe { ShellExecuteExW(&mut info) } != 0;
+        (launched, std::io::Error::last_os_error())
+    });
+    if !launched {
         if error.raw_os_error() == Some(1223) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
