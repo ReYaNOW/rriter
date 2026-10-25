@@ -39,6 +39,23 @@ fn required_graphics_attribute(
     require_graphics_attribute_location(unsafe { gl.get_attrib_location(program, name) }, name)
 }
 
+/// System monospace fonts of the editor chain, in preference order. The first one present on the
+/// machine leads the chain; the bundled fonts follow it.
+pub(crate) const EDITOR_SYSTEM_FONT_PATHS: [&str; 3] = [
+    "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
+    "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+];
+
+/// First existing entry of [`EDITOR_SYSTEM_FONT_PATHS`], or `None` when no system font is
+/// installed and the bundled fallback is the only face.
+pub(crate) fn editor_system_font_path() -> Option<&'static str> {
+    EDITOR_SYSTEM_FONT_PATHS
+        .iter()
+        .copied()
+        .find(|path| std::path::Path::new(path).exists())
+}
+
 impl Renderer {
     pub(crate) fn set_themes(
         &mut self,
@@ -523,19 +540,10 @@ impl Renderer {
                 glow::ONE,
             );
 
-            let font_paths = [
-                "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-                "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
-                "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-            ];
-
             let mut fonts = Vec::new();
 
-            for path in font_paths.iter() {
-                if std::path::Path::new(path).exists() {
-                    fonts.push(FontData::new_lazy(path));
-                    break;
-                }
+            if let Some(path) = editor_system_font_path() {
+                fonts.push(FontData::new_lazy(path));
             }
 
             let nerd_font_data = include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf");
