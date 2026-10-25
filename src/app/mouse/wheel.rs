@@ -569,34 +569,11 @@ impl App {
                     let cell = self.terminal_report_cell(mx, my).unwrap_or((0, 0));
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                        let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                        let is_alt = grid.is_alt_screen();
-                        let app_cursor = grid.app_cursor_keys();
-                        let tracked = grid.mouse_tracking().enabled();
-                        let kind = if dy < 0.0 {
-                            ronsole_term::MouseEventKind::WheelUp
-                        } else {
-                            ronsole_term::MouseEventKind::WheelDown
-                        };
-                        let report = super::terminal_mouse::terminal_mouse_report(&grid, kind, cell);
-                        let total_lines = grid.total_rows();
-                        drop(grid);
-
-                        let steps = super::terminal_mouse::terminal_wheel_steps(dy);
-                        if tracked {
-                            let input = report.unwrap_or_default().repeat(steps);
-                            let _ = term.write_input(&input);
+                        if term.forward_wheel(dy, cell) {
                             return;
                         }
-                        if is_alt {
-                            let input = super::terminal_mouse::terminal_wheel_arrow_bytes(
-                                dy < 0.0,
-                                app_cursor,
-                                steps,
-                            );
-                            let _ = term.write_input(&input);
-                            return;
-                        }
+                        let total_lines =
+                            crate::app::terminal::lock_terminal_grid(&term.grid).total_rows();
 
                         term.scroll_y.anim_speed = 7.0;
                         term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom

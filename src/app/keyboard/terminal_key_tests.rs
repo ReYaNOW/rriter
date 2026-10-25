@@ -230,6 +230,19 @@ fn closing_active_terminal_tab_clears_held_terminal_keys() {
 }
 
 #[test]
+fn leaving_terminal_panel_for_editor_clears_held_terminal_keys() {
+    let mut app = terminal_app(10);
+    app.is_focused = true;
+    app.sync_terminal_focus_reports();
+    app.ide_panel.terminal_host_held_key = Some(PhysicalKey::Code(KeyCode::KeyC));
+    app.sync_terminal_focus_reports();
+    assert_eq!(app.ide_panel.terminal_host_held_key, Some(PhysicalKey::Code(KeyCode::KeyC)));
+    app.ide_panel.terminal_focused = false;
+    app.sync_terminal_focus_reports();
+    assert_eq!(app.ide_panel.terminal_host_held_key, None);
+}
+
+#[test]
 fn focus_loss_and_terminal_tab_changes_call_clear_terminal_held_keys() {
     // Window focus and the tab handlers need an ActiveEventLoop or a live tab set, so the call
     // sites are checked in source, as the other event-handler tests in this crate do.
