@@ -146,25 +146,62 @@ impl Terminal {
         let kind = MouseEventKind::Motion {
             held: self.mouse.motion_button(),
         };
-        // Encode under the grid lock, but write after it is released: a blocking PTY write
-        // must not hold the grid while the parser thread waits for it.
+        // Encode under the grid lock; the report is queued after the lock is released.
         let report = terminal_mouse_report(&lock_terminal_grid(&self.grid), kind, cell);
         if let Some(bytes) = report {
             let _ = self.write_input(&bytes);
         }
     }
 
+    /// Routes a wheel step at `cell` to the PTY when the application tracks the mouse or the
+    /// alternate screen is shown. Returns `false` when the step must scroll the scrollback.
+    pub(crate) fn forward_wheel(&mut self, dy: f32, cell: (usize, usize)) -> bool {
+        let grid = lock_terminal_grid(&self.grid);
+        let is_alt = grid.is_alt_screen();
+        let tracked = grid.mouse_tracking().enabled();
+        if !tracked && !is_alt {
+            return false;
+        }
+        let app_cursor = grid.app_cursor_keys();
+        let kind = if dy < 0.0 {
+            MouseEventKind::WheelUp
+        } else {
+            MouseEventKind::WheelDown
+        };
+        let report = terminal_mouse_report(&grid, kind, cell);
+        drop(grid);
+        let steps = terminal_wheel_steps(dy);
+        if tracked {
+            if let Some(report) = report {
+                let _ = self.write_input(&report.repeat(steps));
+            }
+        } else {
+            let _ = self.write_input(&terminal_wheel_arrow_bytes(dy < 0.0, app_cursor, steps));
+        }
+        true
+    }
+
     /// Brings this tab's DECSET 1004 state to `desired`. Losing focus also drops the held buttons,
-    /// because the host will not deliver their releases.
-    pub(crate) fn sync_focus_report(&mut self, desired: bool) {
+    /// because the host will not deliver their releases. Returns `true` when this call took the
+    /// tab from focused to unfocused, so the App can drop the terminal keys held on it.
+    pub(crate) fn sync_focus_report(&mut self, desired: bool) -> bool {
+        let lost_focus = self.focus_sent && !desired;
         if !desired {
             self.mouse.clear_held();
         }
         self.report_focus(desired);
+        lost_focus
     }
 }
 
 impl App {
+    /// Clears the search and file-tree keyboard focus, so that the terminal body takes the keyboard.
+    pub(crate) fn clear_non_terminal_focus(&mut self) {
+        self.search_focused = false;
+        self.ide_panel.term_search_focused = false;
+        self.ide_panel.file_tree_focused = false;
+    }
+
     /// Active terminal index when the pointer is over its body in IDE mode with the terminal panel open.
     fn terminal_body_target(&self, mx: f32, my: f32) -> Option<usize> {
         if !self.is_ide_mode
@@ -295,10 +332,8 @@ impl App {
             && !self.ide_panel.terminal_focused
             && self.tracking_body_target(mx, my).is_some()
         {
+            self.clear_non_terminal_focus();
             self.ide_panel.terminal_focused = true;
-            self.ide_panel.term_search_focused = false;
-            self.ide_panel.file_tree_focused = false;
-            self.search_focused = false;
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -342,12 +377,14 @@ impl App {
 
     /// Single point that reconciles every tab's DECSET 1004 state with the host focus.
     /// Sends `CSI I` / `CSI O` only on transitions, and only when the application enabled reporting.
+    /// A tab losing focus also drops the terminal keys the host still counts as held.
     pub(crate) fn sync_terminal_focus_reports(&mut self) {
         let window_focused = self.is_focused;
         let panel_focused = self.ide_panel.terminal_focused;
         let panel_open = self.ide_panel.is_open(PanelId::Terminal);
         let active = self.ide_panel.active_terminal;
         let is_ide_mode = self.is_ide_mode;
+        let mut lost_focus = false;
         for (index, term) in self.ide_panel.terminals.iter_mut().enumerate() {
             let desired = terminal_focus_desired(
                 window_focused,
@@ -356,7 +393,10 @@ impl App {
                 panel_open,
                 index == active,
             );
-            term.sync_focus_report(desired);
+            lost_focus |= term.sync_focus_report(desired);
+        }
+        if lost_focus {
+            self.clear_terminal_held_keys();
         }
     }
 
