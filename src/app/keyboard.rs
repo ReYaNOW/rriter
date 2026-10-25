@@ -325,6 +325,13 @@ impl App {
         }
     }
 
+    /// Forgets every terminal key the host may still count as held. Called when the window loses
+    /// focus or the active terminal changes, because the release of a held key may never reach us.
+    pub(crate) fn clear_terminal_held_keys(&mut self) {
+        self.ide_panel.terminal_host_held_key = None;
+        self.ide_panel.terminal_held_modifier_keys = 0;
+    }
+
     /// Modifiers for the encoder event of `input`. The host learns the state after a key only
     /// from the following modifiers event, so a modifier key's own flag is set here: on press and
     /// repeat, and on release only while its other key of the same family is still held.

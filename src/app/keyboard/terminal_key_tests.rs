@@ -194,3 +194,49 @@ fn empty_modifiers_event_clears_held_modifier_keys() {
     send(&mut app, key(KeyCode::ShiftLeft, None, None, ElementState::Released, false), ModifiersState::empty());
     assert_eq!(written(&app), b"\x1b[57441;1:3u");
 }
+
+#[test]
+fn clear_terminal_held_keys_resets_host_key_and_modifier_mask() {
+    let mut app = terminal_app(10);
+    send(&mut app, key(KeyCode::ShiftRight, None, None, ElementState::Pressed, false), ModifiersState::SHIFT);
+    app.ide_panel.terminal_host_held_key = Some(PhysicalKey::Code(KeyCode::KeyC));
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0b0001_0000);
+    app.clear_terminal_held_keys();
+    assert_eq!(app.ide_panel.terminal_host_held_key, None);
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0);
+}
+
+#[test]
+fn clear_terminal_held_keys_on_empty_state_is_noop() {
+    let mut app = terminal_app(10);
+    app.clear_terminal_held_keys();
+    app.clear_terminal_held_keys();
+    assert_eq!(app.ide_panel.terminal_host_held_key, None);
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0);
+}
+
+#[test]
+fn closing_active_terminal_tab_clears_held_terminal_keys() {
+    let mut app = terminal_app(10);
+    app.ide_panel
+        .terminals
+        .push(crate::app::terminal::Terminal::test_without_process(80, 24));
+    app.ide_panel.active_terminal = 1;
+    app.ide_panel.terminal_held_modifier_keys = 0b0001_0000;
+    app.ide_panel.terminal_host_held_key = Some(PhysicalKey::Code(KeyCode::KeyC));
+    app.close_terminal_tab_at(0);
+    assert_eq!(app.ide_panel.terminal_host_held_key, None);
+    assert_eq!(app.ide_panel.terminal_held_modifier_keys, 0);
+}
+
+#[test]
+fn focus_loss_and_terminal_tab_changes_call_clear_terminal_held_keys() {
+    // Window focus and the tab handlers need an ActiveEventLoop or a live tab set, so the call
+    // sites are checked in source, as the other event-handler tests in this crate do.
+    let events = include_str!("../events.rs");
+    assert!(events.contains("if !focused {\n                    self.clear_terminal_held_keys();\n                }"));
+    let tabs = include_str!("../app_ide_tab_methods.rs");
+    assert!(tabs.contains("self.ide_panel.active_terminal = idx;\n        self.clear_terminal_held_keys();"));
+    assert!(tabs.contains("self.reveal_active_terminal_tab_now();\n            self.clear_terminal_held_keys();"));
+    assert!(tabs.contains("self.ide_panel.terminals.remove(idx);\n        self.clear_terminal_held_keys();"));
+}
