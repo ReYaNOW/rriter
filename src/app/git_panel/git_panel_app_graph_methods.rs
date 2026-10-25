@@ -588,8 +588,16 @@ impl App {
             match lookup.poll() {
                 crate::ui_waker::OneShotState::Ready(position) => {
                     match position {
-                        Some(position) => self.ide_panel.git.graph_reveal.set_position(position),
-                        None => self.finish_git_graph_reveal_not_found(),
+                        Ok(Some(position)) => {
+                            self.ide_panel.git.graph_reveal.set_position(position)
+                        }
+                        Ok(None) => self.finish_git_graph_reveal_not_found(),
+                        // History could not be read: report git's own message, not "not found".
+                        Err(message) => {
+                            self.ide_panel.git.graph_reveal.finish_error();
+                            self.ide_panel.git.graph_notice = None;
+                            self.show_notice(message);
+                        }
                     }
                     updated = true;
                 }

@@ -642,7 +642,7 @@ pub struct GitPanelState {
     pub graph_has_more: bool,
     pub graph_copied_commit: Option<(usize, usize)>,
     pub graph_reveal: GitGraphReveal,
-    graph_reveal_lookup_rx: Option<crate::ui_waker::OneShot<Option<usize>>>,
+    graph_reveal_lookup_rx: Option<crate::ui_waker::OneShot<Result<Option<usize>, String>>>,
     graph_rx: Vec<GitGraphReceiver>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,

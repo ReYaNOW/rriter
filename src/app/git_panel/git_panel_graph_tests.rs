@@ -268,7 +268,7 @@
             .start(0, repo_root.clone(), target.clone());
         let (tx, rx) = app.ui_waker.one_shot_channel();
         app.ide_panel.git.graph_reveal_lookup_rx = Some(rx);
-        tx.send(Some(target_index)).expect("deliver lookup position");
+        tx.send(Ok(Some(target_index))).expect("deliver lookup position");
 
         app.poll_git_panel();
 
@@ -313,7 +313,7 @@
             .start(0, repo_root.clone(), "not-in-head".to_string());
         let (tx, rx) = app.ui_waker.one_shot_channel();
         app.ide_panel.git.graph_reveal_lookup_rx = Some(rx);
-        tx.send(None).expect("deliver lookup miss");
+        tx.send(Ok(None)).expect("deliver lookup miss");
 
         app.poll_git_panel();
 
@@ -347,10 +347,41 @@
         let (first, head) = (first_id.to_string(), head_id.to_string());
 
         // Known hashes must resolve first, so a broken git call fails here, not on the miss below.
-        assert_eq!(git_graph_commit_position(&repo_root, &head), Some(0));
-        assert_eq!(git_graph_commit_position(&repo_root, &first), Some(1));
-        assert_eq!(git_graph_commit_position(&repo_root, &"f".repeat(40)), None);
+        assert_eq!(git_graph_commit_position(&repo_root, &head), Ok(Some(0)));
+        assert_eq!(git_graph_commit_position(&repo_root, &first), Ok(Some(1)));
+        assert_eq!(git_graph_commit_position(&repo_root, &"f".repeat(40)), Ok(None));
 
+        let _ = std::fs::remove_dir_all(&repo_root);
+    }
+
+    #[test]
+    fn graph_reveal_reports_git_failure_instead_of_not_found() {
+        // Unborn HEAD (no commits yet): `rev-list HEAD` fails, which is not a missing commit.
+        let repo_root = std::env::temp_dir().join(format!(
+            "rriter-graph-unborn-{}-{}",
+            std::process::id(),
+            crate::platform::next_operation_id()
+        ));
+        std::fs::create_dir_all(&repo_root).unwrap();
+        git2::Repository::init(&repo_root).unwrap();
+        let oid = "f".repeat(40);
+        let lookup = git_graph_commit_position(&repo_root, &oid);
+        assert!(lookup.is_err(), "rev-list on unborn HEAD must fail, got {lookup:?}");
+
+        let mut app = graph_reveal_test_app(&repo_root, 3);
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root.clone(), oid);
+        let (tx, rx) = app.ui_waker.one_shot_channel();
+        app.ide_panel.git.graph_reveal_lookup_rx = Some(rx);
+        tx.send(lookup).expect("deliver lookup error");
+
+        app.poll_git_panel();
+
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert!(!app.readonly_notice_text.is_empty());
+        assert_ne!(app.readonly_notice_text, "Коммит не найден в истории текущей ветки");
         let _ = std::fs::remove_dir_all(&repo_root);
     }
 
