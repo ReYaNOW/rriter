@@ -428,3 +428,92 @@ fn tracking_reports_visible_row_while_scrolled_back() {
     assert_eq!(written(&session, 0), expected.as_bytes());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn wheel_with_tracking_reaches_pty_without_panel_focus() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-unfocused-tracking") else {
+        return;
+    };
+    // Wheel down (SGR button 65) over visible cell (4, 2) goes to the application even when the panel is not focused.
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    session.app.ide_panel.terminal_focused = false;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nwheel 0 -100 px\n"));
+    assert_eq!(written(&session, 0), b"\x1b[<65;5;3M\x1b[<65;5;3M\x1b[<65;5;3M");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wheel_without_tracking_or_panel_focus_leaves_scrollback_alone() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-wheel-unfocused-main") else {
+        return;
+    };
+    let lines: Vec<u8> = b"line\r\n".repeat(120);
+    feed(&session, 0, &lines);
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    session.app.ide_panel.terminal_focused = false;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nwheel 0 3\n"));
+    // Scroll offset 0 is the bottom of the history; an unfocused tab without tracking must not leave it.
+    let scroll = &session.app.ide_panel.terminals[0].scroll_y;
+    assert_eq!(scroll.target, 0.0);
+    assert_eq!(scroll.current, 0.0);
+    assert!(written(&session, 0).is_empty(), "no PTY input without tracking");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn first_click_on_unfocused_tracking_terminal_only_focuses_it() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-focus-only") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    session.app.ide_panel.terminal_focused = false;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\n"));
+    assert!(written(&session, 0).is_empty(), "the focusing click must not reach the PTY");
+    assert!(session.app.ide_panel.terminal_focused, "the click must focus the terminal");
+    let grid = lock_terminal_grid(&session.app.ide_panel.terminals[0].grid);
+    assert!(grid.selection().is_none(), "the focusing click must not start a selection");
+    drop(grid);
+    // The second click lands on the focused terminal: press and release at visible cell (4, 2).
+    run(&mut session, "click left down\nclick left up\n");
+    assert_eq!(written(&session, 0), b"\x1b[<0;5;3M\x1b[<0;5;3m");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn click_and_wheel_above_terminal_body_do_not_reach_pty() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-outside") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1000h\x1b[?1006h");
+    let body = ui_rect(&dump(&mut session), "TerminalBody");
+    let (x, _) = point_for_visible_cell(&mut session, 4, 2);
+    // Four pixels above the body is outside it, so tracking must not take the pointer events.
+    let y = body[1] - 4.0;
+    written(&session, 0);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\nclick left up\nwheel 0 -100 px\n"));
+    assert!(written(&session, 0).is_empty(), "pointer events outside the terminal body reached the PTY");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn window_focus_loss_forgets_held_button_before_release() {
+    let Some((dir, mut session)) = open_shell_terminal("ui-terminal-mouse-window-focus") else {
+        return;
+    };
+    feed(&session, 0, b"\x1b[?1002h\x1b[?1006h");
+    let (x, y) = point_for_visible_cell(&mut session, 4, 2);
+    run(&mut session, &format!("mouse_move {x} {y}\nclick left down\n"));
+    written(&session, 0);
+    // Same state change as WindowEvent::Focused(false) followed by the frame sync; the headless
+    // harness cannot inject the window event itself.
+    session.app.is_focused = false;
+    session.app.sync_terminal_focus_reports();
+    run(&mut session, "click left up\n");
+    assert!(written(&session, 0).is_empty(), "release after window focus loss must not reach the PTY");
+    let _ = std::fs::remove_dir_all(dir);
+}

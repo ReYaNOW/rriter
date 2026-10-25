@@ -563,7 +563,9 @@ impl App {
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
-                if self.ide_panel.terminal_focused {
+                // Tracking takes the wheel even when the panel is not focused; scrollback and
+                // arrow keys below still require focus, because only a focused tab is scrolled.
+                if self.ide_panel.terminal_focused || self.active_terminal_tracks_mouse() {
                     let cell = self.terminal_report_cell(mx, my).unwrap_or((0, 0));
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
