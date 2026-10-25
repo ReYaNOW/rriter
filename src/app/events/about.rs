@@ -192,7 +192,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         event_loop.set_awaiting_background(app.ide_panel.database.pending_job.is_some());
         let suspended_deadline = earliest_optional_wake(
             app.ide_panel.database.cancel_deadline(),
-            terminal_sync_wake_at(app),
+            terminal_sync_wake_at(app, now),
         );
         event_loop.set_control_flow(match suspended_about_wait_plan(suspended_deadline) {
             AboutWaitPlan::Wait => ControlFlow::Wait,
@@ -276,7 +276,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             || app.ide_panel.database.pending_job.is_some(),
     );
     let deadline_wake_at = earliest_optional_wake(
-        earliest_optional_wake(terminal_sync_wake_at(app), hover_wake_at),
+        earliest_optional_wake(terminal_sync_wake_at(app, now), hover_wake_at),
         earliest_optional_wake(
             background_wake_at,
             earliest_optional_wake(
@@ -334,7 +334,7 @@ pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) ->
         if let Some(text) = terminal.apply_host_events() {
             clipboard = Some(text);
         }
-        needs_redraw |= terminal.flush_expired_sync(now);
+        needs_redraw |= terminal.flush_expired_sync(now).needs_redraw();
     }
     if let Some(text) = clipboard {
         app.set_clipboard_text(text);
@@ -343,11 +343,12 @@ pub(crate) fn about_to_wait_terminal_host_events(app: &mut App, now: Instant) ->
 }
 
 /// Earliest UI fallback wake over all terminal tabs that hold output, read without the grid lock.
-fn terminal_sync_wake_at(app: &App) -> Option<Instant> {
+/// A tab whose replay was blocked by the grid lock gets a retry wake shortly after `now`.
+fn terminal_sync_wake_at(app: &App, now: Instant) -> Option<Instant> {
     app.ide_panel
         .terminals
         .iter()
-        .filter_map(|terminal| terminal.sync_wake_at())
+        .filter_map(|terminal| terminal.sync_wake_at(now))
         .min()
 }
 

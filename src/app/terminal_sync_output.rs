@@ -11,6 +11,10 @@ use std::time::{Duration, Instant};
 /// The parser thread replays on time; the UI replay is only a fallback for a stalled parser.
 pub(crate) const SYNC_UI_FALLBACK_GRACE: Duration = Duration::from_millis(50);
 
+/// How long the UI thread waits before retrying a fallback replay that found the grid lock busy.
+/// The retry is a wake-up, not a spin: the UI thread never waits for the lock itself.
+pub(crate) const SYNC_UI_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
 /// Whether the UI thread may replay a hold with `deadline` at `now`.
 pub(crate) fn sync_ui_fallback_due(deadline: Instant, now: Instant) -> bool {
     deadline

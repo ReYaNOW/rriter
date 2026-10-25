@@ -590,7 +590,12 @@ impl Renderer {
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
             let new_rows = terminal_visible_rows(term_content_h, char_h, s);
 
-            if crate::app::terminal::resize_terminal_grid(&mut grid, new_cols, new_rows) {
+            if crate::app::terminal::resize_terminal_grid(
+                &mut grid,
+                new_cols,
+                new_rows,
+                term.host_events(),
+            ) {
                 term.resize_pty(
                     clamp_terminal_pty_dimension(new_cols),
                     clamp_terminal_pty_dimension(new_rows),

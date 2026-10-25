@@ -7,7 +7,7 @@
 
 use crate::ui_waker::UiWaker;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -31,6 +31,7 @@ pub(crate) struct HostEventsSink {
     pending: Arc<Mutex<PendingHostEvents>>,
     published_sync_deadline: Arc<Mutex<Option<Instant>>>,
     published_focus_reporting: Arc<AtomicBool>,
+    published_content_generation: Arc<AtomicU64>,
     waker: UiWaker,
 }
 
@@ -40,8 +41,20 @@ impl HostEventsSink {
             pending: Arc::new(Mutex::new(PendingHostEvents::default())),
             published_sync_deadline: Arc::new(Mutex::new(None)),
             published_focus_reporting: Arc::new(AtomicBool::new(false)),
+            published_content_generation: Arc::new(AtomicU64::new(0)),
             waker,
         }
+    }
+
+    /// Parser or UI side, with the grid lock held: publishes the grid's content generation after a change.
+    pub(crate) fn set_content_generation(&self, generation: u64) {
+        self.published_content_generation.store(generation, Ordering::Release);
+    }
+
+    /// Any thread: the last published content generation. It reads no grid state, so it never
+    /// waits for the grid lock; it can trail the grid by one change until the publisher unlocks.
+    pub(crate) fn content_generation(&self) -> u64 {
+        self.published_content_generation.load(Ordering::Acquire)
     }
 
     /// Parser side: publishes the mode 2026 hold deadline of the grid it just changed.
