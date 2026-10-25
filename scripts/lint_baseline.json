@@ -854,9 +854,6 @@
     "src/render_view/root_frame_helpers.rs": {
       "manual_clamp": 2
     },
-    "src/render_view/root_frame_layout_renderer.rs": {
-      "struct_excessive_bools": 2
-    },
     "src/render_view/root_frame_overlay_helpers.rs": {
       "unwrap_used": 2
     },
