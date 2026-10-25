@@ -404,6 +404,20 @@ fn git_graph_total_commit_count(repo_root: &Path) -> Option<usize> {
     text.trim().parse::<usize>().ok()
 }
 
+// Position of `oid` in the same topo order `git log --topo-order HEAD` pages use,
+// so the index can be passed as an absolute page end to the graph loader.
+fn git_graph_commit_position(repo_root: &Path, oid: &str) -> Option<usize> {
+    let output = git_output_strs(
+        repo_root,
+        &["rev-list", "--topo-order", "HEAD"],
+        "GRAPH REVEAL",
+        false,
+    )
+    .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().position(|line| line == oid)
+}
+
 struct GitGraphLogRecord {
     oid: Arc<str>,
     parent_oids: Vec<Arc<str>>,

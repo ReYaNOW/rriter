@@ -164,6 +164,7 @@
             .git
             .graph_reveal
             .start(0, repo_root.clone(), "target-commit".to_string());
+        app.ide_panel.git.graph_reveal.set_position(300);
         app.ide_panel.git.graph_reveal.mark_page_requested(200);
         app.ide_panel.git.graph_notice = Some("Ищу коммит…".to_string());
         app.ide_panel
@@ -251,11 +252,12 @@
     }
 
     #[test]
-    fn graph_reveal_limit_caps_last_page_and_reports_not_found() {
-        let repo_root = PathBuf::from("/repo/limit");
-        let limit = App::GIT_GRAPH_REVEAL_LIMIT;
-        let loaded = limit.saturating_sub(10);
-        let history: Vec<_> = (0..limit + 10)
+    fn graph_reveal_loads_one_page_up_to_commit_beyond_former_limit() {
+        let repo_root = PathBuf::from("/repo/far");
+        let loaded = 200;
+        let target_index = 1000;
+        let target = format!("{target_index:040x}");
+        let history: Vec<_> = (0..target_index + GIT_GRAPH_LIMIT_STEP)
             .map(|index| graph_commit(&format!("{index:040x}"), &[]))
             .collect();
         let mut app = graph_reveal_test_app(&repo_root, loaded);
@@ -263,20 +265,24 @@
         app.ide_panel
             .git
             .graph_reveal
-            .start(0, repo_root.clone(), "missing-target".to_string());
+            .start(0, repo_root.clone(), target.clone());
+        let (tx, rx) = app.ui_waker.one_shot_channel();
+        app.ide_panel.git.graph_reveal_lookup_rx = Some(rx);
+        tx.send(Some(target_index)).expect("deliver lookup position");
 
-        app.advance_git_graph_reveal();
+        app.poll_git_panel();
 
-        assert_eq!(app.ide_panel.git.graph_commit_limit, limit);
-        assert_eq!(app.ide_panel.git.graph_snapshot.len(), loaded);
-        assert!(app.ide_panel.git.graph_pending);
+        assert_eq!(
+            app.ide_panel.git.graph_commit_limit,
+            target_index + GIT_GRAPH_LIMIT_STEP
+        );
         let request_id = app
             .ide_panel
             .git
             .graph_latest_request_by_root
             .get(&crate::platform::PathKey::new(&repo_root))
             .copied()
-            .expect("reveal requested a capped final page");
+            .expect("reveal requested the page up to the commit");
         app.ide_panel.git.graph_rx.clear();
         deliver_graph_event(
             &mut app,
@@ -284,7 +290,7 @@
                 request_id,
                 &repo_root,
                 loaded,
-                history[loaded..limit].to_vec(),
+                history[loaded..].to_vec(),
                 None,
                 true,
             ),
@@ -292,12 +298,74 @@
 
         app.poll_git_panel();
 
-        assert!(history.len() >= limit + 10);
-        assert_eq!(app.ide_panel.git.graph_snapshot.len(), limit);
-        assert!(app.ide_panel.git.graph_snapshot.len() <= limit);
+        assert_eq!(app.ide_panel.git.graph_snapshot.len(), history.len());
+        assert_eq!(app.ide_panel.git.graph_reveal.highlight_oid(), Some(target.as_str()));
         assert!(!app.ide_panel.git.graph_reveal.is_searching());
-        assert_eq!(app.readonly_notice_text, "Коммит не найден в загруженной истории");
-        assert_eq!(app.ide_panel.git.graph_next_request_id, request_id + 1);
+    }
+
+    #[test]
+    fn graph_reveal_reports_commit_missing_from_head_without_loading_pages() {
+        let repo_root = PathBuf::from("/repo/missing-from-head");
+        let mut app = graph_reveal_test_app(&repo_root, 3);
+        app.ide_panel
+            .git
+            .graph_reveal
+            .start(0, repo_root.clone(), "not-in-head".to_string());
+        let (tx, rx) = app.ui_waker.one_shot_channel();
+        app.ide_panel.git.graph_reveal_lookup_rx = Some(rx);
+        tx.send(None).expect("deliver lookup miss");
+
+        app.poll_git_panel();
+
+        assert!(!app.ide_panel.git.graph_reveal.is_searching());
+        assert!(app.ide_panel.git.graph_latest_request_by_root.is_empty());
+        assert_eq!(app.readonly_notice_text, "Коммит не найден в истории текущей ветки");
+    }
+
+    #[test]
+    fn graph_reveal_rejects_unknown_hash_position() {
+        // Temp repo with its own history, so the test does not depend on the project's .git
+        // and a failing git call cannot be mistaken for an unknown hash.
+        let repo_root = std::env::temp_dir().join(format!(
+            "rriter-graph-position-{}-{}",
+            std::process::id(),
+            crate::platform::next_operation_id()
+        ));
+        std::fs::create_dir_all(&repo_root).unwrap();
+        let git = |args: &[&str]| -> String {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo_root)
+                .args([
+                    "-c",
+                    "user.name=RRiter Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "first"]);
+        let first = git(&["rev-parse", "HEAD"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "second"]);
+        let head = git(&["rev-parse", "HEAD"]);
+
+        // Known hashes must resolve first, so a broken git call fails here, not on the miss below.
+        assert_eq!(git_graph_commit_position(&repo_root, &head), Some(0));
+        assert_eq!(git_graph_commit_position(&repo_root, &first), Some(1));
+        assert_eq!(git_graph_commit_position(&repo_root, &"f".repeat(40)), None);
+
+        let _ = std::fs::remove_dir_all(&repo_root);
     }
 
     #[test]
@@ -309,11 +377,12 @@
             .git
             .graph_reveal
             .start(0, repo_root, "missing-target".to_string());
+        app.ide_panel.git.graph_reveal.set_position(10);
 
         app.advance_git_graph_reveal();
 
         assert!(!app.ide_panel.git.graph_reveal.is_searching());
-        assert_eq!(app.readonly_notice_text, "Коммит не найден в загруженной истории");
+        assert_eq!(app.readonly_notice_text, "Коммит не найден в истории текущей ветки");
     }
 
     #[test]
