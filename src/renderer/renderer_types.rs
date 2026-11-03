@@ -272,6 +272,10 @@ impl GitGraphTooltipHover {
 pub struct FontData {
     pub source: FontSource,
     pub index: u32,
+    /// Tried after every other font of the chain by the reverse colour pass of
+    /// `rasterize_font_glyph`, so a broad fallback (the CJK face) does not take symbols from
+    /// the symbol fonts that sit before it in the chain.
+    pub color_pass_last: bool,
     /// Table-directory offset and swash cache key, computed once on first use: a fresh
     /// `CacheKey` per `FontRef::from_index` would miss swash's scaler and hinting caches.
     font_key: Option<(u32, CacheKey)>,
@@ -285,6 +289,7 @@ impl FontData {
                 std::rc::Rc::new(std::cell::RefCell::new(None)),
             ),
             index: 0,
+            color_pass_last: false,
             font_key: None,
         }
     }
@@ -293,6 +298,7 @@ impl FontData {
         Self {
             source: FontSource::Static(data),
             index: 0,
+            color_pass_last: false,
             font_key: None,
         }
     }

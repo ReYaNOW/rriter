@@ -56,6 +56,48 @@ pub(crate) fn editor_system_font_path() -> Option<&'static str> {
         .find(|path| std::path::Path::new(path).exists())
 }
 
+/// System CJK fallback of the editor chain: `(file, English family of the face to use)`.
+/// The monospace face gives every ideograph the same advance.
+pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &str)] = &[
+    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc", "WenQuanYi Zen Hei Mono"),
+    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", "WenQuanYi Zen Hei Mono"),
+];
+
+/// Index of the face whose English family name is `family` in a font file or collection.
+fn font_face_index_by_family(data: &[u8], family: &str) -> Option<u32> {
+    let collection = swash::FontDataRef::new(data)?;
+    (0..collection.len()).find_map(|index| {
+        let name = collection
+            .get(index)?
+            .localized_strings()
+            .find_by_id(swash::StringId::Family, Some("en"))?;
+        name.chars().eq(family.chars()).then_some(index as u32)
+    })
+}
+
+/// First installed candidate that has a face of the named family, mapped once at renderer
+/// creation with that face selected. A file without the family is skipped: face 0 of
+/// NotoSansCJK-Regular.ttc is the proportional "Noto Sans CJK JP".
+fn editor_cjk_font(candidates: &[(&str, &str)]) -> Option<FontData> {
+    for (path, family) in candidates {
+        if !std::path::Path::new(path).exists() {
+            continue;
+        }
+        let mut font = FontData::new_lazy(path);
+        font.ensure_loaded();
+        let Some(index) = font_face_index_by_family(font.data_slice(), family) else {
+            continue;
+        };
+        font.index = index;
+        font.color_pass_last = true;
+        return Some(font);
+    }
+    None
+}
+
 impl Renderer {
     pub(crate) fn set_themes(
         &mut self,
@@ -577,6 +619,13 @@ impl Renderer {
                 if std::path::Path::new(path).exists() {
                     fonts.push(FontData::new_lazy(path));
                 }
+            }
+
+            // CJK ideographs and full-width punctuation are in none of the fonts above; without
+            // this face they all fall back to the tofu glyph. It sits after the symbol fonts so
+            // glyphs they already draw keep their look.
+            if let Some(font) = editor_cjk_font(EDITOR_CJK_FONT_CANDIDATES) {
+                fonts.push(font);
             }
 
             let emoji_paths = [
