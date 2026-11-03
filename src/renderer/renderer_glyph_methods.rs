@@ -145,6 +145,9 @@ fn rasterize_font_data_glyph(
     .then_some((image, glyph_advance))
 }
 
+/// Draws `c` from the first font of the chain that maps it. A whitespace glyph the first font
+/// lacks does not end the walk: U+3000 lives only in the CJK fallback, which gives it a full
+/// em, while the first font's .notdef is used only when no font maps the character at all.
 fn rasterize_font_glyph(
     fonts: &mut [FontData],
     scale_context: &mut ScaleContext,
@@ -152,17 +155,52 @@ fn rasterize_font_glyph(
     pixel_size: f32,
     prefer_color: bool,
 ) -> Option<(swash::scale::image::Image, f32)> {
+    // ASCII whitespace (a tab) takes the first font's .notdef advance at once: walking the
+    // chain for it would load the lazy CJK collection in any file with tabs.
+    let ascii_whitespace = c.is_ascii_whitespace();
+    if let Some(rendered) = rasterize_font_glyph_pass(
+        fonts,
+        scale_context,
+        c,
+        pixel_size,
+        prefer_color,
+        ascii_whitespace,
+    ) {
+        return Some(rendered);
+    }
+    // Other whitespace no font maps still needs the first font's .notdef advance.
+    if !c.is_whitespace() || ascii_whitespace {
+        return None;
+    }
+    rasterize_font_glyph_pass(fonts, scale_context, c, pixel_size, prefer_color, true)
+}
+
+fn rasterize_font_glyph_pass(
+    fonts: &mut [FontData],
+    scale_context: &mut ScaleContext,
+    c: char,
+    pixel_size: f32,
+    prefer_color: bool,
+    allow_missing_whitespace: bool,
+) -> Option<(swash::scale::image::Image, f32)> {
     if prefer_color {
-        for (idx, font_data) in fonts.iter_mut().enumerate().rev() {
-            if let Some(rendered) = rasterize_font_data_glyph(
-                font_data,
-                scale_context,
-                c,
-                pixel_size,
-                true,
-                c.is_whitespace() && idx == 0,
-            ) {
-                return Some(rendered);
+        // Reverse walk puts the emoji font first; fonts marked `color_pass_last` go after all
+        // others so the symbol fonts keep precedence over the broad CJK fallback.
+        for last in [false, true] {
+            for (idx, font_data) in fonts.iter_mut().enumerate().rev() {
+                if font_data.color_pass_last != last {
+                    continue;
+                }
+                if let Some(rendered) = rasterize_font_data_glyph(
+                    font_data,
+                    scale_context,
+                    c,
+                    pixel_size,
+                    true,
+                    allow_missing_whitespace && idx == 0,
+                ) {
+                    return Some(rendered);
+                }
             }
         }
     } else {
@@ -173,7 +211,7 @@ fn rasterize_font_glyph(
                 c,
                 pixel_size,
                 false,
-                c.is_whitespace() && idx == 0,
+                allow_missing_whitespace && idx == 0,
             ) {
                 return Some(rendered);
             }
@@ -777,6 +815,141 @@ mod terminal_face_tests {
             .get_terminal_glyph_at_size(UNMAPPED, None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
             .expect("regular glyph");
         assert_eq!((styled.u, styled.v, styled.advance), (regular.u, regular.v, regular.advance));
+    }
+
+    // A line of Chinese drew every ideograph and the full-width comma as the tofu box while a
+    // CJK font was installed: no font of the editor chain mapped them.
+    #[test]
+    fn cjk_glyphs_draw_with_installed_cjk_font_not_tofu() {
+        // Production skips a candidate whose file lacks its family, so the expected candidate
+        // carries the same validation instead of being the first existing path.
+        let Some(&(path, family)) = EDITOR_CJK_FONT_CANDIDATES.iter().find(|(path, family)| {
+            std::path::Path::new(path).exists()
+                && std::fs::read(path)
+                    .is_ok_and(|data| font_face_index_by_family(&data, family).is_some())
+        }) else {
+            return;
+        };
+        let (_context, mut renderer) = test_renderer();
+        let tofu = renderer
+            .get_glyph_for_color_preference_at_size('□', Some(false), TEST_PIXEL_SIZE)
+            .expect("tofu glyph");
+        for c in ['你', '\u{FF0C}'] {
+            let editor = renderer.get_glyph_at_size(c, TEST_PIXEL_SIZE).expect("editor glyph");
+            assert_ne!((editor.u, editor.v), (tofu.u, tofu.v), "editor draws {c:?} as tofu");
+            let terminal = renderer
+                .get_terminal_glyph_at_size(c, None, TEST_PIXEL_SIZE, TERMINAL_FACE_REGULAR)
+                .expect("terminal glyph");
+            assert_ne!((terminal.u, terminal.v), (tofu.u, tofu.v), "terminal draws {c:?} as tofu");
+        }
+        // The editor lays text out by glyph advance, so an ideograph takes its own wide advance.
+        let latin = renderer.char_advance_at_size('a', TEST_PIXEL_SIZE);
+        assert!(renderer.char_advance_at_size('你', TEST_PIXEL_SIZE) > latin);
+        let cjk = renderer
+            .fonts
+            .iter_mut()
+            .position(|font| font.font_ref().is_some_and(|font| font.charmap().map('你') != 0))
+            .expect("CJK font in the editor chain");
+        let cjk = &renderer.fonts[cjk];
+        assert!(cjk.color_pass_last, "CJK face yields to symbol fonts in the colour pass");
+        assert_eq!(
+            Some(cjk.index),
+            font_face_index_by_family(cjk.data_slice(), family),
+            "face {family} of {path}"
+        );
+    }
+
+    // Chinese paragraphs are indented with U+3000, which only the CJK fallback maps. The chain
+    // must not settle for the first font's .notdef advance instead of the CJK em.
+    #[test]
+    fn ideographic_space_takes_the_cjk_advance() {
+        if !EDITOR_CJK_FONT_CANDIDATES
+            .iter()
+            .any(|(path, _)| std::path::Path::new(path).exists())
+        {
+            return;
+        }
+        let (_context, mut renderer) = test_renderer();
+        let ideograph = renderer.char_advance_at_size('中', TEST_PIXEL_SIZE);
+        let ideographic_space = renderer.char_advance_at_size('\u{3000}', TEST_PIXEL_SIZE);
+        assert_eq!(
+            ideographic_space, ideograph,
+            "U+3000 takes the CJK em, not the first font's .notdef width"
+        );
+    }
+
+    // The CJK fallback is a 19 MB collection: a session without CJK text must not open it nor
+    // parse the name tables of its faces at startup.
+    #[test]
+    fn cjk_fallback_font_loads_lazily() {
+        let (_context, mut renderer) = test_renderer();
+        let Some(cjk) = renderer.fonts.iter().position(|font| font.color_pass_last) else {
+            return;
+        };
+        assert!(
+            !renderer.fonts[cjk].cjk_candidates.is_empty(),
+            "startup keeps the CJK candidates unresolved"
+        );
+        assert!(
+            renderer.fonts[cjk].data_slice().is_empty(),
+            "startup does not map the CJK collection"
+        );
+        renderer.fonts[cjk].font_ref().expect("first use resolves a face");
+        assert!(
+            !renderer.fonts[cjk].data_slice().is_empty(),
+            "first use maps the file"
+        );
+    }
+
+    const BUNDLED_REGULAR: &[u8] = include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf");
+    const BUNDLED_BOLD: &[u8] = include_bytes!("../fonts/JetBrainsMonoNerdFont-Bold.ttf");
+    /// English family name (name ID 1) of the bundled JetBrains Mono Nerd Font faces.
+    const BUNDLED_FAMILY: &str = "JetBrainsMono NF";
+
+    #[test]
+    fn face_index_by_family_reads_name_table() {
+        assert_eq!(font_face_index_by_family(BUNDLED_REGULAR, BUNDLED_FAMILY), Some(0));
+        assert_eq!(font_face_index_by_family(BUNDLED_REGULAR, "Noto Sans Mono CJK SC"), None);
+        assert_eq!(font_face_index_by_family(b"not a font", BUNDLED_FAMILY), None);
+    }
+
+    #[test]
+    fn cjk_font_skips_candidate_without_wanted_family() {
+        let regular = concat!(env!("CARGO_MANIFEST_DIR"), "/src/fonts/JetBrainsMonoNerdFont-Regular.ttf");
+        let bold = concat!(env!("CARGO_MANIFEST_DIR"), "/src/fonts/JetBrainsMonoNerdFont-Bold.ttf");
+        let mut font = editor_cjk_font(&[
+            ("/definitely/missing/cjk.ttc", BUNDLED_FAMILY),
+            (regular, "No Such Family"),
+            (bold, BUNDLED_FAMILY),
+        ])
+        .expect("third candidate has the family");
+        font.font_ref().expect("candidate with the family resolves");
+        assert_eq!(font.data_slice(), BUNDLED_BOLD);
+        assert_eq!(font.index, 0);
+        assert!(font.color_pass_last);
+        let mut missing = editor_cjk_font(&[(regular, "No Such Family")]).expect("the file exists");
+        assert!(missing.font_ref().is_none(), "no face of the wanted family");
+    }
+
+    #[test]
+    fn colour_pass_tries_color_pass_last_font_after_the_rest() {
+        // The reverse walk alone would reach Bold (chain end) first.
+        let mut last = FontData::new_static(BUNDLED_BOLD);
+        last.color_pass_last = true;
+        let mut chain = [FontData::new_static(BUNDLED_REGULAR), last];
+        let mut ctx = ScaleContext::new();
+        let (chain_image, _) = rasterize_font_glyph(&mut chain, &mut ctx, 'a', TEST_PIXEL_SIZE, true)
+            .expect("colour pass draws 'a'");
+        let (regular_image, _) = rasterize_font_data_glyph(
+            &mut FontData::new_static(BUNDLED_REGULAR),
+            &mut ctx,
+            'a',
+            TEST_PIXEL_SIZE,
+            true,
+            false,
+        )
+        .expect("Regular draws 'a'");
+        assert_eq!(chain_image.data, regular_image.data);
     }
 
     #[test]

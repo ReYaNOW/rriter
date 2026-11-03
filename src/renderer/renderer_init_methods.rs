@@ -56,6 +56,41 @@ pub(crate) fn editor_system_font_path() -> Option<&'static str> {
         .find(|path| std::path::Path::new(path).exists())
 }
 
+/// System CJK fallback of the editor chain: `(file, English family of the face to use)`.
+/// The monospace face gives every ideograph the same advance.
+pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &str)] = &[
+    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
+    ("/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc", "WenQuanYi Zen Hei Mono"),
+    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", "WenQuanYi Zen Hei Mono"),
+];
+
+/// Index of the face whose English family name is `family` in a font file or collection.
+fn font_face_index_by_family(data: &[u8], family: &str) -> Option<u32> {
+    let collection = swash::FontDataRef::new(data)?;
+    (0..collection.len()).find_map(|index| {
+        let name = collection
+            .get(index)?
+            .localized_strings()
+            .find_by_id(swash::StringId::Family, Some("en"))?;
+        name.chars().eq(family.chars()).then_some(index as u32)
+    })
+}
+
+/// Lazy CJK fallback of the editor chain: the first installed candidate whose file has a face
+/// of the named family wins. The file is opened and its faces parsed on first use, not at
+/// startup, so a session without CJK text never maps the collection. A file without the family
+/// is skipped: face 0 of NotoSansCJK-Regular.ttc is the proportional "Noto Sans CJK JP".
+fn editor_cjk_font(candidates: &[(&str, &'static str)]) -> Option<FontData> {
+    let installed: Vec<(std::path::PathBuf, &'static str)> = candidates
+        .iter()
+        .filter(|(path, _)| std::path::Path::new(path).exists())
+        .map(|(path, family)| (std::path::PathBuf::from(path), *family))
+        .collect();
+    (!installed.is_empty()).then(|| FontData::new_lazy_cjk(installed))
+}
+
 impl Renderer {
     pub(crate) fn set_themes(
         &mut self,
@@ -293,7 +328,9 @@ impl Renderer {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             }
         }
-        for i in 32..128u8 {
+        // Printable ASCII only: no font maps DEL, so warming it would walk the chain down to the
+        // lazy CJK fallback and load the collection at startup.
+        for i in 32..127u8 {
             if let Some(glyph) = self.get_glyph(i as char) {
                 self.ascii_advances[i as usize] = glyph.advance;
             }
@@ -579,6 +616,13 @@ impl Renderer {
                 }
             }
 
+            // CJK ideographs and full-width punctuation are in none of the fonts above; without
+            // this face they all fall back to the tofu glyph. It sits after the symbol fonts so
+            // glyphs they already draw keep their look.
+            if let Some(font) = editor_cjk_font(EDITOR_CJK_FONT_CANDIDATES) {
+                fonts.push(font);
+            }
+
             let emoji_paths = [
                 "/usr/share/fonts/noto/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
@@ -808,7 +852,9 @@ impl Renderer {
                 terminal_tab_render_order: Vec::new(),
             };
 
-            for i in 32..128u8 {
+            // Printable ASCII only: no font maps DEL, so warming it would walk the chain down to
+            // the lazy CJK fallback and load the collection at startup.
+            for i in 32..127u8 {
                 let c = i as char;
                 if let Some(g) = renderer.get_glyph(c) {
                     renderer.ascii_advances[i as usize] = g.advance;
