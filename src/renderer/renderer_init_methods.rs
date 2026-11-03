@@ -58,7 +58,7 @@ pub(crate) fn editor_system_font_path() -> Option<&'static str> {
 
 /// System CJK fallback of the editor chain: `(file, English family of the face to use)`.
 /// The monospace face gives every ideograph the same advance.
-pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &'static str)] = &[
+pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &str)] = &[
     ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
     ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
     ("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
