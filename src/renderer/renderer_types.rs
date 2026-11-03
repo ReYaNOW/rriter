@@ -276,6 +276,11 @@ pub struct FontData {
     /// `rasterize_font_glyph`, so a broad fallback (the CJK face) does not take symbols from
     /// the symbol fonts that sit before it in the chain.
     pub color_pass_last: bool,
+    /// Installed files of the system CJK fallback and the family to pick from each, in
+    /// preference order. Resolved on the first `font_ref`, so startup neither maps the
+    /// collection nor parses the name tables of its faces; a file without the family falls
+    /// through to the next candidate, as the eager selection did.
+    cjk_candidates: Vec<(std::path::PathBuf, &'static str)>,
     /// Table-directory offset and swash cache key, computed once on first use: a fresh
     /// `CacheKey` per `FontRef::from_index` would miss swash's scaler and hinting caches.
     font_key: Option<(u32, CacheKey)>,
@@ -290,6 +295,7 @@ impl FontData {
             ),
             index: 0,
             color_pass_last: false,
+            cjk_candidates: Vec::new(),
             font_key: None,
         }
     }
@@ -299,8 +305,41 @@ impl FontData {
             source: FontSource::Static(data),
             index: 0,
             color_pass_last: false,
+            cjk_candidates: Vec::new(),
             font_key: None,
         }
+    }
+
+    /// CJK fallback of the editor chain: the file is opened and its faces are parsed on first
+    /// use, when a glyph reaches this slot. `candidates` holds the installed files with the
+    /// family to pick from each.
+    pub fn new_lazy_cjk(candidates: Vec<(std::path::PathBuf, &'static str)>) -> Self {
+        Self {
+            source: FontSource::Static(&[]),
+            index: 0,
+            color_pass_last: true,
+            cjk_candidates: candidates,
+            font_key: None,
+        }
+    }
+
+    /// Picks the first candidate file that has a face of its wanted family and selects it, then
+    /// caches the font. A file without the family is skipped for the next candidate; when none
+    /// has it the slot stays empty and the chain moves on.
+    fn resolve_cjk_candidates(&mut self) {
+        for (path, family) in std::mem::take(&mut self.cjk_candidates) {
+            self.source = FontSource::Lazy(
+                path,
+                std::rc::Rc::new(std::cell::RefCell::new(None)),
+            );
+            self.ensure_loaded();
+            if let Some(index) = font_face_index_by_family(self.data_slice(), family) {
+                self.index = index;
+                return;
+            }
+        }
+        self.source = FontSource::Static(&[]);
+        self.index = 0;
     }
 
     pub fn ensure_loaded(&mut self) {
@@ -341,6 +380,9 @@ impl FontData {
 
     /// Loads the font if needed and returns a `FontRef` that keeps the same cache key across calls.
     pub fn font_ref(&mut self) -> Option<FontRef<'_>> {
+        if !self.cjk_candidates.is_empty() {
+            self.resolve_cjk_candidates();
+        }
         self.ensure_loaded();
         if self.font_key.is_none() {
             let font_ref = FontRef::from_index(self.data_slice(), self.index as usize)?;

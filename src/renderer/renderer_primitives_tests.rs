@@ -715,6 +715,7 @@ mod tests {
             source: FontSource::LoadedVec(std::sync::Arc::new(vec![1, 2, 3, 4])),
             index: 2,
             color_pass_last: false,
+            cjk_candidates: Vec::new(),
             font_key: None,
         };
         assert_eq!(vec_font.data_slice(), &[1, 2, 3, 4]);

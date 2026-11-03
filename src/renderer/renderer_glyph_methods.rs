@@ -145,12 +145,43 @@ fn rasterize_font_data_glyph(
     .then_some((image, glyph_advance))
 }
 
+/// Draws `c` from the first font of the chain that maps it. A whitespace glyph the first font
+/// lacks does not end the walk: U+3000 lives only in the CJK fallback, which gives it a full
+/// em, while the first font's .notdef is used only when no font maps the character at all.
 fn rasterize_font_glyph(
     fonts: &mut [FontData],
     scale_context: &mut ScaleContext,
     c: char,
     pixel_size: f32,
     prefer_color: bool,
+) -> Option<(swash::scale::image::Image, f32)> {
+    // ASCII whitespace (a tab) takes the first font's .notdef advance at once: walking the
+    // chain for it would load the lazy CJK collection in any file with tabs.
+    let ascii_whitespace = c.is_ascii_whitespace();
+    if let Some(rendered) = rasterize_font_glyph_pass(
+        fonts,
+        scale_context,
+        c,
+        pixel_size,
+        prefer_color,
+        ascii_whitespace,
+    ) {
+        return Some(rendered);
+    }
+    // Other whitespace no font maps still needs the first font's .notdef advance.
+    if !c.is_whitespace() || ascii_whitespace {
+        return None;
+    }
+    rasterize_font_glyph_pass(fonts, scale_context, c, pixel_size, prefer_color, true)
+}
+
+fn rasterize_font_glyph_pass(
+    fonts: &mut [FontData],
+    scale_context: &mut ScaleContext,
+    c: char,
+    pixel_size: f32,
+    prefer_color: bool,
+    allow_missing_whitespace: bool,
 ) -> Option<(swash::scale::image::Image, f32)> {
     if prefer_color {
         // Reverse walk puts the emoji font first; fonts marked `color_pass_last` go after all
@@ -166,7 +197,7 @@ fn rasterize_font_glyph(
                     c,
                     pixel_size,
                     true,
-                    c.is_whitespace() && idx == 0,
+                    allow_missing_whitespace && idx == 0,
                 ) {
                     return Some(rendered);
                 }
@@ -180,7 +211,7 @@ fn rasterize_font_glyph(
                 c,
                 pixel_size,
                 false,
-                c.is_whitespace() && idx == 0,
+                allow_missing_whitespace && idx == 0,
             ) {
                 return Some(rendered);
             }
@@ -790,10 +821,13 @@ mod terminal_face_tests {
     // CJK font was installed: no font of the editor chain mapped them.
     #[test]
     fn cjk_glyphs_draw_with_installed_cjk_font_not_tofu() {
-        let Some(&(path, family)) = EDITOR_CJK_FONT_CANDIDATES
-            .iter()
-            .find(|(path, _)| std::path::Path::new(path).exists())
-        else {
+        // Production skips a candidate whose file lacks its family, so the expected candidate
+        // carries the same validation instead of being the first existing path.
+        let Some(&(path, family)) = EDITOR_CJK_FONT_CANDIDATES.iter().find(|(path, family)| {
+            std::path::Path::new(path).exists()
+                && std::fs::read(path)
+                    .is_ok_and(|data| font_face_index_by_family(&data, family).is_some())
+        }) else {
             return;
         };
         let (_context, mut renderer) = test_renderer();
@@ -825,6 +859,48 @@ mod terminal_face_tests {
         );
     }
 
+    // Chinese paragraphs are indented with U+3000, which only the CJK fallback maps. The chain
+    // must not settle for the first font's .notdef advance instead of the CJK em.
+    #[test]
+    fn ideographic_space_takes_the_cjk_advance() {
+        if !EDITOR_CJK_FONT_CANDIDATES
+            .iter()
+            .any(|(path, _)| std::path::Path::new(path).exists())
+        {
+            return;
+        }
+        let (_context, mut renderer) = test_renderer();
+        let ideograph = renderer.char_advance_at_size('中', TEST_PIXEL_SIZE);
+        let ideographic_space = renderer.char_advance_at_size('\u{3000}', TEST_PIXEL_SIZE);
+        assert_eq!(
+            ideographic_space, ideograph,
+            "U+3000 takes the CJK em, not the first font's .notdef width"
+        );
+    }
+
+    // The CJK fallback is a 19 MB collection: a session without CJK text must not open it nor
+    // parse the name tables of its faces at startup.
+    #[test]
+    fn cjk_fallback_font_loads_lazily() {
+        let (_context, mut renderer) = test_renderer();
+        let Some(cjk) = renderer.fonts.iter().position(|font| font.color_pass_last) else {
+            return;
+        };
+        assert!(
+            !renderer.fonts[cjk].cjk_candidates.is_empty(),
+            "startup keeps the CJK candidates unresolved"
+        );
+        assert!(
+            renderer.fonts[cjk].data_slice().is_empty(),
+            "startup does not map the CJK collection"
+        );
+        renderer.fonts[cjk].font_ref().expect("first use resolves a face");
+        assert!(
+            !renderer.fonts[cjk].data_slice().is_empty(),
+            "first use maps the file"
+        );
+    }
+
     const BUNDLED_REGULAR: &[u8] = include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf");
     const BUNDLED_BOLD: &[u8] = include_bytes!("../fonts/JetBrainsMonoNerdFont-Bold.ttf");
     /// English family name (name ID 1) of the bundled JetBrains Mono Nerd Font faces.
@@ -841,16 +917,18 @@ mod terminal_face_tests {
     fn cjk_font_skips_candidate_without_wanted_family() {
         let regular = concat!(env!("CARGO_MANIFEST_DIR"), "/src/fonts/JetBrainsMonoNerdFont-Regular.ttf");
         let bold = concat!(env!("CARGO_MANIFEST_DIR"), "/src/fonts/JetBrainsMonoNerdFont-Bold.ttf");
-        let font = editor_cjk_font(&[
+        let mut font = editor_cjk_font(&[
             ("/definitely/missing/cjk.ttc", BUNDLED_FAMILY),
             (regular, "No Such Family"),
             (bold, BUNDLED_FAMILY),
         ])
         .expect("third candidate has the family");
+        font.font_ref().expect("candidate with the family resolves");
         assert_eq!(font.data_slice(), BUNDLED_BOLD);
         assert_eq!(font.index, 0);
         assert!(font.color_pass_last);
-        assert!(editor_cjk_font(&[(regular, "No Such Family")]).is_none());
+        let mut missing = editor_cjk_font(&[(regular, "No Such Family")]).expect("the file exists");
+        assert!(missing.font_ref().is_none(), "no face of the wanted family");
     }
 
     #[test]

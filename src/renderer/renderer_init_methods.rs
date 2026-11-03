@@ -58,7 +58,7 @@ pub(crate) fn editor_system_font_path() -> Option<&'static str> {
 
 /// System CJK fallback of the editor chain: `(file, English family of the face to use)`.
 /// The monospace face gives every ideograph the same advance.
-pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &str)] = &[
+pub(crate) const EDITOR_CJK_FONT_CANDIDATES: &[(&str, &'static str)] = &[
     ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
     ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
     ("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans Mono CJK SC"),
@@ -78,24 +78,17 @@ fn font_face_index_by_family(data: &[u8], family: &str) -> Option<u32> {
     })
 }
 
-/// First installed candidate that has a face of the named family, mapped once at renderer
-/// creation with that face selected. A file without the family is skipped: face 0 of
-/// NotoSansCJK-Regular.ttc is the proportional "Noto Sans CJK JP".
-fn editor_cjk_font(candidates: &[(&str, &str)]) -> Option<FontData> {
-    for (path, family) in candidates {
-        if !std::path::Path::new(path).exists() {
-            continue;
-        }
-        let mut font = FontData::new_lazy(path);
-        font.ensure_loaded();
-        let Some(index) = font_face_index_by_family(font.data_slice(), family) else {
-            continue;
-        };
-        font.index = index;
-        font.color_pass_last = true;
-        return Some(font);
-    }
-    None
+/// Lazy CJK fallback of the editor chain: the first installed candidate whose file has a face
+/// of the named family wins. The file is opened and its faces parsed on first use, not at
+/// startup, so a session without CJK text never maps the collection. A file without the family
+/// is skipped: face 0 of NotoSansCJK-Regular.ttc is the proportional "Noto Sans CJK JP".
+fn editor_cjk_font(candidates: &[(&str, &'static str)]) -> Option<FontData> {
+    let installed: Vec<(std::path::PathBuf, &'static str)> = candidates
+        .iter()
+        .filter(|(path, _)| std::path::Path::new(path).exists())
+        .map(|(path, family)| (std::path::PathBuf::from(path), *family))
+        .collect();
+    (!installed.is_empty()).then(|| FontData::new_lazy_cjk(installed))
 }
 
 impl Renderer {
@@ -335,7 +328,9 @@ impl Renderer {
                 self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             }
         }
-        for i in 32..128u8 {
+        // Printable ASCII only: no font maps DEL, so warming it would walk the chain down to the
+        // lazy CJK fallback and load the collection at startup.
+        for i in 32..127u8 {
             if let Some(glyph) = self.get_glyph(i as char) {
                 self.ascii_advances[i as usize] = glyph.advance;
             }
@@ -857,7 +852,9 @@ impl Renderer {
                 terminal_tab_render_order: Vec::new(),
             };
 
-            for i in 32..128u8 {
+            // Printable ASCII only: no font maps DEL, so warming it would walk the chain down to
+            // the lazy CJK fallback and load the collection at startup.
+            for i in 32..127u8 {
                 let c = i as char;
                 if let Some(g) = renderer.get_glyph(c) {
                     renderer.ascii_advances[i as usize] = g.advance;
