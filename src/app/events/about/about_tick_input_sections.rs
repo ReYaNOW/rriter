@@ -38,9 +38,31 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
             app.add_terminal();
         }
         let active = app.ide_panel.active_terminal;
+        // Read before the terminal is borrowed mutably: the panel rect borrows all of `app`.
+        let panel_metrics = app.renderer.as_ref().map(|r| {
+            let s = r.scale_factor;
+            let (_, content_y, _, content_h, _) = crate::app::mouse::app_panel_scroll_rect(
+                app,
+                crate::app::PanelId::Terminal,
+                s,
+            );
+            let (char_h, body_h) = crate::render_view::terminal_ui::terminal_scroll_metrics(
+                r.line_height,
+                content_y,
+                content_h,
+                s,
+            );
+            (char_h, body_h, s)
+        });
         if let Some(t) = app.ide_panel.terminals.get_mut(active) {
+            let anchor_limit = panel_metrics
+                .and_then(|(char_h, body_h, scale)| t.anchor_scroll(char_h, body_h, scale));
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
+            }
+            if let Some(max) = anchor_limit {
+                t.scroll_y.clamp_target(0.0, max);
+                t.scroll_y.clamp_current(0.0, max);
             }
             if t.grid_dirty_without_waiting() {
                 needs_redraw = true;

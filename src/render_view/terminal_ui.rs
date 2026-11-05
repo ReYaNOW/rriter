@@ -124,6 +124,18 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
     (content_y + body_offset, (content_h - body_offset).max(0.0))
 }
 
+/// Line height in pixels and visible body height of the terminal panel content rect: the inputs
+/// of `terminal_max_scroll` and of the active terminal's scroll anchor.
+pub(crate) fn terminal_scroll_metrics(
+    line_height: f32,
+    content_y: f32,
+    content_h: f32,
+    scale: f32,
+) -> (f32, f32) {
+    let (_, body_h) = terminal_body_rect(content_y, content_h, scale);
+    (line_height * TERMINAL_TEXT_SCALE, body_h)
+}
+
 /// Left edge of the terminal text in the panel. The frame draw, the dump and the cursor drag
 /// mapping all call it, so they agree on where the text starts.
 #[inline]

@@ -1,7 +1,7 @@
 use crate::app::terminal_sync_output::{
     SYNC_UI_FALLBACK_GRACE, SYNC_UI_RETRY_INTERVAL, sync_ui_fallback_due,
 };
-use ronsole_term::{Term, TermConfig, TermIdentity, TermPalette};
+use ronsole_term::{ScrollbackAnchor, Term, TermConfig, TermIdentity, TermPalette};
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -85,6 +85,12 @@ fn flush_expired_sync_on_grid(
 /// palette, for tests that need a grid without spawning a process.
 #[cfg(test)]
 pub(crate) fn test_term(cols: usize, rows: usize) -> Term {
+    test_term_with_scrollback(cols, rows, TERMINAL_SCROLLBACK_LINES)
+}
+
+/// Like `test_term`, with the scrollback depth chosen by the test (small, to reach eviction).
+#[cfg(test)]
+pub(crate) fn test_term_with_scrollback(cols: usize, rows: usize, scrollback_lines: usize) -> Term {
     let black = ronsole_term::Rgb { r: 0, g: 0, b: 0 };
     let white = ronsole_term::Rgb {
         r: 255,
@@ -94,7 +100,7 @@ pub(crate) fn test_term(cols: usize, rows: usize) -> Term {
     Term::new(TermConfig {
         cols,
         rows,
-        scrollback_lines: TERMINAL_SCROLLBACK_LINES,
+        scrollback_lines,
         identity: TermIdentity {
             name: "rriter",
             version: env!("CARGO_PKG_VERSION"),
@@ -104,6 +110,7 @@ pub(crate) fn test_term(cols: usize, rows: usize) -> Term {
             background: black,
             cursor: white,
             ansi: [black; 16],
+            bold_foreground: None,
         },
     })
 }
@@ -162,6 +169,8 @@ pub struct Terminal {
     pub grid: Arc<Mutex<Term>>,
     process: Option<crate::app::terminal_process::TerminalProcess>,
     pub scroll_y: crate::scroll::ScrollState,
+    /// Keeps a scrolled-up viewport on its lines while output pushes lines into the scrollback.
+    scroll_anchor: ScrollbackAnchor,
     pub(crate) presentation_intent: TerminalPresentationIntent,
     pub(crate) reveal_right_tail_when_presented: bool,
     pub(crate) mouse: crate::app::mouse::TerminalMouseState,
@@ -250,6 +259,7 @@ impl Terminal {
             grid,
             process,
             scroll_y: crate::scroll::ScrollState::new(7.0),
+            scroll_anchor: ScrollbackAnchor::new(),
             presentation_intent: TerminalPresentationIntent::None,
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
@@ -377,6 +387,38 @@ impl Terminal {
         grid
     }
 
+    /// Keeps a viewport scrolled up into the scrollback on the same lines. `scroll_y` counts pixels
+    /// from the bottom, so each line output pushes into the scrollback moves the content under it;
+    /// the offset grows by the pushed lines (`ScrollbackAnchor`). At the bottom (`target <= 0`) the
+    /// anchor is released and the view follows output without taking the grid lock. Returns the
+    /// scroll limit of the current content (0 on the alternate screen) for the caller's clamp, or
+    /// `None` when released or when `char_h` is unusable. A full scrollback that evicts lines under
+    /// the view is clamped by the caller to the oldest retained line.
+    pub(crate) fn anchor_scroll(&mut self, char_h: f32, body_h: f32, scale: f32) -> Option<f32> {
+        if !(self.scroll_y.target > 0.0) {
+            self.scroll_anchor.release();
+            return None;
+        }
+        // Checked before `hold`: `hold` consumes the pushed count, which would be lost here.
+        if !char_h.is_finite() || char_h <= 0.0 {
+            return None;
+        }
+        let (pushed, total_lines, is_alt) = {
+            let grid = lock_terminal_grid(&self.grid);
+            (self.scroll_anchor.hold(&grid), grid.total_rows(), grid.is_alt_screen())
+        };
+        if pushed > 0 {
+            let delta = pushed as f32 * char_h;
+            self.scroll_y.current += delta;
+            self.scroll_y.target += delta;
+        }
+        Some(if is_alt {
+            0.0
+        } else {
+            crate::render_view::terminal_ui::terminal_max_scroll(total_lines, char_h, body_h, scale)
+        })
+    }
+
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
     #[cfg(test)]
     pub(crate) fn test_without_process(cols: usize, rows: usize) -> Self {
@@ -384,6 +426,7 @@ impl Terminal {
             grid: Arc::new(Mutex::new(test_term(cols, rows))),
             process: None,
             scroll_y: crate::scroll::ScrollState::new(7.0),
+            scroll_anchor: ScrollbackAnchor::new(),
             presentation_intent: TerminalPresentationIntent::None,
             reveal_right_tail_when_presented: false,
             mouse: crate::app::mouse::TerminalMouseState::default(),
@@ -467,6 +510,7 @@ mod tests {
             background,
             cursor: foreground,
             ansi: [background; 16],
+            bold_foreground: None,
         });
         let (write_queue, write_rx) = crate::app::terminal_sink::pty_write_queue();
         let mut sink = RriterTermSink::new(None, Some(write_queue));
@@ -699,5 +743,108 @@ mod tests {
         assert!(term.focus_sent);
         assert_eq!(term.take_focus_key_reset(), Some(true));
         assert_eq!(term.take_focus_key_reset(), None);
+    }
+
+    // Ported from Ronsole's terminal tests (`scrolled_up_view_keeps_its_lines`,
+    // `view_at_bottom_follows_output`, `full_scrollback_evicts`); expected values are its.
+    const ANCHOR_CHAR_H: f32 = 10.0;
+    const ANCHOR_BODY_H: f32 = 60.0;
+
+    /// One frame of the tick's scroll step: anchor, then clamp to the limit.
+    fn anchor_frame(terminal: &mut Terminal) {
+        if let Some(max) = terminal.anchor_scroll(ANCHOR_CHAR_H, ANCHOR_BODY_H, 1.0) {
+            terminal.scroll_y.clamp_target(0.0, max);
+            terminal.scroll_y.clamp_current(0.0, max);
+        }
+    }
+
+    fn anchor_max(terminal: &Terminal) -> f32 {
+        let total = lock_terminal_grid(&terminal.grid).total_rows();
+        crate::render_view::terminal_ui::terminal_max_scroll(
+            total,
+            ANCHOR_CHAR_H,
+            ANCHOR_BODY_H,
+            1.0,
+        )
+    }
+
+    fn feed_numbered(terminal: &Terminal, from: usize, count: usize) {
+        let bytes: String = (from..from + count).map(|i| format!("l{i}\r\n")).collect();
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), bytes.as_bytes());
+    }
+
+    /// Text of the bottom line in view at the current offset.
+    fn bottom_line_in_view(terminal: &Terminal) -> String {
+        let grid = lock_terminal_grid(&terminal.grid);
+        let scrolled = (terminal.scroll_y.current / ANCHOR_CHAR_H).round() as usize;
+        let row = grid.total_rows() - 1 - scrolled;
+        grid.row(row)
+            .map(|line| line.iter().map(|cell| cell.ch()).collect::<String>())
+            .unwrap_or_default()
+            .trim_end()
+            .to_string()
+    }
+
+    fn scroll_to(terminal: &mut Terminal, offset: f32) {
+        terminal.scroll_y.current = offset;
+        terminal.scroll_y.target = offset;
+    }
+
+    #[test]
+    fn scrolled_up_view_keeps_its_lines_while_output_arrives() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        feed_numbered(&terminal, 40, 7);
+        anchor_frame(&mut terminal);
+
+        assert_eq!(bottom_line_in_view(&terminal), before);
+        assert_eq!(terminal.scroll_y.current, 12.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.target, 12.0 * ANCHOR_CHAR_H);
+    }
+
+    #[test]
+    fn view_at_bottom_follows_output() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        anchor_frame(&mut terminal);
+
+        feed_numbered(&terminal, 40, 7);
+        anchor_frame(&mut terminal);
+
+        assert_eq!(terminal.scroll_y.current, 0.0);
+        assert_eq!(terminal.scroll_y.target, 0.0);
+        // The cursor sits on the empty row below the newest line.
+        scroll_to(&mut terminal, ANCHOR_CHAR_H);
+        assert_eq!(bottom_line_in_view(&terminal), "l46");
+    }
+
+    #[test]
+    fn scrolled_up_view_keeps_its_lines_while_full_scrollback_evicts() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        terminal.grid = Arc::new(Mutex::new(test_term_with_scrollback(20, 4, 8)));
+        feed_numbered(&terminal, 0, 30);
+        assert_eq!(lock_terminal_grid(&terminal.grid).scrollback_len(), 8);
+        scroll_to(&mut terminal, 3.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        feed_numbered(&terminal, 30, 2);
+        anchor_frame(&mut terminal);
+        assert_eq!(bottom_line_in_view(&terminal), before);
+
+        // At the oldest retained line, evicted content leaves the view pinned
+        // to the new oldest line: the offset stays at the limit.
+        let max = anchor_max(&terminal);
+        scroll_to(&mut terminal, max);
+        anchor_frame(&mut terminal);
+        feed_numbered(&terminal, 32, 3);
+        anchor_frame(&mut terminal);
+        assert_eq!(terminal.scroll_y.current, max);
+        assert_eq!(terminal.scroll_y.target, max);
+        assert_eq!(anchor_max(&terminal), max);
     }
 }

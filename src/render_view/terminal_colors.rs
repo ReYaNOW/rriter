@@ -34,6 +34,7 @@ pub(crate) fn terminal_palette(theme: &Theme) -> TermPalette {
         background: theme_rgb(theme.terminal_bg),
         cursor: theme_rgb(theme.terminal_cursor),
         ansi: std::array::from_fn(|index| theme_rgb(theme.terminal[index])),
+        bold_foreground: None,
     }
 }
 
