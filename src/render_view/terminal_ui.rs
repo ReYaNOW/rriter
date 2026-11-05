@@ -124,6 +124,18 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
     (content_y + body_offset, (content_h - body_offset).max(0.0))
 }
 
+/// Line height in pixels and visible body height of the terminal panel content rect: the inputs
+/// of `terminal_max_scroll` and of the active terminal's scroll anchor.
+pub(crate) fn terminal_scroll_metrics(
+    line_height: f32,
+    content_y: f32,
+    content_h: f32,
+    scale: f32,
+) -> (f32, f32) {
+    let (_, body_h) = terminal_body_rect(content_y, content_h, scale);
+    (line_height * TERMINAL_TEXT_SCALE, body_h)
+}
+
 /// Left edge of the terminal text in the panel. The frame draw, the dump and the cursor drag
 /// mapping all call it, so they agree on where the text starts.
 #[inline]
@@ -614,11 +626,10 @@ impl Renderer {
                 terminal_max_scroll(total_lines, char_h, term_content_h, s)
             };
 
-            let scroll_offset = terminal_render_scroll_offset(
-                term.scroll_y.current,
-                max_scroll,
-                is_alt,
-            );
+            // Lines output since the last tick are drawn now, under the same grid lock, so the
+            // frame does not show the old offset while the next tick moves the view.
+            let render_scroll = term.scroll_y.current + term.anchor_pending_pixels(&grid, char_h);
+            let scroll_offset = terminal_render_scroll_offset(render_scroll, max_scroll, is_alt);
             let draw_x = terminal_text_x(panel_x, s);
             let (_, term_pad_bottom) = terminal_text_padding(s);
 
@@ -872,7 +883,7 @@ impl Renderer {
                     s,
                     char_h,
                     total_lines,
-                    term.scroll_y.current,
+                    render_scroll,
                 );
                 let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
                     ui: ui_registry,

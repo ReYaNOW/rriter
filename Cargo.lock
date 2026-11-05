@@ -3750,7 +3750,7 @@ dependencies = [
 [[package]]
 name = "ronsole-term"
 version = "0.1.0"
-source = "git+https://github.com/ReYaNOW/ronsole?rev=6d6980dd805e369dcc4c979b457fe97a0f6676b5#6d6980dd805e369dcc4c979b457fe97a0f6676b5"
+source = "git+https://github.com/ReYaNOW/ronsole?rev=07ae6a69d45a04758c0304fbe3784aed2cc66673#07ae6a69d45a04758c0304fbe3784aed2cc66673"
 dependencies = [
  "unicode-width",
  "vte",

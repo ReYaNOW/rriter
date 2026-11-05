@@ -579,10 +579,8 @@ impl App {
                         term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
 
                         let lh = self.renderer.as_ref().unwrap().line_height;
-                        let char_h = lh * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-
-                        let (_, term_content_h) =
-                            crate::render_view::terminal_ui::terminal_body_rect(cy, ch, s);
+                        let (char_h, term_content_h) =
+                            crate::render_view::terminal_ui::terminal_scroll_metrics(lh, cy, ch, s);
                         let max_scroll = crate::render_view::terminal_ui::terminal_max_scroll(
                             total_lines,
                             char_h,
