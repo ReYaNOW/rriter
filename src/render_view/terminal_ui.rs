@@ -626,11 +626,10 @@ impl Renderer {
                 terminal_max_scroll(total_lines, char_h, term_content_h, s)
             };
 
-            let scroll_offset = terminal_render_scroll_offset(
-                term.scroll_y.current,
-                max_scroll,
-                is_alt,
-            );
+            // Lines output since the last tick are drawn now, under the same grid lock, so the
+            // frame does not show the old offset while the next tick moves the view.
+            let render_scroll = term.scroll_y.current + term.anchor_pending_pixels(&grid, char_h);
+            let scroll_offset = terminal_render_scroll_offset(render_scroll, max_scroll, is_alt);
             let draw_x = terminal_text_x(panel_x, s);
             let (_, term_pad_bottom) = terminal_text_padding(s);
 
@@ -884,7 +883,7 @@ impl Renderer {
                     s,
                     char_h,
                     total_lines,
-                    term.scroll_y.current,
+                    render_scroll,
                 );
                 let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
                     ui: ui_registry,

@@ -393,9 +393,11 @@ impl Terminal {
     /// anchor is released and the view follows output without taking the grid lock. Returns the
     /// scroll limit of the current content (0 on the alternate screen) for the caller's clamp, or
     /// `None` when released or when `char_h` is unusable. A full scrollback that evicts lines under
-    /// the view is clamped by the caller to the oldest retained line.
+    /// the view is clamped by the caller to the oldest retained line. On the alternate screen the
+    /// anchor stays held and the offset is still compensated, but `None` is returned so the caller
+    /// does not clamp: the main screen's lines come back on exit.
     pub(crate) fn anchor_scroll(&mut self, char_h: f32, body_h: f32, scale: f32) -> Option<f32> {
-        if !(self.scroll_y.target > 0.0) {
+        if !self.scrolled_up() {
             self.scroll_anchor.release();
             return None;
         }
@@ -412,11 +414,35 @@ impl Terminal {
             self.scroll_y.current += delta;
             self.scroll_y.target += delta;
         }
-        Some(if is_alt {
-            0.0
-        } else {
-            crate::render_view::terminal_ui::terminal_max_scroll(total_lines, char_h, body_h, scale)
-        })
+        if is_alt {
+            return None;
+        }
+        Some(crate::render_view::terminal_ui::terminal_max_scroll(
+            total_lines,
+            char_h,
+            body_h,
+            scale,
+        ))
+    }
+
+    /// The view is heading above the bottom (a NaN target counts as the bottom).
+    fn scrolled_up(&self) -> bool {
+        self.scroll_y.target > 0.0
+    }
+
+    /// Pixels the anchor will add to `scroll_y.current` on the next tick: the lines output since
+    /// the last `hold`, read without consuming them. The renderer adds this to draw the offset the
+    /// tick is about to produce, so output that landed after the tick does not shift the view for
+    /// a frame. `grid` is the grid the renderer already locked. Returns 0 when the next tick would
+    /// release the anchor (`target <= 0`), on the alternate screen, or when `char_h` is unusable.
+    pub(crate) fn anchor_pending_pixels(&self, grid: &Term, char_h: f32) -> f32 {
+        if !self.scrolled_up() || !char_h.is_finite() || char_h <= 0.0 {
+            return 0.0;
+        }
+        if grid.is_alt_screen() {
+            return 0.0;
+        }
+        self.scroll_anchor.pending(grid) as f32 * char_h
     }
 
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
@@ -846,5 +872,65 @@ mod tests {
         assert_eq!(terminal.scroll_y.current, max);
         assert_eq!(terminal.scroll_y.target, max);
         assert_eq!(anchor_max(&terminal), max);
+    }
+
+    #[test]
+    fn scrolled_up_view_keeps_its_offset_across_alt_screen() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[?1049h");
+        anchor_frame(&mut terminal);
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.target, 5.0 * ANCHOR_CHAR_H);
+
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[?1049l");
+        anchor_frame(&mut terminal);
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.target, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(bottom_line_in_view(&terminal), before);
+    }
+
+    #[test]
+    fn scrolled_up_view_keeps_its_offset_when_rows_shrink_and_grow() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        lock_terminal_grid(&terminal.grid).resize(20, 2);
+        anchor_frame(&mut terminal);
+        lock_terminal_grid(&terminal.grid).resize(20, 4);
+        anchor_frame(&mut terminal);
+
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.target, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(bottom_line_in_view(&terminal), before);
+    }
+
+    #[test]
+    fn output_after_the_last_tick_moves_the_render_offset() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+
+        feed_numbered(&terminal, 40, 3);
+        let grid = lock_terminal_grid(&terminal.grid);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
+        // Reading the pending lines does not consume them.
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
+        drop(grid);
+        // Only the tick moves the stored offset.
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+
+        anchor_frame(&mut terminal);
+        assert_eq!(terminal.scroll_y.current, 8.0 * ANCHOR_CHAR_H);
+        let grid = lock_terminal_grid(&terminal.grid);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 0.0);
     }
 }

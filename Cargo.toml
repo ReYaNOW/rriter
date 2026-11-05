@@ -87,12 +87,12 @@ futures-util = { version = "0.3.32", default-features = false, features = [
 zeroize = "1.9.0"
 
 memmap2 = "0.9.11"
-ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "8e90421b7b9e1d4972e16c0e9a0e5426220bbb02" }
+ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "07ae6a69d45a04758c0304fbe3784aed2cc66673" }
 portable-pty = "0.9.0"
 git2 = "0.20"
 
 [dev-dependencies]
-ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "8e90421b7b9e1d4972e16c0e9a0e5426220bbb02", features = ["test-support"] }
+ronsole-term = { git = "https://github.com/ReYaNOW/ronsole", rev = "07ae6a69d45a04758c0304fbe3784aed2cc66673", features = ["test-support"] }
 
 
 [dependencies.tokio]
