@@ -27,8 +27,10 @@ use crate::platform::{self, ManagedChild};
 const HELPER_FLAG: &str = "--rriter-media-render";
 /// Largest input the helper accepts; longer input is `TooLarge` without spawning anything.
 const MAX_INPUT_BYTES: usize = 20 * 1024 * 1024;
-/// The decoder keeps the long side of a raster within this many pixels.
-const MAX_OUTPUT_SIDE: u32 = 4096;
+/// The decoder keeps each side of a raster within this many pixels (a native bitmap may be
+/// up to `MAX_NATIVE_SIDE` tall) and the whole raster within `MAX_OUTPUT_PIXELS`.
+const MAX_OUTPUT_SIDE: u32 = 8192;
+const MAX_OUTPUT_PIXELS: u64 = 4096 * 4096;
 /// Longest header line accepted in either direction.
 const HEADER_LIMIT: u64 = 1024;
 const ERR_TEXT_LIMIT: usize = 200;
@@ -363,7 +365,8 @@ fn read_pixels(reader: &mut impl BufRead, fields: &str) -> Result<MediaPixels, M
         && natural_w <= super::decode::MAX_INPUT_SIDE as f32
         && natural_h <= super::decode::MAX_INPUT_SIDE as f32
         && (1..=MAX_OUTPUT_SIDE).contains(&raster_w)
-        && (1..=MAX_OUTPUT_SIDE).contains(&raster_h);
+        && (1..=MAX_OUTPUT_SIDE).contains(&raster_h)
+        && u64::from(raster_w) * u64::from(raster_h) <= MAX_OUTPUT_PIXELS;
     if !sane {
         return Err(MediaError::Crashed);
     }
@@ -575,7 +578,7 @@ mod tests {
             b"OK inf 1 1 1\n\x01\x02\x03\x04".to_vec(),
             b"OK 0 1 1 1\n\x01\x02\x03\x04".to_vec(),
             b"OK 1 1 0 1\n".to_vec(),
-            b"OK 1 1 4097 1\n".to_vec(),
+            b"OK 1 1 8193 1\n".to_vec(),
             b"OK 1 1 5000 5000\n".to_vec(),
             b"OK 1 1 4294967295 4294967295\n".to_vec(),
             b"OK 1 1 -1 1\n\x01\x02\x03\x04".to_vec(),

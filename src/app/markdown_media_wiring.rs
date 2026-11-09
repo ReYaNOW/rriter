@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::markdown_nav::document_media;
 use super::{App, MarkdownMode, MarkdownTabState};
-use crate::markdown_media::{MarkdownMedia, MediaKey, MediaRequest, VisibleMedia};
+use crate::markdown_media::{MarkdownMedia, MediaKey, MediaRequest, VisibleMedia, prefetch_rank};
 use crate::ui_waker::UiWaker;
 
 /// Inputs of the last request pass of one tab. While they stay the same the pass is skipped;
@@ -112,9 +112,11 @@ impl MarkdownTabState {
         media.revalidate_files(&keys, waker);
     }
 
-    /// Headless dump of the media of a tab in Read mode: `{key, state, x, y, w, h}` per media
-    /// element of the document, the rectangle in document pixels. Empty outside Read mode
-    /// and without a layout. `state` is `pending`, `ready` or `failed:<MediaError variant>`;
+    /// Headless dump of the media of a tab in Read mode: `{key, state, texture, x, y, w, h}`
+    /// per media element of the document, the rectangle in document pixels. Empty outside
+    /// Read mode and without a layout. `state` is `pending`, `ready` or
+    /// `failed:<MediaError variant>`; `texture` is true when the element is drawn as a picture
+    /// (a `ready` element whose texture was evicted is drawn as a frame until it reloads);
     /// a key the cache has not been asked for yet counts as `pending`. An element without a
     /// media rectangle (a failed Mermaid block is drawn as a code block) has no x/y/w/h
     /// (`null`).
@@ -142,7 +144,9 @@ impl MarkdownTabState {
             .map(|item| {
                 let key = &item.key;
                 let rect = rects.iter().find(|(rect_key, _)| *rect_key == key).map(|(_, rect)| *rect);
-                let state = match media.entry(key) {
+                let entry = media.entry(key);
+                let texture = matches!(entry, MediaEntryView::Ready { texture: Some(_), .. });
+                let state = match entry {
                     MediaEntryView::Unknown | MediaEntryView::Pending { .. } => "pending".to_string(),
                     MediaEntryView::Ready { .. } => "ready".to_string(),
                     MediaEntryView::Failed(error) => {
@@ -154,6 +158,7 @@ impl MarkdownTabState {
                 serde_json::json!({
                     "key": key.dump_name(),
                     "state": state,
+                    "texture": texture,
                     "x": rect.map(|rect| rect[0]),
                     "y": rect.map(|rect| rect[1]),
                     "w": rect.map(|rect| rect[2]),
@@ -176,7 +181,34 @@ impl MarkdownTabState {
             })
             .collect()
     }
+
+    /// Media elements outside `[top, bottom]` but within `margin` of it, with their prefetch
+    /// rank (`prefetch_rank`: distance to the viewport, doubled behind the scroll direction).
+    fn near_media(
+        &self,
+        top: f32,
+        bottom: f32,
+        margin: f32,
+        direction: f32,
+    ) -> impl Iterator<Item = (&MediaKey, f32)> + '_ {
+        self.read_layout.media_blocks().filter_map(move |(key, [_, y, _, h])| {
+            let (distance, above) = if y + h <= top {
+                (top - (y + h), true)
+            } else if y >= bottom {
+                (y - bottom, false)
+            } else {
+                return None;
+            };
+            (distance <= margin).then(|| (key, prefetch_rank(distance, above, direction)))
+        })
+    }
 }
+
+/// Media within this many viewport heights of the viewport are prefetch candidates; the cache
+/// takes them nearest first only while their textures fit its byte bound
+/// (`NEAR_TEXTURE_BUDGET`), so on a large monitor the bytes, not the screens, limit the zone.
+/// Eight heights ahead are ~1 s of lead at a fast wheel flick (~10 000 px/s on 1440 px).
+const MEDIA_PREFETCH_VIEWPORTS: f32 = 8.0;
 
 impl App {
     fn markdown_read_active(&self) -> bool {
@@ -204,6 +236,7 @@ impl App {
         let waker = self.ui_waker.clone();
         self.markdown_media.poll(&waker);
         let mut visible = Vec::new();
+        let mut view = None;
         if self.markdown_read_active()
             && let Some((width, height, scale)) = self
                 .renderer
@@ -211,13 +244,27 @@ impl App {
                 .map(|renderer| (renderer.width, renderer.height, renderer.scale_factor))
         {
             let content_width = self.markdown_read_content_width_for(width, scale);
-            visible = self.markdown_media_layout_visible(content_width, scale, height, &waker);
+            if let Some(shown) = self.markdown_media_layout_visible(content_width, scale, height, &waker) {
+                visible = shown;
+                let top = self.scroll_y.current;
+                let ahead = self.scroll_y.target - top;
+                let direction = if ahead.abs() < 0.5 { 0.0 } else { ahead.signum() };
+                view = Some((top, top + height, height * MEDIA_PREFETCH_VIEWPORTS, direction));
+            }
             self.apply_pending_markdown_anchor();
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        if self.markdown_media.prepare_gpu(renderer, &visible, &waker)
+        // A handful of borrowed keys per frame, sorted so the cache takes the nearest first.
+        let mut near: Vec<(&MediaKey, f32)> = match view {
+            Some((top, bottom, margin, direction)) => {
+                self.markdown.near_media(top, bottom, margin, direction).collect()
+            }
+            None => Vec::new(),
+        };
+        near.sort_by(|a, b| a.1.total_cmp(&b.1));
+        if self.markdown_media.prepare_gpu(renderer, &visible, near.into_iter(), &waker)
             && let Some(window) = self.window.as_ref()
         {
             window.request_redraw();
@@ -230,14 +277,10 @@ impl App {
         scale: f32,
         view_height: f32,
         waker: &UiWaker,
-    ) -> Vec<VisibleMedia> {
+    ) -> Option<Vec<VisibleMedia>> {
         let version = self.editor.version;
-        let Some(doc_dir) = self.markdown_doc_dir() else {
-            return Vec::new();
-        };
-        if self.markdown.read_document(version).is_none() {
-            return Vec::new();
-        }
+        let doc_dir = self.markdown_doc_dir()?;
+        self.markdown.read_document(version)?;
         self.markdown.read_layout.set_media_dir(&doc_dir);
         self.markdown.request_media(
             &mut self.markdown_media,
@@ -247,9 +290,7 @@ impl App {
             scale,
             waker,
         );
-        let Some(renderer) = self.renderer.as_mut() else {
-            return Vec::new();
-        };
+        let renderer = self.renderer.as_mut()?;
         let content_width = content_width.max(1.0);
         // A geometry change ends the gestures that belong to the old layout; a change of
         // the media alone (`media_gen`) must not.
@@ -269,10 +310,10 @@ impl App {
             version,
             content_width,
         ) {
-            return Vec::new();
+            return None;
         }
         let top = self.scroll_y.current;
-        self.markdown.visible_media(top, top + view_height)
+        Some(self.markdown.visible_media(top, top + view_height))
     }
 
     /// Revalidation trigger (watcher tick, activation of a Markdown tab, reopen of a file):

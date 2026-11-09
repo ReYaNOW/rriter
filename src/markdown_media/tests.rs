@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::texture_budget::{
-    BudgetItem, QueueEntryState, QueueFacts, enqueue_indices, eviction_plan, needs_rerender,
-    should_trim_disk_cache, texture_totals, upload_order,
+    BudgetItem, QueueEntryState, QueueFacts, UploadRank, enqueue_indices, eviction_plan,
+    far_load_may_start, far_upload_fits, native_raster_suffices, near_fits, needs_rerender,
+    next_to_start, prefetch_rank, should_trim_disk_cache, texture_totals,
+    upload_order,
 };
 use super::*;
 
@@ -78,17 +80,23 @@ struct FakeHost {
     uploaded: Vec<(u32, u32)>,
     deleted: Vec<glow::Texture>,
     refuse_upload: bool,
+    /// Bytes of every strip, in order.
+    strips: Vec<usize>,
 }
 
 impl TextureHost for FakeHost {
-    fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
-        assert_eq!(rgba.len(), w as usize * h as usize * 4);
+    fn create_rgba_texture(&mut self, w: u32, h: u32) -> Option<glow::Texture> {
         if self.refuse_upload {
             return None;
         }
         self.next += 1;
         self.uploaded.push((w, h));
         std::num::NonZeroU32::new(self.next).map(glow::NativeTexture)
+    }
+
+    fn upload_rgba_rows(&mut self, _texture: glow::Texture, w: u32, _y: u32, rows: u32, rgba: &[u8]) {
+        assert_eq!(rgba.len(), w as usize * rows as usize * 4);
+        self.strips.push(rgba.len());
     }
 
     fn delete_texture(&mut self, texture: glow::Texture) {
@@ -180,6 +188,11 @@ fn at_most_three_loads_run_and_slots_are_held_until_upload() {
     for req in &reqs {
         media.request(req.clone(), &waker);
     }
+    // Before any frame every key is far: one slot stays free for visible and near keys.
+    wait_until("two far loads to start", || started.load(Ordering::SeqCst) == 2);
+    let mut host = FakeHost::default();
+    let keys: Vec<VisibleMedia> = reqs.iter().map(|req| visible(&req.key, 400)).collect();
+    media.prepare_with(&mut host, &keys, &waker);
     wait_until("three loads to start", || started.load(Ordering::SeqCst) == 3);
     std::thread::sleep(Duration::from_millis(30));
     assert_eq!(started.load(Ordering::SeqCst), 3, "a 4th load started while 3 slots were busy");
@@ -192,10 +205,8 @@ fn at_most_three_loads_run_and_slots_are_held_until_upload() {
     media.poll(&waker);
     assert_eq!(media.stats().loads_started, 3, "slots were freed before the upload");
 
-    let mut host = FakeHost::default();
-    let keys: Vec<VisibleMedia> = reqs.iter().map(|req| visible(&req.key, 400)).collect();
     media.prepare_with(&mut host, &keys, &waker);
-    assert_eq!(host.uploaded.len(), 2, "at most two uploads per frame");
+    assert_eq!(host.uploaded.len(), MAX_UPLOADS_PER_FRAME, "at most {MAX_UPLOADS_PER_FRAME} uploads per frame");
     pump(&mut media, &waker, &mut host, &keys, |m| reqs.iter().all(|r| has_texture(m, &r.key)));
     assert_eq!(media.stats().loads_started, 5);
     assert!(media.pending_uploads.is_empty() && media.tasks.is_empty());
@@ -640,7 +651,14 @@ fn request_does_not_requeue_an_evicted_invisible_key() {
     }
     std::thread::sleep(Duration::from_millis(20));
     media.poll(&waker);
-    assert_eq!(media.stats().loads_started, loads + 1, "the visible evicted key loads once");
+    // 480 MiB of pixels fit the RAM cache: the texture comes back by an upload, no load.
+    assert_eq!(media.stats().loads_started, loads, "the visible evicted key is restored from RAM");
+    let uploads = host.uploaded.len();
+    for _ in 0..10 {
+        media.poll(&waker);
+        media.prepare_with(&mut host, &shown, &waker);
+    }
+    assert_eq!(host.uploaded.len(), uploads, "restored exactly once");
 }
 
 #[test]
@@ -673,7 +691,105 @@ fn rerender_requests_display_width_once() {
 }
 
 fn facts(visible: bool, state: QueueEntryState) -> QueueFacts {
-    QueueFacts { visible, state }
+    QueueFacts { visible, near: false, state }
+}
+
+#[test]
+fn near_idle_key_is_queued_like_a_visible_one() {
+    let near = |state| QueueFacts { visible: false, near: true, state };
+    let all = [
+        near(QueueEntryState::Idle),
+        near(QueueEntryState::Textured),
+        near(QueueEntryState::InFlight),
+        near(QueueEntryState::Failed),
+        near(QueueEntryState::Queued),
+        facts(false, QueueEntryState::Idle),
+    ];
+    assert_eq!(enqueue_indices(&all), vec![0], "only the idle near key; a far key stays out");
+}
+
+#[test]
+fn next_load_is_visible_first_then_the_nearest_and_far_loads_leave_a_slot() {
+    let pick = |ranks: &[Option<f32>]| next_to_start(ranks.iter().copied());
+    assert_eq!(pick(&[None, Some(300.0), Some(-1.0), Some(-1.0)]), Some(2), "first visible in queue order");
+    assert_eq!(pick(&[None, Some(300.0), Some(40.0), Some(900.0)]), Some(2), "nearest prefetch key");
+    assert_eq!(pick(&[None, None]), None, "only far keys: the caller decides");
+    assert_eq!(pick(&[]), None);
+    assert!(far_load_may_start(0, MAX_SLOTS));
+    assert!(far_load_may_start(MAX_SLOTS - 2, MAX_SLOTS));
+    assert!(!far_load_may_start(MAX_SLOTS - 1, MAX_SLOTS), "the last slot is kept for near keys");
+}
+
+#[test]
+fn far_result_is_uploaded_only_within_the_invisible_budget() {
+    let mib = 1024 * 1024;
+    assert!(far_upload_fits(100 * mib, 28 * mib, 128 * mib));
+    assert!(!far_upload_fits(120 * mib, 9 * mib, 128 * mib));
+    assert!(!far_upload_fits(u64::MAX, 1, 128 * mib), "no overflow");
+}
+
+/// Like `pump`, with keys inside the prefetch margin.
+fn pump_near(
+    media: &mut MarkdownMedia,
+    waker: &UiWaker,
+    host: &mut FakeHost,
+    visible: &[VisibleMedia],
+    near: &[(MediaKey, f32)],
+    mut done: impl FnMut(&MarkdownMedia) -> bool,
+) {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        media.poll(waker);
+        media.prepare_frame(host, visible, near.iter().map(|(key, distance)| (key, *distance)), waker);
+        assert!(media.slots_used() <= MAX_SLOTS, "more than {MAX_SLOTS} slots in use");
+        if done(media) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "timed out pumping the cache");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn near_keys_are_prefetched_kept_and_drawn_on_the_frame_they_become_visible() {
+    const IMAGES: u64 = 30;
+    let waker = UiWaker::counting();
+    // 2048 x 2048 x 4 = 16 MiB each, 480 MiB in total: far over the 128 MiB budget.
+    let mut media = MarkdownMedia::with_loader(Arc::new(|_| Ok(pixels((2048.0, 2048.0), (2048, 2048)))));
+    let reqs: Vec<MediaRequest> = (0..IMAGES).map(|n| mermaid_req(n, 2048)).collect();
+    for req in &reqs {
+        media.request(req.clone(), &waker);
+    }
+    let key = |n: usize| reqs[n].key.clone();
+    let mut host = FakeHost::default();
+    // Viewport on image 10; 9 and 11 are within the margin, 12 further down.
+    let shown = [visible(&key(10), 2048)];
+    let near = [(key(11), 10.0), (key(9), 10.0), (key(12), 900.0)];
+    pump_near(&mut media, &waker, &mut host, &shown, &near, |m| {
+        m.tasks.is_empty() && !m.uploads_waiting() && m.queue.is_empty()
+    });
+    for n in 9..=12 {
+        assert!(has_texture(&media, &key(n)), "image {n} is prefetched");
+    }
+    let stats = media.stats();
+    assert!(stats.texture_bytes - stats.visible_texture_bytes <= INVISIBLE_TEXTURE_BUDGET, "{stats:?}");
+    assert!(
+        (host.uploaded.len() as u64) < IMAGES,
+        "far results over the budget are not uploaded: {} uploads",
+        host.uploaded.len()
+    );
+
+    // One step down: 11 is visible and drawn at once, 10 went up into the margin and stays.
+    let loads = media.stats().loads_started;
+    let shown = [visible(&key(11), 2048)];
+    let near = [(key(10), 10.0), (key(12), 10.0), (key(13), 900.0)];
+    media.prepare_frame(&mut host, &shown, near.iter().map(|(key, distance)| (key, *distance)), &waker);
+    assert!(has_texture(&media, &key(11)), "the image entering the view is drawn on that frame");
+    pump_near(&mut media, &waker, &mut host, &shown, &near, |m| has_texture(m, &key(13)) && m.tasks.is_empty());
+    for n in 10..=13 {
+        assert!(has_texture(&media, &key(n)), "image {n} kept or prefetched");
+    }
+    assert!(media.stats().loads_started <= loads + 1, "only the new near key loads");
 }
 
 #[test]
@@ -703,8 +819,126 @@ fn evicted_and_visible_again_key_is_queued_exactly_once_in_five_cycles() {
     assert_eq!(queued_times, 1);
 }
 
-fn item(mib: u64, visible: bool, last_visible_frame: u64) -> BudgetItem {
-    BudgetItem { bytes: mib * 1024 * 1024, visible, last_visible_frame }
+fn item(mib: u64, visible: bool, last_wanted_frame: u64) -> BudgetItem {
+    BudgetItem { bytes: mib * 1024 * 1024, visible, near: false, last_wanted_frame }
+}
+
+#[test]
+fn prefetch_zone_is_bounded_by_bytes_and_prefers_the_scroll_direction() {
+    let mib = 1024 * 1024;
+    assert!(near_fits(0, 300 * mib, 64 * mib), "the nearest key always joins");
+    assert!(near_fits(40 * mib, 24 * mib, 64 * mib));
+    assert!(!near_fits(40 * mib, 25 * mib, 64 * mib));
+    // Scrolling down: 100 px above is behind (200), 150 px below is ahead (150).
+    assert_eq!(prefetch_rank(100.0, true, 1.0), 200.0);
+    assert_eq!(prefetch_rank(150.0, false, 1.0), 150.0);
+    assert_eq!(prefetch_rank(150.0, false, -1.0), 300.0);
+    assert_eq!(prefetch_rank(100.0, true, 0.0), 100.0, "still: both sides alike");
+}
+
+#[test]
+fn a_large_texture_is_uploaded_in_strips_and_shown_only_when_complete() {
+    let waker = UiWaker::counting();
+    // 2048 x 2048 x 4 = 16 MiB: several strips of at most UPLOAD_BYTES_PER_FRAME.
+    let mut media = MarkdownMedia::with_loader(Arc::new(|_| Ok(pixels((2048.0, 2048.0), (2048, 2048)))));
+    let req = mermaid_req(1, 2048);
+    media.request(req.clone(), &waker);
+    let shown = [visible(&req.key, 2048)];
+    poll_until(&mut media, &waker, |m| m.pending_uploads.len() == 1);
+    let mut host = FakeHost::default();
+    let strips = 2048usize.div_ceil(UPLOAD_BYTES_PER_FRAME / (2048 * 4));
+    assert!(strips > 1);
+    let mut frames = 0;
+    while !has_texture(&media, &req.key) {
+        media.prepare_with(&mut host, &shown, &waker);
+        frames += 1;
+        assert!(frames <= strips, "one strip per frame, the texture only when complete");
+    }
+    assert_eq!(frames, strips);
+    assert_eq!(host.strips.len(), strips);
+    assert!(host.strips.iter().all(|&bytes| bytes <= UPLOAD_BYTES_PER_FRAME), "{:?}", host.strips);
+    assert_eq!(host.strips.iter().sum::<usize>(), 2048 * 2048 * 4);
+}
+
+#[test]
+fn ram_cache_restores_evicted_textures_within_its_bound() {
+    const IMAGES: u64 = 40;
+    let waker = UiWaker::counting();
+    // 40 x 16 MiB = 640 MiB of pixels: over both the texture and the RAM bound.
+    let mut media = MarkdownMedia::with_loader(Arc::new(|_| Ok(pixels((2048.0, 2048.0), (2048, 2048)))));
+    let reqs: Vec<MediaRequest> = (0..IMAGES).map(|n| mermaid_req(n, 2048)).collect();
+    for req in &reqs {
+        media.request(req.clone(), &waker);
+    }
+    let mut host = FakeHost::default();
+    for req in &reqs {
+        let shown = [visible(&req.key, 2048)];
+        pump(&mut media, &waker, &mut host, &shown, |m| has_texture(m, &req.key));
+    }
+    let stats = media.stats();
+    assert!(stats.ram_bytes <= RAM_CACHE_BUDGET + stats.visible_texture_bytes, "{stats:?}");
+    assert!(stats.texture_bytes - stats.visible_texture_bytes <= INVISIBLE_TEXTURE_BUDGET, "{stats:?}");
+    // Back to an image evicted from the GPU but recent enough for RAM: no new load.
+    let loads = stats.loads_started;
+    let back = &reqs[IMAGES as usize - 15].key;
+    assert!(!has_texture(&media, back), "evicted from the GPU");
+    pump(&mut media, &waker, &mut host, &[visible(back, 2048)], |m| has_texture(m, back));
+    assert_eq!(media.stats().loads_started, loads, "restored from RAM");
+    // The oldest one left RAM too: it loads again.
+    let first = &reqs[0].key;
+    pump(&mut media, &waker, &mut host, &[visible(first, 2048)], |m| has_texture(m, first));
+    assert_eq!(media.stats().loads_started, loads + 1, "beyond the RAM bound a key is decoded again");
+}
+
+#[test]
+fn a_native_bitmap_is_scaled_by_the_gpu_instead_of_re_rendered() {
+    // 1440 px wide shot drawn 1920 (x1.333) or 2880 (x2) wide: the native texture serves.
+    assert!(native_raster_suffices((1440.0, 900.0), 1.333, 1920));
+    assert!(native_raster_suffices((1440.0, 900.0), 2.0, 2880));
+    // A narrow column shrinks it below `NATIVE_MIN_SHRINK`: a CPU-resized raster is due.
+    assert!(!native_raster_suffices((1440.0, 900.0), 1.0, 600));
+}
+
+#[test]
+fn near_keys_beyond_the_byte_bound_are_not_prefetched() {
+    let waker = UiWaker::counting();
+    // 2048 x 2048 x 4 = 16 MiB each: four fit the 64 MiB near bound.
+    let mut media = MarkdownMedia::with_loader(Arc::new(|_| Ok(pixels((2048.0, 2048.0), (2048, 2048)))));
+    let reqs: Vec<MediaRequest> = (0..8).map(|n| mermaid_req(n, 2048)).collect();
+    for req in &reqs {
+        media.request(req.clone(), &waker);
+    }
+    let mut host = FakeHost::default();
+    // Natural sizes known for all; then textures and RAM pixels are dropped, as after a
+    // long scroll elsewhere.
+    pump_near(&mut media, &waker, &mut host, &[], &[], |m| {
+        m.tasks.is_empty() && !m.uploads_waiting() && m.queue.is_empty()
+    });
+    for req in &reqs {
+        if let Some(entry) = media.entries.get_mut(&req.key) {
+            entry.ram = None;
+            if let Some((texture, _, _)) = entry.texture.take() {
+                media.to_free.push(texture);
+            }
+        }
+    }
+    let near: Vec<(MediaKey, f32)> = reqs.iter().enumerate().map(|(n, req)| (req.key.clone(), n as f32 * 100.0)).collect();
+    pump_near(&mut media, &waker, &mut host, &[], &near, |m| {
+        (0..4).all(|n| has_texture(m, &reqs[n].key)) && m.tasks.is_empty() && m.queue.is_empty() && !m.uploads_waiting()
+    });
+    for req in &reqs[4..] {
+        assert!(!has_texture(&media, &req.key), "a key past the byte bound is not prefetched");
+    }
+}
+
+#[test]
+fn near_textures_are_kept_but_count_against_the_invisible_budget() {
+    let near = |mib: u64, frame: u64| BudgetItem { near: true, ..item(mib, false, frame) };
+    // 180 MiB invisible, of it 100 MiB near: only far ones go, never-wanted first.
+    let items = [near(50, 9), item(40, false, 4), near(50, 9), item(30, false, 0), item(10, false, 7)];
+    assert_eq!(eviction_plan(&items, 128 * 1024 * 1024), vec![3, 1]);
+    // Near textures alone over the budget stay.
+    assert!(eviction_plan(&[near(100, 9), near(100, 9)], 128 * 1024 * 1024).is_empty());
 }
 
 #[test]
@@ -755,9 +989,11 @@ fn totals_sum_texture_bytes_over_a_slice() {
 }
 
 #[test]
-fn uploads_take_visible_first_and_at_most_the_limit() {
-    assert_eq!(upload_order(&[false, true, false, true], 2), vec![1, 3]);
-    assert_eq!(upload_order(&[false, false, true], 2), vec![2, 0]);
+fn uploads_take_visible_then_near_first_and_at_most_the_limit() {
+    use UploadRank::{Far, Near, Visible};
+    assert_eq!(upload_order(&[Far, Visible, Far, Visible], 2), vec![1, 3]);
+    assert_eq!(upload_order(&[Far, Far, Visible], 2), vec![2, 0]);
+    assert_eq!(upload_order(&[Far, Near, Visible, Near], 3), vec![2, 1, 3]);
     assert!(upload_order(&[], 2).is_empty());
 }
 

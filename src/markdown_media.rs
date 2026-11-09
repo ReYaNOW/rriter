@@ -23,9 +23,12 @@ mod tests;
 
 use fetch::{load_media, trim_disk_cache};
 use texture_budget::{
-    BudgetItem, QueueEntryState, QueueFacts, INVISIBLE_TEXTURE_BUDGET, enqueue_indices,
-    eviction_plan, needs_rerender, should_trim_disk_cache, texture_totals, upload_order,
+    BudgetItem, QueueEntryState, QueueFacts, INVISIBLE_TEXTURE_BUDGET, NEAR_TEXTURE_BUDGET,
+    UploadRank, enqueue_indices, eviction_plan, far_load_may_start, far_upload_fits,
+    native_raster_suffices, near_fits, needs_rerender, next_to_start, should_enqueue,
+    should_trim_disk_cache, texture_totals, upload_order,
 };
+pub(crate) use texture_budget::prefetch_rank;
 
 pub(crate) use render_helper::run_media_helper_if_requested;
 
@@ -195,7 +198,17 @@ pub(crate) struct FetchEnv {
 /// At most this many `load_media` tasks run at once (= helper processes). A slot stays
 /// taken until the result is uploaded to the GPU or discarded.
 const MAX_SLOTS: usize = 3;
-const MAX_UPLOADS_PER_FRAME: usize = 2;
+/// One upload job per frame (`MarkdownMedia::upload_pending`); prefetch keeps uploads off the
+/// critical path, so this is no visible delay.
+const MAX_UPLOADS_PER_FRAME: usize = 1;
+/// Rows sent to the GPU per frame. Measured on the scroll bench at 2560x1440: 6 MiB strips
+/// cost ~3 ms of draw CPU (p99 3.95–4.04 ms against the 4.17 ms budget at 240 Hz), so a
+/// strip is 2 MiB (~1 ms); a 1440 x 900 screenshot takes three frames, a tall one ~13, both
+/// well inside the prefetch lead.
+const UPLOAD_BYTES_PER_FRAME: usize = 2 * 1024 * 1024;
+/// Decoded pixels kept in RAM after their upload (and for far results without a texture), on
+/// top of those of the visible keys; least recently wanted go first.
+const RAM_CACHE_BUDGET: u64 = 512 * 1024 * 1024;
 const DISK_CACHE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_FETCH_BYTES: u64 = 20 * 1024 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -228,6 +241,9 @@ pub(crate) struct MediaStats {
     pub texture_bytes: u64,
     /// The same over the keys visible in the last `prepare_gpu`.
     pub visible_texture_bytes: u64,
+    /// Decoded pixels kept in RAM (`RAM_CACHE_BUDGET`), so an evicted texture comes back
+    /// with an upload only.
+    pub ram_bytes: u64,
 }
 
 enum EntryState {
@@ -241,6 +257,12 @@ struct Entry {
     state: EntryState,
     texture: Option<(glow::Texture, u32, u32)>,
     last_visible_frame: u64,
+    /// Last frame the key was within the prefetch margin, and its distance to the viewport
+    /// then (document px); the nearest queued key loads first.
+    last_near_frame: u64,
+    near_distance: f32,
+    /// The texture is a bitmap at its own pixels, scaled by the GPU (`native_raster_ok`).
+    native_raster: bool,
     /// A task is running or its pixels wait for the upload; the slot is held meanwhile.
     in_flight: bool,
     /// Unique per entry; a task result carrying another value is stale and dropped.
@@ -249,8 +271,11 @@ struct Entry {
     /// Last request, reused when the texture is evicted or has to be re-rendered.
     request: MediaRequest,
     queued: bool,
-    /// Decoded pixels between the end of the task and the upload.
+    /// Decoded pixels between the end of the task (or a RAM restore) and the end of the upload.
     pending: Option<MediaPixels>,
+    /// Decoded pixels of the last upload (or of a far result left without a texture), kept
+    /// within `RAM_CACHE_BUDGET`: an evicted texture is restored without a new decode.
+    ram: Option<MediaPixels>,
     /// Display width of the last re-render, so one size is never re-rendered twice in a row.
     rerendered_for: Option<u32>,
 }
@@ -261,15 +286,35 @@ struct Task {
     job: OneShot<LoadResult>,
 }
 
+/// A texture filled `UPLOAD_BYTES_PER_FRAME` of rows per frame from `Entry::pending`; the
+/// entry keeps drawing its old texture (or its frame) until the last strip is in.
+struct StripUpload {
+    key: MediaKey,
+    generation: u64,
+    texture: glow::Texture,
+    w: u32,
+    h: u32,
+    next_row: u32,
+    /// Restored from RAM: holds no load slot.
+    from_ram: bool,
+}
+
 /// The GPU side of `prepare_gpu`; `Renderer` in the app, a fake in tests.
 trait TextureHost {
-    fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture>;
+    /// An allocated, unfilled RGBA8 texture.
+    fn create_rgba_texture(&mut self, w: u32, h: u32) -> Option<glow::Texture>;
+    /// Writes `rows` full rows from row `y`; `rgba` holds exactly those rows.
+    fn upload_rgba_rows(&mut self, texture: glow::Texture, w: u32, y: u32, rows: u32, rgba: &[u8]);
     fn delete_texture(&mut self, texture: glow::Texture);
 }
 
 impl TextureHost for Renderer {
-    fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
-        Renderer::upload_rgba(self, w, h, rgba)
+    fn create_rgba_texture(&mut self, w: u32, h: u32) -> Option<glow::Texture> {
+        Renderer::create_rgba_texture(self, w, h)
+    }
+
+    fn upload_rgba_rows(&mut self, texture: glow::Texture, w: u32, y: u32, rows: u32, rgba: &[u8]) {
+        Renderer::upload_rgba_rows(self, texture, w, y, rows, rgba)
     }
 
     fn delete_texture(&mut self, texture: glow::Texture) {
@@ -289,6 +334,9 @@ pub(crate) struct MarkdownMedia {
     tasks: Vec<Task>,
     /// Keys whose pixels wait for the upload, in arrival order; each holds a slot.
     pending_uploads: Vec<MediaKey>,
+    /// Keys whose RAM pixels wait for the upload (`Entry::ram` moved to `pending`); no slot.
+    restores: Vec<MediaKey>,
+    uploading: Option<StripUpload>,
     to_free: Vec<glow::Texture>,
     revalidation: Option<OneShot<Vec<(PathKey, u64)>>>,
     trim_task: Option<OneShot<()>>,
@@ -335,6 +383,8 @@ impl MarkdownMedia {
             queue: VecDeque::new(),
             tasks: Vec::new(),
             pending_uploads: Vec::new(),
+            restores: Vec::new(),
+            uploading: None,
             to_free: Vec::new(),
             revalidation: None,
             trim_task: None,
@@ -372,13 +422,19 @@ impl MarkdownMedia {
             .map(|entry| self.budget_item(entry))
             .collect();
         let (texture_bytes, visible_texture_bytes) = texture_totals(&items);
-        MediaStats { loads_started: self.loads_started, texture_bytes, visible_texture_bytes }
+        let ram_bytes = self.entries.values().map(ram_bytes).sum();
+        MediaStats { loads_started: self.loads_started, texture_bytes, visible_texture_bytes, ram_bytes }
+    }
+
+    /// Pixels still waiting for (or in the middle of) an upload, so another frame is due.
+    fn uploads_waiting(&self) -> bool {
+        !self.pending_uploads.is_empty() || !self.restores.is_empty() || self.uploading.is_some()
     }
 
     /// Asks for a key. Unknown keys become `Pending` and join the queue. A known key only
     /// stores the latest request (scale, column width), so the next render and the re-render
-    /// check use the current target; it is queued again by `prepare_gpu` when it is visible,
-    /// never from here (an evicted invisible image must not be rendered again).
+    /// check use the current target; it is queued again by `prepare_gpu` when it is visible
+    /// or near, never from here (an evicted far image must not be rendered again).
     pub(crate) fn request(&mut self, req: MediaRequest, waker: &UiWaker) {
         if let Some(entry) = self.entries.get_mut(&req.key) {
             // A queued re-render already carries the width it was queued for.
@@ -423,20 +479,35 @@ impl MarkdownMedia {
         }
         self.start_tasks(waker);
         // A same-size re-render or reload does not bump media_gen but still needs a frame to upload.
-        self.media_gen != before || !self.pending_uploads.is_empty()
+        self.media_gen != before || self.uploads_waiting()
     }
 
-    /// Frame step on the GPU side. True while another frame is needed for pending uploads.
-    pub(crate) fn prepare_gpu(
+    /// Frame step on the GPU side. `near` are the keys outside the viewport but within the
+    /// prefetch margin, with their distance to it: they load (nearest first) and keep their
+    /// textures, so they are drawn on the frame they scroll into view. True while another
+    /// frame is needed for pending uploads.
+    pub(crate) fn prepare_gpu<'k>(
         &mut self,
         renderer: &mut Renderer,
         visible: &[VisibleMedia],
+        near: impl Iterator<Item = (&'k MediaKey, f32)>,
         waker: &UiWaker,
     ) -> bool {
-        self.prepare_with(renderer, visible, waker)
+        self.prepare_frame(renderer, visible, near, waker)
     }
 
+    #[cfg(test)]
     fn prepare_with(&mut self, host: &mut dyn TextureHost, visible: &[VisibleMedia], waker: &UiWaker) -> bool {
+        self.prepare_frame(host, visible, std::iter::empty(), waker)
+    }
+
+    fn prepare_frame<'k>(
+        &mut self,
+        host: &mut dyn TextureHost,
+        visible: &[VisibleMedia],
+        near: impl Iterator<Item = (&'k MediaKey, f32)>,
+        waker: &UiWaker,
+    ) -> bool {
         let media_gen = self.media_gen;
         for texture in self.to_free.drain(..) {
             host.delete_texture(texture);
@@ -447,11 +518,13 @@ impl MarkdownMedia {
                 entry.last_visible_frame = self.frame;
             }
         }
+        self.mark_near(near);
         self.upload_pending(host);
         self.queue_visible(visible);
         self.evict_over_budget();
+        self.evict_ram_over_budget();
         self.start_tasks(waker);
-        !self.pending_uploads.is_empty() || self.media_gen != media_gen
+        self.uploads_waiting() || self.media_gen != media_gen
     }
 
     /// Drops the entry of a changed or vanished file. A task still running for it is
@@ -466,6 +539,8 @@ impl MarkdownMedia {
         }
         self.queue.retain(|queued| *queued != key);
         self.pending_uploads.retain(|pending| *pending != key);
+        self.restores.retain(|pending| *pending != key);
+        // A strip upload of the removed entry is dropped by `continue_upload`.
         self.media_gen += 1;
     }
 
@@ -522,19 +597,24 @@ impl MarkdownMedia {
             state: EntryState::Pending,
             texture: None,
             last_visible_frame: 0,
+            last_near_frame: 0,
+            near_distance: 0.0,
+            native_raster: false,
             in_flight: false,
             generation: self.next_generation,
             stamp: None,
             request,
             queued: false,
             pending: None,
+            ram: None,
             rerendered_for: None,
         }
     }
 
-    fn queue_facts(entry: &Entry, visible: bool) -> QueueFacts {
+    fn queue_facts(entry: &Entry, visible: bool, near: bool) -> QueueFacts {
         QueueFacts {
             visible,
+            near,
             state: if entry.texture.is_some() {
                 QueueEntryState::Textured
             } else if entry.in_flight {
@@ -553,29 +633,69 @@ impl MarkdownMedia {
         self.frame > 0 && entry.last_visible_frame == self.frame
     }
 
+    fn is_near(&self, entry: &Entry) -> bool {
+        self.frame > 0 && entry.last_near_frame == self.frame
+    }
+
     fn budget_item(&self, entry: &Entry) -> BudgetItem {
         BudgetItem {
-            bytes: entry.texture.map_or(0, |(_, w, h)| u64::from(w) * u64::from(h) * 4),
+            bytes: texture_bytes(entry),
             visible: self.is_visible(entry),
-            last_visible_frame: entry.last_visible_frame,
+            near: self.is_near(entry),
+            last_wanted_frame: entry.last_visible_frame.max(entry.last_near_frame),
+        }
+    }
+
+    /// Marks the keys of the prefetch zone of this frame, nearest first (`near` comes sorted by
+    /// `prefetch_rank`), while their textures fit `NEAR_TEXTURE_BUDGET` (`near_fits`), and
+    /// queues those without a texture. Allocates only for a key that joins the queue.
+    fn mark_near<'k>(&mut self, near: impl Iterator<Item = (&'k MediaKey, f32)>) {
+        let mut held = 0u64;
+        for (key, distance) in near {
+            let Some(entry) = self.entries.get_mut(key) else {
+                continue;
+            };
+            let bytes = expected_texture_bytes(entry);
+            if !near_fits(held, bytes, NEAR_TEXTURE_BUDGET) {
+                break;
+            }
+            held = held.saturating_add(bytes).max(1);
+            entry.last_near_frame = self.frame;
+            entry.near_distance = distance;
+            if should_enqueue(&Self::queue_facts(entry, false, true)) {
+                enqueue_or_restore(entry, key, &mut self.queue, &mut self.restores);
+            }
         }
     }
 
     fn slots_used(&self) -> usize {
-        self.tasks.len() + self.pending_uploads.len()
+        let uploading = self.uploading.as_ref().is_some_and(|upload| !upload.from_ram);
+        self.tasks.len() + self.pending_uploads.len() + usize::from(uploading)
     }
 
-    /// Next key to load: the first visible one in queue order, else the oldest.
+    /// Next key to load: the first visible one in queue order, else the nearest prefetch key
+    /// (`next_to_start`), else the oldest while a slot may go to a far key.
     fn pop_next_to_start(&mut self) -> Option<MediaKey> {
+        let allow_far = far_load_may_start(self.slots_used(), MAX_SLOTS);
         let entries = &self.entries;
         self.queue
             .retain(|key| entries.get(key).is_some_and(|entry| entry.queued && !entry.in_flight));
-        let position = self
-            .queue
-            .iter()
-            .position(|key| entries.get(key).is_some_and(|entry| self.is_visible(entry)))
-            .unwrap_or(0);
-        self.queue.remove(position)
+        let position = next_to_start(self.queue.iter().map(|key| {
+            entries.get(key).and_then(|entry| {
+                if self.is_visible(entry) {
+                    Some(-1.0)
+                } else if self.is_near(entry) {
+                    Some(entry.near_distance)
+                } else {
+                    None
+                }
+            })
+        }));
+        match position {
+            Some(position) => self.queue.remove(position),
+            None if allow_far => self.queue.pop_front(),
+            None => None,
+        }
     }
 
     fn start_tasks(&mut self, waker: &UiWaker) {
@@ -643,6 +763,18 @@ impl MarkdownMedia {
                 }
                 entry.state = EntryState::Ready;
                 entry.stamp = pixels.stamp;
+                // Only a bitmap decoder returns the natural pixels when the target differs
+                // (SVG and Mermaid always render at the target size).
+                let raster = (pixels.raster_w, pixels.raster_h);
+                let target = decode::raster_target_size(
+                    pixels.natural_w,
+                    pixels.natural_h,
+                    entry.request.scale,
+                    entry.request.max_raster_w,
+                );
+                entry.native_raster = raster
+                    == (pixels.natural_w.round() as u32, pixels.natural_h.round() as u32)
+                    && raster != target;
                 entry.pending = Some(pixels);
                 self.pending_uploads.push(key.clone());
             }
@@ -680,57 +812,153 @@ impl MarkdownMedia {
         }
     }
 
+    /// One upload job per frame: continue the strip upload in progress, or start the next
+    /// waiting result (visible, then near, then far; `upload_order`) and send its first
+    /// strip. A texture of up to `UPLOAD_BYTES_PER_FRAME` is complete on the frame it starts.
     fn upload_pending(&mut self, host: &mut dyn TextureHost) {
-        if self.pending_uploads.is_empty() {
-            return;
+        if self.uploading.is_none() {
+            self.start_upload(host);
         }
-        let visible: Vec<bool> = self
-            .pending_uploads
-            .iter()
-            .map(|key| self.entries.get(key).is_some_and(|entry| self.is_visible(entry)))
-            .collect();
-        let picked: Vec<MediaKey> = upload_order(&visible, MAX_UPLOADS_PER_FRAME)
-            .into_iter()
-            .map(|index| self.pending_uploads[index].clone())
-            .collect();
-        self.pending_uploads.retain(|key| !picked.contains(key));
-        for key in picked {
+        self.continue_upload(host);
+    }
+
+    fn start_upload(&mut self, host: &mut dyn TextureHost) {
+        while !self.pending_uploads.is_empty() || !self.restores.is_empty() {
+            let rank_of = |key: &MediaKey| match self.entries.get(key) {
+                Some(entry) if self.is_visible(entry) => UploadRank::Visible,
+                Some(entry) if self.is_near(entry) => UploadRank::Near,
+                _ => UploadRank::Far,
+            };
+            let ranks: Vec<UploadRank> = self.pending_uploads.iter().chain(&self.restores).map(rank_of).collect();
+            let Some(&index) = upload_order(&ranks, MAX_UPLOADS_PER_FRAME).first() else {
+                return;
+            };
+            let rank = ranks[index];
+            let from_ram = index >= self.pending_uploads.len();
+            let key = if from_ram {
+                self.restores.remove(index - self.pending_uploads.len())
+            } else {
+                self.pending_uploads.remove(index)
+            };
+            let invisible_bytes: u64 = if rank == UploadRank::Far {
+                self.entries
+                    .values()
+                    .filter(|entry| !self.is_visible(entry))
+                    .map(texture_bytes)
+                    .sum()
+            } else {
+                0
+            };
             let Some(entry) = self.entries.get_mut(&key) else {
                 continue;
             };
             let Some(pixels) = entry.pending.take() else {
+                entry.in_flight = false;
                 continue;
             };
-            entry.in_flight = false;
             let (w, h) = (pixels.raster_w, pixels.raster_h);
+            // A far key stays `Ready` without a texture (its natural size is known), its
+            // pixels go to RAM; it is restored once it comes near.
+            if rank == UploadRank::Far
+                && !far_upload_fits(invisible_bytes, u64::from(w) * u64::from(h) * 4, INVISIBLE_TEXTURE_BUDGET)
+            {
+                entry.in_flight = false;
+                entry.ram = Some(pixels);
+                continue;
+            }
             let size_ok = w > 0
                 && h > 0
                 && (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4))
                     == Some(pixels.rgba.len());
-            if !size_ok {
+            let texture = if size_ok { host.create_rgba_texture(w, h) } else { None };
+            let Some(texture) = texture else {
+                entry.in_flight = false;
                 if entry.texture.is_some() {
                     entry.state = EntryState::Ready;
                 } else {
-                    fail_entry(entry, MediaError::Decode, &mut self.to_free);
+                    let error = if size_ok { MediaError::TooManyPixels } else { MediaError::Decode };
+                    fail_entry(entry, error, &mut self.to_free);
                     self.media_gen += 1;
                 }
                 continue;
+            };
+            entry.pending = Some(pixels);
+            self.uploading = Some(StripUpload {
+                key,
+                generation: entry.generation,
+                texture,
+                w,
+                h,
+                next_row: 0,
+                from_ram,
+            });
+            return;
+        }
+    }
+
+    /// Sends the next `UPLOAD_BYTES_PER_FRAME` of rows; the last strip swaps the texture in
+    /// and moves the pixels to RAM. An entry dropped or reloaded meanwhile loses the upload.
+    fn continue_upload(&mut self, host: &mut dyn TextureHost) {
+        let Some(upload) = self.uploading.as_mut() else {
+            return;
+        };
+        let pixels = self
+            .entries
+            .get(&upload.key)
+            .filter(|entry| entry.generation == upload.generation && entry.in_flight)
+            .and_then(|entry| entry.pending.as_ref());
+        let Some(pixels) = pixels else {
+            host.delete_texture(upload.texture);
+            self.uploading = None;
+            return;
+        };
+        let row_bytes = upload.w as usize * 4;
+        let rows = (UPLOAD_BYTES_PER_FRAME / row_bytes).max(1).min((upload.h - upload.next_row) as usize);
+        let start = upload.next_row as usize * row_bytes;
+        host.upload_rgba_rows(
+            upload.texture,
+            upload.w,
+            upload.next_row,
+            rows as u32,
+            &pixels.rgba[start..start + rows * row_bytes],
+        );
+        upload.next_row += rows as u32;
+        if upload.next_row < upload.h {
+            return;
+        }
+        let StripUpload { key, texture, w, h, .. } = self.uploading.take().expect("upload in progress");
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.in_flight = false;
+            entry.ram = entry.pending.take();
+            if let Some((old, _, _)) = entry.texture.replace((texture, w, h)) {
+                host.delete_texture(old);
             }
-            // `pixels` (and its buffer) is dropped at the end of this iteration.
-            match host.upload_rgba(w, h, &pixels.rgba) {
-                Some(texture) => {
-                    if let Some((old, _, _)) = entry.texture.replace((texture, w, h)) {
-                        host.delete_texture(old);
-                    }
-                }
-                None => {
-                    if entry.texture.is_some() {
-                        entry.state = EntryState::Ready;
-                    } else {
-                        fail_entry(entry, MediaError::TooManyPixels, &mut self.to_free);
-                        self.media_gen += 1;
-                    }
-                }
+        }
+    }
+
+    /// Drops RAM pixels over `RAM_CACHE_BUDGET`, least recently wanted first; pixels of
+    /// visible and near keys stay. Allocates only when over the bound.
+    fn evict_ram_over_budget(&mut self) {
+        let held: u64 = self
+            .entries
+            .values()
+            .filter(|entry| !self.is_visible(entry))
+            .map(ram_bytes)
+            .sum();
+        if held <= RAM_CACHE_BUDGET {
+            return;
+        }
+        let mut keys: Vec<MediaKey> = Vec::new();
+        let mut items: Vec<BudgetItem> = Vec::new();
+        for (key, entry) in &self.entries {
+            if entry.ram.is_some() {
+                keys.push(key.clone());
+                items.push(BudgetItem { bytes: ram_bytes(entry), ..self.budget_item(entry) });
+            }
+        }
+        for index in eviction_plan(&items, RAM_CACHE_BUDGET) {
+            if let Some(entry) = self.entries.get_mut(&keys[index]) {
+                entry.ram = None;
             }
         }
     }
@@ -743,15 +971,14 @@ impl MarkdownMedia {
         for item in visible {
             if let Some(entry) = self.entries.get(&item.key) {
                 keys.push(&item.key);
-                facts.push(Self::queue_facts(entry, true));
+                facts.push(Self::queue_facts(entry, true, false));
             }
         }
         for index in enqueue_indices(&facts) {
             if let Some(entry) = self.entries.get_mut(keys[index])
                 && !entry.queued
             {
-                entry.queued = true;
-                self.queue.push_back(keys[index].clone());
+                enqueue_or_restore(entry, keys[index], &mut self.queue, &mut self.restores);
             }
         }
         for item in visible {
@@ -765,6 +992,7 @@ impl MarkdownMedia {
                 || entry.queued
                 || !matches!(entry.state, EntryState::Ready)
                 || entry.rerendered_for == Some(item.display_w)
+                || (entry.native_raster && native_raster_suffices(natural, entry.request.scale, item.display_w))
                 || !needs_rerender(natural, entry.request.scale, raster_w, item.display_w)
             {
                 continue;
@@ -803,11 +1031,57 @@ impl MarkdownMedia {
     }
 }
 
+/// Queues a key that needs a texture; with pixels in RAM it only waits for an upload.
+fn enqueue_or_restore(
+    entry: &mut Entry,
+    key: &MediaKey,
+    queue: &mut VecDeque<MediaKey>,
+    restores: &mut Vec<MediaKey>,
+) {
+    if let Some(pixels) = entry.ram.take() {
+        entry.pending = Some(pixels);
+        entry.in_flight = true;
+        restores.push(key.clone());
+    } else {
+        entry.queued = true;
+        queue.push_back(key.clone());
+    }
+}
+
+/// Bytes of the RAM pixels of an entry.
+fn ram_bytes(entry: &Entry) -> u64 {
+    entry.ram.as_ref().map_or(0, |pixels| pixels.rgba.len() as u64)
+}
+
+/// `w * h * 4` of the entry's texture, 0 without one.
+fn texture_bytes(entry: &Entry) -> u64 {
+    entry.texture.map_or(0, |(_, w, h)| u64::from(w) * u64::from(h) * 4)
+}
+
+/// Bytes of the entry's texture, or of the one its load will produce once the natural size
+/// is known (the same raster rules as `decode_raster`); 0 while nothing is known.
+fn expected_texture_bytes(entry: &Entry) -> u64 {
+    if entry.texture.is_some() {
+        return texture_bytes(entry);
+    }
+    let Some((natural_w, natural_h)) = entry.natural else {
+        return 0;
+    };
+    let (w, h) = decode::raster_target_size(natural_w, natural_h, entry.request.scale, entry.request.max_raster_w);
+    let pixels = if decode::native_raster_ok((natural_w, natural_h), w) {
+        u64::from(natural_w as u32) * u64::from(natural_h as u32)
+    } else {
+        u64::from(w) * u64::from(h)
+    };
+    pixels * 4
+}
+
 /// Marks an entry failed and releases whatever it held; its texture goes to the free list.
 fn fail_entry(entry: &mut Entry, error: MediaError, to_free: &mut Vec<glow::Texture>) {
     entry.state = EntryState::Failed(error);
     entry.in_flight = false;
     entry.pending = None;
+    entry.ram = None;
     if let Some((texture, _, _)) = entry.texture.take() {
         to_free.push(texture);
     }

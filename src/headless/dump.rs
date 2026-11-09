@@ -243,6 +243,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
             "loads_started": media_stats.loads_started,
             "texture_bytes": media_stats.texture_bytes,
             "visible_texture_bytes": media_stats.visible_texture_bytes,
+            "ram_bytes": media_stats.ram_bytes,
         },
         "markdown_toc": {
             "open": app.markdown_toc.open,
