@@ -208,6 +208,138 @@ mod markdown_read_media_tests {
         assert_eq!(cache.blocks[1].top, first.bottom + BLOCK_GAP);
     }
 
+    fn paragraph_parts(source: &str) -> Vec<ParagraphPart> {
+        let document = parse(source);
+        let media = MarkdownMedia::with_loader(ok_loader(1.0, 1.0));
+        let input = MediaInput::new(&document, source, Path::new(""), &media);
+        let block = &document.blocks[0];
+        let MarkdownBlockKind::Paragraph { inlines, .. } = &block.kind else {
+            panic!("paragraph expected");
+        };
+        let items = input.items.get(&block.source_range.start).expect("media paragraph");
+        split_media_paragraph(source, inlines, items)
+    }
+
+    #[test]
+    fn split_media_paragraph_keeps_text_and_images_in_order() {
+        use ParagraphPart::{Media, Text};
+        assert_eq!(paragraph_parts("![a](a.png) ![b](b.png)\n"), vec![Media(0..2)]);
+        assert_eq!(paragraph_parts("![a](a.png)\n*caption*\n"), vec![Media(0..1), Text(1..3)]);
+        let parts = paragraph_parts("text ![a](a.png) ![b](b.png) more ![c](c.png)\n");
+        assert_eq!(parts.len(), 4, "{parts:?}");
+        assert!(matches!(&parts[0], Text(range) if range.start == 0));
+        assert_eq!(parts[1], Media(0..2));
+        assert!(matches!(&parts[2], Text(_)));
+        assert_eq!(parts[3], Media(2..3));
+    }
+
+    #[test]
+    fn image_with_a_caption_line_is_a_picture_followed_by_the_caption() {
+        let source = "![Форма](a.png)\n*Подпись к снимку.*\n\ntail\n";
+        let media = loaded_media(source, ok_loader(400.0, 300.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        assert_eq!(cache.blocks.len(), 3);
+        let items = media_items(&cache);
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].w, items[0].h, items[0].alt.as_str()), (400.0, 300.0, "Форма"));
+        let ReadBlockKind::Text(caption) = &cache.blocks[1].kind else {
+            panic!("caption must be text: {:?}", cache.blocks[1].kind);
+        };
+        assert_eq!(caption.styled.text, "Подпись к снимку.");
+        assert!(caption.styled.runs[0].style.contains(TextStyle::EMPHASIS));
+        let run_source = caption.styled.runs[0].source_range.clone().expect("source range");
+        assert_eq!(&source[run_source], "Подпись к снимку.");
+        assert_eq!(cache.blocks[1].top, cache.blocks[0].bottom + BLOCK_GAP);
+        assert!(cache.blocks.iter().all(|block| !matches!(
+            &block.kind,
+            ReadBlockKind::Text(text) if text.styled.text.contains("Image: ")
+        )));
+    }
+
+    #[test]
+    fn text_around_an_inline_image_stays_text_before_and_after_the_picture() {
+        let source = "before ![a](a.png) after\n";
+        let media = loaded_media(source, ok_loader(100.0, 50.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        let kinds: Vec<&str> = cache
+            .blocks
+            .iter()
+            .map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => text.styled.text.as_str(),
+                ReadBlockKind::Media { .. } => "<media>",
+                _ => "<other>",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["before", "<media>", "after"]);
+    }
+
+    fn text_styled(cache: &MarkdownReadLayoutCache) -> Vec<&StyledText> {
+        cache
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(&text.styled),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A run with a source range must read the same bytes as the displayed text: a trim moves
+    /// both ranges of a run together.
+    fn assert_runs_match_source(source: &str, cache: &MarkdownReadLayoutCache) {
+        for styled in text_styled(cache) {
+            for run in &styled.runs {
+                let Some(source_range) = run.source_range.as_ref() else {
+                    continue;
+                };
+                assert_eq!(
+                    source.get(source_range.clone()),
+                    styled.text.get(run.range.clone()),
+                    "run {run:?} of {:?} does not map to the source",
+                    styled.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trimmed_text_parts_of_a_media_paragraph_keep_runs_mapped_to_the_source() {
+        for source in [
+            "![a](a.png)\n*caption*\n",
+            "![a](a.png) caption\n",
+            "before ![a](a.png) after\n",
+            "![a](a.png)\r\n*caption*\r\n",
+            "![a](a.png)  \n*caption*\n",
+            "text [![c](z.png)](u) tail\n",
+        ] {
+            let media = loaded_media(source, ok_loader(100.0, 50.0));
+            let cache = layout_with(source, 1000.0, 1.0, &media);
+            assert!(!text_styled(&cache).is_empty(), "no text block in {source:?}");
+            assert_runs_match_source(source, &cache);
+        }
+    }
+
+    #[test]
+    fn whitespace_inside_inline_code_in_a_caption_is_not_trimmed() {
+        let source = "![a](a.png) `  padded  `\n";
+        let media = loaded_media(source, ok_loader(100.0, 50.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        let texts = text_styled(&cache);
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].text, "  padded  ");
+        assert!(texts[0].runs.iter().all(|run| run.style.contains(TextStyle::CODE)));
+        assert_runs_match_source(source, &cache);
+    }
+
+    #[test]
+    fn a_text_part_with_no_visible_text_is_not_a_block() {
+        let source = "![a](a.png) [ ](u)\n";
+        let media = loaded_media(source, ok_loader(100.0, 50.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        assert_eq!(cache.blocks.len(), 1, "empty text part became a block");
+        assert!(matches!(cache.blocks[0].kind, ReadBlockKind::Media { .. }));
+    }
+
     #[test]
     fn media_blocks_reports_keys_and_document_rectangles() {
         let source = "text\n\n![a](https://example.com/a.png) ![b](https://example.com/b.png)\n";
