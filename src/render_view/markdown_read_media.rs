@@ -153,17 +153,65 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         self.media.as_ref()?.mermaid_error(block_start)
     }
 
-    /// Lays `block` out as a media block when it is one; false leaves it to the text layout.
+    /// Lays `block` out as media when it has media elements: a paragraph becomes media blocks
+    /// for its images and text blocks for the text around them, in source order (see
+    /// `split_media_paragraph`). False leaves the block to the text layout.
     fn try_append_media(&mut self, block: &MarkdownBlock, indent: f32) -> bool {
-        let Some(input) = self.media.as_ref() else {
+        // Taken out for the duration so that the text parts can borrow `self` mutably.
+        let Some(input) = self.media.take() else {
             return false;
         };
+        let handled = self.append_media_parts(&input, block, indent);
+        self.media = Some(input);
+        handled
+    }
+
+    fn append_media_parts(&mut self, input: &MediaInput<'_>, block: &MarkdownBlock, indent: f32) -> bool {
         let Some(items) = input.items.get(&block.source_range.start) else {
             return false;
         };
         if input.mermaid_error(block.source_range.start).is_some() {
             return false;
         }
+        let inlines = match &block.kind {
+            MarkdownBlockKind::Paragraph { inlines, .. } => inlines.as_slice(),
+            _ => &[],
+        };
+        let parts = split_media_paragraph(self.source, inlines, items);
+        if parts.is_empty() {
+            return false;
+        }
+        let whole = parts.len() == 1;
+        for part in parts {
+            match part {
+                ParagraphPart::Media(range) => {
+                    let source_range = if whole {
+                        block.source_range.clone()
+                    } else {
+                        items[range.start].source_range.start..items[range.end - 1].source_range.end
+                    };
+                    self.append_media_run(input, &items[range], source_range, indent);
+                }
+                ParagraphPart::Text(range) => {
+                    let spans = &inlines[range];
+                    let source_range = spans[0].source_range.start..spans[spans.len() - 1].source_range.end;
+                    let mut styled = styled_from_inlines(self.source, spans, &[], &mut self.links);
+                    styled.trim_edge_whitespace();
+                    self.append_text(styled, BODY_SCALE, indent, 0, None, None, false, source_range);
+                }
+            }
+        }
+        true
+    }
+
+    /// One media block of `items`, laid out in rows (`layout_media_rects`).
+    fn append_media_run(
+        &mut self,
+        input: &MediaInput<'_>,
+        items: &[MediaItem],
+        source_range: std::ops::Range<usize>,
+        indent: f32,
+    ) {
         let slots: Vec<MediaSlot> = items
             .iter()
             .map(|item| media_slot(input.media.entry(&item.key)))
@@ -188,9 +236,91 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
             .collect();
         let top = self.y;
         let bottom = top + height;
-        self.push_read_block(block.source_range.clone(), top, bottom, ReadBlockKind::Media { items: placed });
+        self.push_read_block(source_range, top, bottom, ReadBlockKind::Media { items: placed });
         self.y = bottom + (BLOCK_GAP * self.scale).round();
-        true
+    }
+}
+
+/// A run of a media paragraph: inline indices of text, or item indices of media elements.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ParagraphPart {
+    Text(std::ops::Range<usize>),
+    Media(std::ops::Range<usize>),
+}
+
+/// Splits a paragraph into text runs and media runs in source order. An inline is an element
+/// when its source range is that of the next item (`media_paragraph` emits the items in inline
+/// order). Elements separated only by whitespace and line breaks share one media run (badge
+/// rows); text runs made only of whitespace are dropped. A block without inlines (Mermaid) is a
+/// single media run. Empty when the items do not match the inlines, so the caller keeps text.
+fn split_media_paragraph(
+    source: &str,
+    inlines: &[MarkdownInlineSpan],
+    items: &[MediaItem],
+) -> Vec<ParagraphPart> {
+    if inlines.is_empty() {
+        return if items.is_empty() { Vec::new() } else { vec![ParagraphPart::Media(0..items.len())] };
+    }
+    let blank = |spans: &[MarkdownInlineSpan]| spans.iter().all(|span| is_blank_inline(source, span));
+    let mut parts = Vec::new();
+    let (mut next, mut text_start) = (0usize, 0usize);
+    for (index, span) in inlines.iter().enumerate() {
+        if items.get(next).is_none_or(|item| item.source_range != span.source_range) {
+            continue;
+        }
+        if !blank(&inlines[text_start..index]) {
+            parts.push(ParagraphPart::Text(text_start..index));
+        }
+        match parts.last_mut() {
+            Some(ParagraphPart::Media(run)) => run.end = next + 1,
+            _ => parts.push(ParagraphPart::Media(next..next + 1)),
+        }
+        next += 1;
+        text_start = index + 1;
+    }
+    if next != items.len() {
+        return Vec::new();
+    }
+    if !blank(&inlines[text_start..]) {
+        parts.push(ParagraphPart::Text(text_start..inlines.len()));
+    }
+    parts
+}
+
+fn is_blank_inline(source: &str, span: &MarkdownInlineSpan) -> bool {
+    match span.style {
+        MarkdownInlineStyle::HardBreak => true,
+        MarkdownInlineStyle::Text if span.children.is_empty() => span
+            .text_ranges
+            .iter()
+            .all(|range| source.get(range.clone()).is_some_and(|text| text.trim().is_empty())),
+        _ => false,
+    }
+}
+
+impl StyledText {
+    /// Drops whitespace at both ends, so the soft break between an image and its caption does
+    /// not open the caption with an empty line.
+    fn trim_edge_whitespace(&mut self) {
+        let end = self.text.trim_end().len();
+        let start = end - self.text[..end].trim_start().len();
+        if start == 0 && end == self.text.len() {
+            return;
+        }
+        self.runs.retain_mut(|run| {
+            let (from, to) = (run.range.start.max(start), run.range.end.min(end));
+            if from >= to {
+                return false;
+            }
+            if let Some(source) = run.source_range.as_mut() {
+                source.start += from - run.range.start;
+                source.end -= run.range.end - to;
+            }
+            run.range = from - start..to - start;
+            true
+        });
+        self.text.truncate(end);
+        self.text.drain(..start);
     }
 }
 

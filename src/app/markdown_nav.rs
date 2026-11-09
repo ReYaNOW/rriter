@@ -326,8 +326,11 @@ pub(crate) fn inline_link_target(
     Some(resolve_link(&dest, doc_dir, defs))
 }
 
-/// Items of a paragraph made only of images, whitespace and links wrapped around one image;
-/// `None` when `block_index` is not such a top-level paragraph.
+/// Items of every image of a top-level paragraph, in order: each top-level image and each link
+/// wrapped around exactly one image is an element. Other inlines (text, a caption on the next
+/// line, a link with text) do not stop the paragraph from being a media paragraph; the Reader
+/// lays them out as text between the media runs (`split_media_paragraph`). `None` when
+/// `block_index` is not a top-level paragraph or has no such element.
 pub(crate) fn media_paragraph(
     doc: &MarkdownDocument,
     block_index: usize,
@@ -352,7 +355,7 @@ pub(crate) fn media_paragraph(
                 let mut images = Vec::new();
                 if !collect_link_images(source, &span.children, &mut images) || images.len() != 1
                 {
-                    return None;
+                    continue;
                 }
                 let dest = span_destination(
                     source,
@@ -363,9 +366,7 @@ pub(crate) fn media_paragraph(
                 let link = resolve_link(&dest, doc_dir, defs);
                 items.push(image_item(source, images[0], span, Some(link), doc_dir, defs));
             }
-            MarkdownInlineStyle::HardBreak => {}
-            MarkdownInlineStyle::Text if is_blank(source, span) => {}
-            _ => return None,
+            _ => {}
         }
     }
     (!items.is_empty()).then_some(items)
@@ -903,10 +904,16 @@ mod tests {
     }
 
     #[test]
-    fn image_mixed_with_text_is_not_a_media_paragraph() {
-        assert_eq!(media("текст ![a](x.png)\n"), None);
-        assert_eq!(media("![a](x.png) text\n"), None);
-        assert_eq!(media("![a](x.png)\ntext\n"), None);
+    fn image_mixed_with_text_keeps_its_images_as_items() {
+        for source in ["текст ![a](x.png)\n", "![a](x.png) text\n", "![a](x.png)\n*caption*\n"] {
+            let items = media(source).expect("paragraph with an image");
+            assert_eq!(items.len(), 1, "{source:?}");
+            assert_eq!(items[0].alt, "a");
+            assert_eq!(items[0].key, file_key("/docs/x.png"));
+        }
+        let items = media("a ![b](y.png) [text](u) [![c](z.png)](u) d\n").expect("paragraph");
+        let alts: Vec<&str> = items.iter().map(|item| item.alt.as_str()).collect();
+        assert_eq!(alts, vec!["b", "c"]);
     }
 
     #[test]

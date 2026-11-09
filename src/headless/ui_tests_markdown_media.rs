@@ -325,7 +325,9 @@ fn switch_to(session: &mut HeadlessSession, file_name: &str) {
 
 #[test]
 fn png_svg_and_a_missing_image_reach_their_states() {
-    let markdown = "# Media\n\n![pic](pic.png)\n\n![badge](badge.svg)\n\n![gone](missing.png)\n";
+    // The PNG shares its paragraph with a caption on the next line, as screenshots in READMEs
+    // usually do; it must still be a picture, not "Image: pic" text.
+    let markdown = "# Media\n\n![pic](pic.png)\n*Caption of pic.*\n\n![badge](badge.svg)\n\n![gone](missing.png)\n";
     let (dir, path) = fixture("md-media-states", markdown);
     let mut session = open_markdown_read(&dir, &path);
     wait_until(&mut session, WAIT_MS, "all three media settled", |session| {
