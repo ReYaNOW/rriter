@@ -21,9 +21,11 @@ pub(super) const MAX_INPUT_SIDE: u32 = 16384;
 const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
 /// Longest side of the produced raster, in pixels.
 const MAX_RASTER_SIDE: u32 = 4096;
-/// Longest side of a bitmap uploaded at its own size (`native_raster_ok`). The renderer does
-/// not query `GL_MAX_TEXTURE_SIZE`; 8192 stays at half the 16384 that current desktop
-/// drivers report, while the pixel count stays within the old 4096 x 4096 bound.
+/// Longest side of a bitmap uploaded at its own size (`native_raster_ok`). 8192 stays at half
+/// the 16384 that current desktop drivers report, while the pixel count stays within the old
+/// 4096 x 4096 bound. This helper process has no GL context: a texture over the context's
+/// `GL_MAX_TEXTURE_SIZE` is refused by `Renderer::create_rgba_texture` and the element shows
+/// the `TooManyPixels` error instead of a transparent texture.
 const MAX_NATIVE_SIDE: u32 = 8192;
 /// Longest accepted SVG document, compressed or after inflating `.svgz`, in bytes.
 const MAX_SVG_BYTES: u64 = 20 * 1024 * 1024;

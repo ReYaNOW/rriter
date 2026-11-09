@@ -237,7 +237,8 @@ impl App {
         self.markdown_media.poll(&waker);
         let mut visible = Vec::new();
         let mut view = None;
-        if self.markdown_read_active()
+        let read_view = self.markdown_read_active();
+        if read_view
             && let Some((width, height, scale)) = self
                 .renderer
                 .as_ref()
@@ -256,15 +257,15 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        // A handful of borrowed keys per frame, sorted so the cache takes the nearest first.
-        let mut near: Vec<(&MediaKey, f32)> = match view {
-            Some((top, bottom, margin, direction)) => {
-                self.markdown.near_media(top, bottom, margin, direction).collect()
-            }
-            None => Vec::new(),
+        // The cache walks the prefetch keys twice (rank, then mark), so nothing is collected
+        // per frame.
+        let markdown = &self.markdown;
+        let near = || {
+            view.into_iter().flat_map(move |(top, bottom, margin, direction)| {
+                markdown.near_media(top, bottom, margin, direction)
+            })
         };
-        near.sort_by(|a, b| a.1.total_cmp(&b.1));
-        if self.markdown_media.prepare_gpu(renderer, &visible, near.into_iter(), &waker)
+        if self.markdown_media.prepare_gpu(renderer, &visible, near, read_view, &waker)
             && let Some(window) = self.window.as_ref()
         {
             window.request_redraw();

@@ -360,6 +360,12 @@ fn images_scrolling_into_view_are_drawn_on_the_first_frame_both_ways() {
         .rect_for(crate::ui_system::UiId::MarkdownReadBody)
         .expect("Markdown Reader body rect");
     let (x, y, viewport_h) = (f64::from(x) + 20.0, f64::from(y) + 20.0, f64::from(viewport_h));
+    // Warm-up once; then the wheel runs at a fixed cadence with no readiness waits, so a
+    // prefetcher that falls behind the scroll shows up as a frame without its picture.
+    wait_until(&mut session, WAIT_MS, "images around the view prefetched", |session| {
+        let top = f64::from(session.app.scroll_y.current);
+        media_drawn_between(&dump(session), top - viewport_h, top + 2.0 * viewport_h)
+    });
     let mut steps = 0;
     for direction in ["down", "up"] {
         let delta = if direction == "down" { -4 } else { 4 };
@@ -371,12 +377,7 @@ fn images_scrolling_into_view_are_drawn_on_the_first_frame_both_ways() {
                 reached_edge = true;
                 break;
             }
-            // The prefetch margin (two viewports) covers one viewport on both sides.
-            wait_until(&mut session, WAIT_MS, "images around the view prefetched", |session| {
-                let top = f64::from(session.app.scroll_y.current);
-                media_drawn_between(&dump(session), top - viewport_h, top + 2.0 * viewport_h)
-            });
-            let lines = run_script(&mut session, format!("mouse_move {x} {y}\nwheel 0 {delta}\n").as_bytes());
+            let lines = run_script(&mut session, format!("mouse_move {x} {y}\nwheel 0 {delta}\nwait 25\n").as_bytes());
             assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
             let top = f64::from(session.app.scroll_y.current);
             let state = dump(&mut session);

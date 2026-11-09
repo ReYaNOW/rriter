@@ -112,12 +112,14 @@ pub(super) fn texture_totals(items: &[BudgetItem]) -> (u64, u64) {
 /// first, until the invisible textures fit `budget`. Visible and near textures are never
 /// evicted, even when they alone exceed the budget, so eviction cannot feed a re-render loop
 /// and a prefetched texture is not dropped before it scrolls into view.
-pub(super) fn eviction_plan(items: &[BudgetItem], budget: u64) -> Vec<usize> {
+/// `not_evictable` are invisible bytes held outside `items` (pixels waiting for an upload, a
+/// partly uploaded texture): they count against the budget but cannot be evicted.
+pub(super) fn eviction_plan(items: &[BudgetItem], not_evictable: u64, budget: u64) -> Vec<usize> {
     let mut held: u64 = items
         .iter()
         .filter(|item| !item.visible)
         .map(|item| item.bytes)
-        .sum();
+        .fold(not_evictable, u64::saturating_add);
     if held <= budget {
         return Vec::new();
     }
@@ -147,14 +149,20 @@ pub(super) enum UploadRank {
     Far,
 }
 
-/// Order in which ready pixels are uploaded: visible, then near, then the rest, arrival order
-/// inside each group. `ranks[i]` describes the i-th waiting upload; at most `limit` indices
-/// come back.
-pub(super) fn upload_order(ranks: &[UploadRank], limit: usize) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..ranks.len()).collect();
-    order.sort_by_key(|&index| ranks[index]);
-    order.truncate(limit);
-    order
+/// Index of the waiting upload to start next: visible, then near by prefetch rank (nearest
+/// first), then the rest; arrival order on ties. The i-th item describes the i-th waiting
+/// upload as `(rank, prefetch rank)`; the prefetch rank matters among near keys only.
+pub(super) fn next_upload(ranks: impl Iterator<Item = (UploadRank, f32)>) -> Option<usize> {
+    let mut best: Option<(usize, UploadRank, f32)> = None;
+    for (index, (rank, distance)) in ranks.enumerate() {
+        let distance = if rank == UploadRank::Near { distance } else { 0.0 };
+        if best.is_none_or(|(_, best_rank, best_distance)| {
+            rank < best_rank || (rank == best_rank && distance < best_distance)
+        }) {
+            best = Some((index, rank, distance));
+        }
+    }
+    best.map(|(index, _, _)| index)
 }
 
 /// Whether a result of `bytes` for a key that is neither visible nor near is worth an upload:
