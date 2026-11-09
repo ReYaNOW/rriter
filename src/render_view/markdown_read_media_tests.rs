@@ -273,6 +273,73 @@ mod markdown_read_media_tests {
         assert_eq!(kinds, vec!["before", "<media>", "after"]);
     }
 
+    fn text_styled(cache: &MarkdownReadLayoutCache) -> Vec<&StyledText> {
+        cache
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(&text.styled),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A run with a source range must read the same bytes as the displayed text: a trim moves
+    /// both ranges of a run together.
+    fn assert_runs_match_source(source: &str, cache: &MarkdownReadLayoutCache) {
+        for styled in text_styled(cache) {
+            for run in &styled.runs {
+                let Some(source_range) = run.source_range.as_ref() else {
+                    continue;
+                };
+                assert_eq!(
+                    source.get(source_range.clone()),
+                    styled.text.get(run.range.clone()),
+                    "run {run:?} of {:?} does not map to the source",
+                    styled.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trimmed_text_parts_of_a_media_paragraph_keep_runs_mapped_to_the_source() {
+        for source in [
+            "![a](a.png)\n*caption*\n",
+            "![a](a.png) caption\n",
+            "before ![a](a.png) after\n",
+            "![a](a.png)\r\n*caption*\r\n",
+            "![a](a.png)  \n*caption*\n",
+            "text [![c](z.png)](u) tail\n",
+        ] {
+            let media = loaded_media(source, ok_loader(100.0, 50.0));
+            let cache = layout_with(source, 1000.0, 1.0, &media);
+            assert!(!text_styled(&cache).is_empty(), "no text block in {source:?}");
+            assert_runs_match_source(source, &cache);
+        }
+    }
+
+    #[test]
+    fn whitespace_inside_inline_code_in_a_caption_is_not_trimmed() {
+        let source = "![a](a.png) `  padded  `\n";
+        let media = loaded_media(source, ok_loader(100.0, 50.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        let texts = text_styled(&cache);
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].text, "  padded  ");
+        assert!(texts[0].runs.iter().all(|run| run.style.contains(TextStyle::CODE)));
+        assert_runs_match_source(source, &cache);
+    }
+
+    #[test]
+    fn a_text_part_with_no_visible_text_is_not_a_block() {
+        let source = "![a](a.png) [ ](u)\n";
+        let media = loaded_media(source, ok_loader(100.0, 50.0));
+        let cache = layout_with(source, 1000.0, 1.0, &media);
+        assert_eq!(cache.blocks.len(), 1, "empty text part became a block");
+        assert!(matches!(cache.blocks[0].kind, ReadBlockKind::Media { .. }));
+    }
+
     #[test]
     fn media_blocks_reports_keys_and_document_rectangles() {
         let source = "text\n\n![a](https://example.com/a.png) ![b](https://example.com/b.png)\n";

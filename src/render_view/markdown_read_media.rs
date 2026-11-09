@@ -197,6 +197,9 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                     let source_range = spans[0].source_range.start..spans[spans.len() - 1].source_range.end;
                     let mut styled = styled_from_inlines(self.source, spans, &[], &mut self.links);
                     styled.trim_edge_whitespace();
+                    if styled.text.is_empty() {
+                        continue;
+                    }
                     self.append_text(styled, BODY_SCALE, indent, 0, None, None, false, source_range);
                 }
             }
@@ -299,11 +302,41 @@ fn is_blank_inline(source: &str, span: &MarkdownInlineSpan) -> bool {
 }
 
 impl StyledText {
-    /// Drops whitespace at both ends, so the soft break between an image and its caption does
-    /// not open the caption with an empty line.
+    /// Drops the separating whitespace at both ends, so the soft break between an image and its
+    /// caption does not open the caption with an empty line. Whitespace belongs to the inline
+    /// code span when it is inside one: the trim stops at a CODE run and never cuts into it.
     fn trim_edge_whitespace(&mut self) {
-        let end = self.text.trim_end().len();
-        let start = end - self.text[..end].trim_start().len();
+        let mut start = 0;
+        for run in &self.runs {
+            if run.style.contains(TextStyle::CODE) {
+                break;
+            }
+            let text = &self.text[run.range.clone()];
+            if text.trim().is_empty() {
+                start = run.range.end;
+                continue;
+            }
+            start = run.range.start + (text.len() - text.trim_start().len());
+            break;
+        }
+        let mut end = self.text.len();
+        for run in self.runs.iter().rev() {
+            if run.style.contains(TextStyle::CODE) {
+                break;
+            }
+            let text = &self.text[run.range.clone()];
+            if text.trim().is_empty() {
+                end = run.range.start;
+                continue;
+            }
+            end = run.range.end - (text.len() - text.trim_end().len());
+            break;
+        }
+        if start >= end {
+            self.text.clear();
+            self.runs.clear();
+            return;
+        }
         if start == 0 && end == self.text.len() {
             return;
         }
