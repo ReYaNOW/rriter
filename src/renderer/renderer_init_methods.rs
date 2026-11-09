@@ -91,11 +91,6 @@ fn editor_cjk_font(candidates: &[(&str, &'static str)]) -> Option<FontData> {
     (!installed.is_empty()).then(|| FontData::new_lazy_cjk(installed))
 }
 
-/// `GL_MAX_TEXTURE_SIZE` of the context, read once in `Renderer::new`; 0 until then (no
-/// check). `create_rgba_texture` refuses larger sides instead of handing out a texture that
-/// `tex_image_2d` failed to allocate (drawn transparent, with no error).
-static MAX_TEXTURE_SIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
 impl Renderer {
     pub(crate) fn set_themes(
         &mut self,
@@ -129,9 +124,9 @@ impl Renderer {
 
     /// Allocates an uninitialized RGBA8 texture; fill it with `upload_rgba_rows` before drawing it.
     /// `tex_image_2d` with no data instead of `tex_storage_2d`: desktop GL 3.3 / macOS 4.1 lack the latter.
-    /// `None` for a side over `GL_MAX_TEXTURE_SIZE` (`MAX_TEXTURE_SIDE`).
+    /// `None` for a side over `GL_MAX_TEXTURE_SIZE` (`max_texture_side`).
     pub fn create_rgba_texture(&mut self, w: u32, h: u32) -> Option<glow::Texture> {
-        let limit = MAX_TEXTURE_SIDE.load(std::sync::atomic::Ordering::Relaxed);
+        let limit = self.max_texture_side;
         if limit > 0 && (w > limit || h > limit) {
             return None;
         }
@@ -360,7 +355,6 @@ impl Renderer {
     ) -> Result<Self, String> {
         unsafe {
             let max_texture_side = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).max(0) as u32;
-            MAX_TEXTURE_SIDE.store(max_texture_side, std::sync::atomic::Ordering::Relaxed);
             let version = gl.get_parameter_string(glow::VERSION);
             let diagnostics = GraphicsDiagnostics {
                 vendor: gl.get_parameter_string(glow::VENDOR),
@@ -777,6 +771,7 @@ impl Renderer {
                 max_terminal_tab_scroll_x: 0.0,
                 last_editor_version_for_scroll_x: u64::MAX,
                 last_view_w_for_scroll_x: -1.0,
+                max_texture_side,
                 scroll_x_bounds_inlays_dirty: true,
                 fps: 0.0,
                 frame_count: 0,
