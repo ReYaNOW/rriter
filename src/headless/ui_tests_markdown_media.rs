@@ -316,6 +316,87 @@ fn thirty_large_images_survive_repeated_end_to_end_scrolling_within_the_texture_
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// True when every media element overlapping `[from, to]` of the document is drawn as a
+/// picture (`texture`), not as a frame.
+fn media_drawn_between(state: &Value, from: f64, to: f64) -> bool {
+    let items = state["tabs"][tab_index(state, "preview.md")]["markdown_media"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    items.iter().all(|item| {
+        let Some(y) = item["y"].as_f64() else { return true };
+        let h = item["h"].as_f64().unwrap_or(0.0);
+        let overlaps = y + h > from && y < to;
+        !overlaps || item["texture"] == true
+    })
+}
+
+#[test]
+fn images_scrolling_into_view_are_drawn_on_the_first_frame_both_ways() {
+    // 40 images of 1600 x 1200: ~170 MiB of textures, over the 128 MiB invisible budget,
+    // so the cache cannot simply hold them all.
+    let dir = scratch_dir("md-media-prefetch");
+    let source_png = dir.join("source.png");
+    write_png(&source_png, 1600, 1200);
+    let mut markdown = String::from("# Prefetch\n\n");
+    for index in 0..40 {
+        let name = format!("shot-{index:02}.png");
+        std::fs::copy(&source_png, dir.join(&name)).expect("copy PNG fixture");
+        markdown.push_str(&format!("Step {index}.\n\n![shot {index}]({name})\n\n"));
+    }
+    let path = dir.join("preview.md");
+    std::fs::write(&path, markdown).expect("write prefetch markdown fixture");
+    let mut session = open_markdown_read(&dir, &path);
+    // Natural sizes known for all: the layout no longer moves under the scroll.
+    wait_until(&mut session, WAIT_MS, "every image loaded once", |session| {
+        let state = dump(session);
+        state["tabs"][tab_index(&state, "preview.md")]["markdown_media"]
+            .as_array()
+            .is_some_and(|items| items.len() == 40 && items.iter().all(|item| item["state"] == "ready"))
+    });
+    let (x, y, _, viewport_h) = session
+        .app
+        .ui_registry
+        .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+        .expect("Markdown Reader body rect");
+    let (x, y, viewport_h) = (f64::from(x) + 20.0, f64::from(y) + 20.0, f64::from(viewport_h));
+    // Warm-up once; then the wheel runs at a fixed cadence with no readiness waits, so a
+    // prefetcher that falls behind the scroll shows up as a frame without its picture.
+    wait_until(&mut session, WAIT_MS, "images around the view prefetched", |session| {
+        let top = f64::from(session.app.scroll_y.current);
+        media_drawn_between(&dump(session), top - viewport_h, top + 2.0 * viewport_h)
+    });
+    let mut steps = 0;
+    for direction in ["down", "up"] {
+        let delta = if direction == "down" { -4 } else { 4 };
+        let mut reached_edge = false;
+        for _ in 0..400 {
+            let max_scroll = (f64::from(session.app.markdown.read_layout.content_height()) - viewport_h).max(0.0);
+            let top = f64::from(session.app.scroll_y.current);
+            if (direction == "down" && top >= max_scroll - 2.0) || (direction == "up" && top <= 2.0) {
+                reached_edge = true;
+                break;
+            }
+            let lines = run_script(&mut session, format!("mouse_move {x} {y}\nwheel 0 {delta}\nwait 25\n").as_bytes());
+            assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+            let top = f64::from(session.app.scroll_y.current);
+            let state = dump(&mut session);
+            assert!(
+                media_drawn_between(&state, top, top + viewport_h),
+                "{direction} step {steps}: an image entered the view as a frame at scroll {top}"
+            );
+            steps += 1;
+        }
+        assert!(reached_edge, "scroll did not reach the {direction} edge: {}", session.app.scroll_y.current);
+    }
+    let state = dump(&mut session);
+    let stats = &state["markdown_media_stats"];
+    let texture_bytes = stats["texture_bytes"].as_u64().unwrap_or(u64::MAX);
+    let visible_texture_bytes = stats["visible_texture_bytes"].as_u64().unwrap_or(0);
+    assert!(texture_bytes <= 128 * 1024 * 1024 + visible_texture_bytes, "{stats}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn switch_to(session: &mut HeadlessSession, file_name: &str) {
     let index = tab_index(&dump(session), file_name);
     click_ui(session, &format!("EditorTab({index})"));

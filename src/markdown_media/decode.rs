@@ -21,6 +21,12 @@ pub(super) const MAX_INPUT_SIDE: u32 = 16384;
 const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
 /// Longest side of the produced raster, in pixels.
 const MAX_RASTER_SIDE: u32 = 4096;
+/// Longest side of a bitmap uploaded at its own size (`native_raster_ok`). 8192 stays at half
+/// the 16384 that current desktop drivers report, while the pixel count stays within the old
+/// 4096 x 4096 bound. This helper process has no GL context: a texture over the context's
+/// `GL_MAX_TEXTURE_SIZE` is refused by `Renderer::create_rgba_texture` and the element shows
+/// the `TooManyPixels` error instead of a transparent texture.
+const MAX_NATIVE_SIDE: u32 = 8192;
 /// Longest accepted SVG document, compressed or after inflating `.svgz`, in bytes.
 const MAX_SVG_BYTES: u64 = 20 * 1024 * 1024;
 /// How much of the input is inspected when sniffing an SVG signature.
@@ -113,15 +119,37 @@ fn decode_raster(bytes: &[u8], scale: f32, max_raster_w: u32) -> Result<MediaPix
     let image = DynamicImage::from_decoder(decoder).map_err(map_error)?;
     let rgba = image.into_rgba8();
     let (target_w, target_h) = raster_target_size(width as f32, height as f32, scale, max_raster_w);
-    // Sized natural x scale (upscaling included) so the raster matches the display size;
-    // the target is already clamped to `max_raster_w` and `MAX_RASTER_SIDE`.
-    let rgba = if (target_w, target_h) != (width, height) {
+    // A bitmap keeps its own pixels whenever the GPU can scale it (`native_raster_ok`): the
+    // CPU Triangle resize took 100–450 ms per screenshot, ten times the decode itself.
+    let rgba = if (target_w, target_h) != (width, height)
+        && !native_raster_ok((width as f32, height as f32), target_w)
+    {
         image::imageops::resize(&rgba, target_w, target_h, FilterType::Triangle)
     } else {
         rgba
     };
     Ok(pixels(width as f32, height as f32, rgba))
 }
+
+/// Whether a bitmap of `natural` pixels is uploaded as is and scaled by the GPU to a display
+/// raster `target_w` wide. Linear texture sampling is the same bilinear filter as the CPU
+/// Triangle resize for any upscale and a mild shrink. A shrink below `NATIVE_MIN_SHRINK`
+/// is resized on the CPU: the native texture would cost much more memory than the display
+/// needs (and alias below one half without mipmaps). The native texture also has to fit the
+/// texture limits: `MAX_NATIVE_SIDE` per side and the pixel count of a `MAX_RASTER_SIDE` square.
+pub(crate) fn native_raster_ok(natural: (f32, f32), target_w: u32) -> bool {
+    let (w, h) = natural;
+    let max_pixels = MAX_RASTER_SIDE as f32 * MAX_RASTER_SIDE as f32;
+    w >= 1.0
+        && h >= 1.0
+        && w.max(h) <= MAX_NATIVE_SIDE as f32
+        && w * h <= max_pixels
+        && target_w as f32 >= w * NATIVE_MIN_SHRINK
+}
+
+/// Smallest display/natural width ratio a native bitmap is kept for; covers the tall shots
+/// shrunk to `MAX_RASTER_SIDE` (~0.89) at under 40% more texture memory than the display size.
+const NATIVE_MIN_SHRINK: f32 = 0.85;
 
 fn pixels(natural_w: f32, natural_h: f32, image: RgbaImage) -> MediaPixels {
     MediaPixels {
@@ -379,14 +407,28 @@ mod tests {
     #[test]
     fn png_natural_size_and_upscale() {
         let png = encode(&sample(3, 2), ImageFormat::Png);
+        // An upscale is left to the GPU: the raster keeps the native pixels.
         let pixels = decode_in_process(MediaKind::Raster, &png, 2.0, 1000).unwrap();
         assert_eq!((pixels.natural_w, pixels.natural_h), (3.0, 2.0));
-        assert_eq!((pixels.raster_w, pixels.raster_h), (6, 4));
-        assert_eq!(pixels.rgba.len(), 6 * 4 * 4);
+        assert_eq!((pixels.raster_w, pixels.raster_h), (3, 2));
+        assert_eq!(pixels.rgba.len(), 3 * 2 * 4);
         assert!(pixels.stamp.is_none());
-        // The upscaled raster is still clamped to the text column width.
         let pixels = decode_in_process(MediaKind::Raster, &png, 2.0, 4).unwrap();
-        assert_eq!((pixels.raster_w, pixels.raster_h), (4, 3));
+        assert_eq!((pixels.raster_w, pixels.raster_h), (3, 2));
+    }
+
+    #[test]
+    fn bitmaps_stay_native_unless_shrunk_below_half_or_over_the_texture_limits() {
+        assert!(native_raster_ok((1440.0, 900.0), 1920), "upscale x1.333");
+        assert!(native_raster_ok((1440.0, 4597.0), 1283), "tall shot shrunk to 4096 high");
+        assert!(native_raster_ok((200.0, 100.0), 172), "mild shrink");
+        assert!(!native_raster_ok((200.0, 100.0), 160), "stronger shrink: CPU resize");
+        assert!(!native_raster_ok((100.0, 9000.0), 100), "side over MAX_NATIVE_SIDE");
+        assert!(!native_raster_ok((5000.0, 5000.0), 5000), "pixels over 4096 x 4096");
+        // A tall shot over MAX_RASTER_SIDE keeps its pixels: the old 4096 clamp cost a resize.
+        let png = encode(&sample(30, 4200), ImageFormat::Png);
+        let pixels = decode_in_process(MediaKind::Raster, &png, 1.0, 1000).unwrap();
+        assert_eq!((pixels.raster_w, pixels.raster_h), (30, 4200));
     }
 
     #[test]
