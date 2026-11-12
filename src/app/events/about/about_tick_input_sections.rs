@@ -3,7 +3,7 @@
 
 /// Terminal presentation intents, closed terminal cleanup and active terminal scroll.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
+fn about_to_wait_terminals(app: &mut App, dt: f32, now: Instant) -> bool {
     let mut needs_redraw = false;
     if app.is_ide_mode && app.process_terminal_presentation_intents() {
         needs_redraw = true;
@@ -56,7 +56,7 @@ fn about_to_wait_terminals(app: &mut App, dt: f32) -> bool {
         });
         if let Some(t) = app.ide_panel.terminals.get_mut(active) {
             let anchor_limit = panel_metrics
-                .and_then(|(char_h, body_h, scale)| t.anchor_scroll(char_h, body_h, scale));
+                .and_then(|(char_h, body_h, scale)| t.anchor_scroll(char_h, body_h, scale, now));
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
             }
@@ -154,7 +154,7 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
 
 /// Selection drag autoscroll for the terminal and the editor.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn about_to_wait_selection_drag_autoscroll(app: &mut App, dt: f32) -> bool {
+fn about_to_wait_selection_drag_autoscroll(app: &mut App, dt: f32, now: Instant) -> bool {
     let mut needs_redraw = false;
     if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings {
         if app.window.is_some() {
@@ -185,11 +185,18 @@ fn about_to_wait_selection_drag_autoscroll(app: &mut App, dt: f32) -> bool {
                                 term_h,
                                 s,
                             );
+                            // The redraw after a history clear still shows short content: leave the
+                            // offset unclamped, the next tick's anchor clamps after the reprint.
+                            let scroll_limit = if term.anchor_redrawing(&grid, now) {
+                                f32::MAX
+                            } else {
+                                max_scroll
+                            };
                             if max_scroll > 0.0 && total_lines > 0 {
                                 let speed = drag_autoscroll_speed(drag_delta, drag_delta < 0.0);
                                 term.scroll_y.target = (term.scroll_y.target
                                     - drag_delta.signum() * speed * dt)
-                                    .clamp(0.0, max_scroll);
+                                    .clamp(0.0, scroll_limit);
                                 term.scroll_y.anim_speed = 15.0;
 
                                 let (cell_x, cell_y) = terminal_drag_cell(
