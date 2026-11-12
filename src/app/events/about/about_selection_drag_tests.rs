@@ -184,7 +184,7 @@
         // `about_to_wait` delegates the drag autoscroll to its input tick section.
         assert_eq!(
             include_str!("../about.rs")
-                .matches("about_to_wait_selection_drag_autoscroll(app, dt)")
+                .matches("about_to_wait_selection_drag_autoscroll(app, dt, now)")
                 .count(),
             1
         );

@@ -395,8 +395,17 @@ impl Terminal {
     /// `None` when released or when `char_h` is unusable. A full scrollback that evicts lines under
     /// the view is clamped by the caller to the oldest retained line. On the alternate screen the
     /// anchor stays held and the offset is still compensated, but `None` is returned so the caller
-    /// does not clamp: the main screen's lines come back on exit.
-    pub(crate) fn anchor_scroll(&mut self, char_h: f32, body_h: f32, scale: f32) -> Option<f32> {
+    /// does not clamp: the main screen's lines come back on exit. Also `None` while the redraw
+    /// after a scrollback clear is in progress (`ScrollbackAnchor::redrawing`): the content is
+    /// still short of the reprint, and clamping to it would lose the offset. `now` times that
+    /// redraw window.
+    pub(crate) fn anchor_scroll(
+        &mut self,
+        char_h: f32,
+        body_h: f32,
+        scale: f32,
+        now: Instant,
+    ) -> Option<f32> {
         if !self.scrolled_up() {
             self.scroll_anchor.release();
             return None;
@@ -405,16 +414,18 @@ impl Terminal {
         if !char_h.is_finite() || char_h <= 0.0 {
             return None;
         }
-        let (pushed, total_lines, is_alt) = {
+        let (pushed, total_lines, is_alt, redrawing) = {
             let grid = lock_terminal_grid(&self.grid);
-            (self.scroll_anchor.hold(&grid), grid.total_rows(), grid.is_alt_screen())
+            let pushed = self.scroll_anchor.hold(&grid, now);
+            let redrawing = self.scroll_anchor.redrawing(&grid, now);
+            (pushed, grid.total_rows(), grid.is_alt_screen(), redrawing)
         };
         if pushed > 0 {
             let delta = pushed as f32 * char_h;
             self.scroll_y.current += delta;
             self.scroll_y.target += delta;
         }
-        if is_alt {
+        if is_alt || redrawing {
             return None;
         }
         Some(crate::render_view::terminal_ui::terminal_max_scroll(
@@ -433,16 +444,25 @@ impl Terminal {
     /// Pixels the anchor will add to `scroll_y.current` on the next tick: the lines output since
     /// the last `hold`, read without consuming them. The renderer adds this to draw the offset the
     /// tick is about to produce, so output that landed after the tick does not shift the view for
-    /// a frame. `grid` is the grid the renderer already locked. Returns 0 when the next tick would
-    /// release the anchor (`target <= 0`), on the alternate screen, or when `char_h` is unusable.
-    pub(crate) fn anchor_pending_pixels(&self, grid: &Term, char_h: f32) -> f32 {
+    /// a frame. `grid` is the grid the renderer already locked; `now` is the frame instant passed
+    /// to the tick. Returns 0 when the next tick would release the anchor (`target <= 0`), on the
+    /// alternate screen, or when `char_h` is unusable.
+    pub(crate) fn anchor_pending_pixels(&self, grid: &Term, char_h: f32, now: Instant) -> f32 {
         if !self.scrolled_up() || !char_h.is_finite() || char_h <= 0.0 {
             return 0.0;
         }
         if grid.is_alt_screen() {
             return 0.0;
         }
-        self.scroll_anchor.pending(grid) as f32 * char_h
+        self.scroll_anchor.pending(grid, now) as f32 * char_h
+    }
+
+    /// Whether a scrolled-up view is waiting for the redraw after a scrollback clear at `now`,
+    /// read under the grid lock the caller already holds. Input and selection autoscroll leave
+    /// the offset unclamped meanwhile: the limit is the short content before the reprint, and the
+    /// next tick's `anchor_scroll` clamps once the redraw is over.
+    pub(crate) fn anchor_redrawing(&self, grid: &Term, now: Instant) -> bool {
+        self.scrolled_up() && self.scroll_anchor.redrawing(grid, now)
     }
 
     /// A terminal without a PTY process: `write_input` only records its bytes in `written_input`.
@@ -776,9 +796,21 @@ mod tests {
     const ANCHOR_CHAR_H: f32 = 10.0;
     const ANCHOR_BODY_H: f32 = 60.0;
 
+    /// One fixed frame instant: frames at it never reach the redraw deadline of
+    /// `ScrollbackAnchor`, so the tests do not depend on how fast they run.
+    fn anchor_now() -> Instant {
+        static NOW: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *NOW.get_or_init(Instant::now)
+    }
+
     /// One frame of the tick's scroll step: anchor, then clamp to the limit.
     fn anchor_frame(terminal: &mut Terminal) {
-        if let Some(max) = terminal.anchor_scroll(ANCHOR_CHAR_H, ANCHOR_BODY_H, 1.0) {
+        anchor_frame_at(terminal, anchor_now());
+    }
+
+    /// One frame of the tick's scroll step at `now`.
+    fn anchor_frame_at(terminal: &mut Terminal, now: Instant) {
+        if let Some(max) = terminal.anchor_scroll(ANCHOR_CHAR_H, ANCHOR_BODY_H, 1.0, now) {
             terminal.scroll_y.clamp_target(0.0, max);
             terminal.scroll_y.clamp_current(0.0, max);
         }
@@ -830,6 +862,80 @@ mod tests {
         assert_eq!(bottom_line_in_view(&terminal), before);
         assert_eq!(terminal.scroll_y.current, 12.0 * ANCHOR_CHAR_H);
         assert_eq!(terminal.scroll_y.target, 12.0 * ANCHOR_CHAR_H);
+    }
+
+    // Ported from Ronsole's `scrolled_up_view_stays_put_across_a_clear_and_reprint_redraw`.
+    /// An Ink app (Claude Code) answers the focus reports of a tab switch by
+    /// clearing the screen and the history and reprinting the transcript; the
+    /// scrolled-up view must stay where it was instead of jumping to the top.
+    #[test]
+    fn scrolled_up_view_stays_put_across_a_clear_and_reprint_redraw() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[2J\x1b[3J\x1b[H");
+        feed_numbered(&terminal, 0, 40);
+        anchor_frame(&mut terminal);
+
+        assert_eq!(bottom_line_in_view(&terminal), before);
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.target, 5.0 * ANCHOR_CHAR_H);
+    }
+
+    // Ported from Ronsole's `scroll_anchor_keeps_the_offset_over_a_frame_between_clear_and_reprint`.
+    /// A frame can land between the history clear and the reprint (no
+    /// synchronized output, or a block that overflowed); the short content of
+    /// that frame must not clamp the offset away.
+    #[test]
+    fn scroll_anchor_keeps_the_offset_over_a_frame_between_clear_and_reprint() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        anchor_frame(&mut terminal);
+        let before = bottom_line_in_view(&terminal);
+
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[2J\x1b[3J\x1b[H");
+        // A render before the next step must not clamp the offset either.
+        assert!(terminal.anchor_redrawing(&lock_terminal_grid(&terminal.grid), anchor_now()));
+        anchor_frame(&mut terminal);
+        // The first part of the reprint scrolls fewer lines than the offset.
+        feed_numbered(&terminal, 0, 7);
+        anchor_frame(&mut terminal);
+        feed_numbered(&terminal, 7, 33);
+        anchor_frame(&mut terminal);
+        // Output went quiet: the redraw is over.
+        let quiet = anchor_now() + Duration::from_secs(1);
+        assert!(!terminal.anchor_redrawing(&lock_terminal_grid(&terminal.grid), quiet));
+        anchor_frame_at(&mut terminal, quiet);
+
+        assert_eq!(terminal.scroll_y.target, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
+        assert_eq!(bottom_line_in_view(&terminal), before);
+    }
+
+    // Ported from Ronsole's `redraw_window_lets_output_after_an_idle_gap_move_the_view`.
+    /// No frame comes after a redraw until genuine output arrives much later;
+    /// the view must move with that output.
+    #[test]
+    fn redraw_window_lets_output_after_an_idle_gap_move_the_view() {
+        let mut terminal = Terminal::test_without_process(20, 4);
+        feed_numbered(&terminal, 0, 40);
+        scroll_to(&mut terminal, 5.0 * ANCHOR_CHAR_H);
+        let start = anchor_now();
+        anchor_frame_at(&mut terminal, start);
+        let before = bottom_line_in_view(&terminal);
+
+        advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[2J\x1b[3J\x1b[H");
+        feed_numbered(&terminal, 0, 40);
+        anchor_frame_at(&mut terminal, start);
+        feed_numbered(&terminal, 40, 6);
+        anchor_frame_at(&mut terminal, start + Duration::from_secs(10));
+
+        assert_eq!(terminal.scroll_y.target, 11.0 * ANCHOR_CHAR_H);
+        assert_eq!(bottom_line_in_view(&terminal), before);
     }
 
     #[test]
@@ -921,9 +1027,9 @@ mod tests {
 
         feed_numbered(&terminal, 40, 3);
         let grid = lock_terminal_grid(&terminal.grid);
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 3.0 * ANCHOR_CHAR_H);
         // Reading the pending lines does not consume them.
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 3.0 * ANCHOR_CHAR_H);
         drop(grid);
         // Only the tick moves the stored offset.
         assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
@@ -931,6 +1037,6 @@ mod tests {
         anchor_frame(&mut terminal);
         assert_eq!(terminal.scroll_y.current, 8.0 * ANCHOR_CHAR_H);
         let grid = lock_terminal_grid(&terminal.grid);
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 0.0);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 0.0);
     }
 }

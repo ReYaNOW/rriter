@@ -572,8 +572,12 @@ impl App {
                         if term.forward_wheel(dy, cell) {
                             return;
                         }
-                        let total_lines =
-                            crate::app::terminal::lock_terminal_grid(&term.grid).total_rows();
+                        let now = std::time::Instant::now();
+                        let (total_lines, redrawing) = {
+                            let grid =
+                                crate::app::terminal::lock_terminal_grid(&term.grid);
+                            (grid.total_rows(), term.anchor_redrawing(&grid, now))
+                        };
 
                         term.scroll_y.anim_speed = 7.0;
                         term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
@@ -588,7 +592,10 @@ impl App {
                             s,
                         );
 
-                        term.scroll_y.clamp_target(0.0, max_scroll);
+                        // The redraw after a history clear still shows short content: leave the
+                        // offset unclamped, the next tick's anchor clamps after the reprint.
+                        let scroll_limit = if redrawing { f32::MAX } else { max_scroll };
+                        term.scroll_y.clamp_target(0.0, scroll_limit);
                         self.window.as_ref().unwrap().request_redraw();
                     }
                     return;

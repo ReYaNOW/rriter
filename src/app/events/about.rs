@@ -236,9 +236,9 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     let (tab_content_redraw, database_refresh_wake_at) =
         about_to_wait_tab_content_scrolls(app, dt, now, wall_ms);
     needs_redraw |= tab_content_redraw;
-    needs_redraw |= about_to_wait_terminals(app, dt);
+    needs_redraw |= about_to_wait_terminals(app, dt, now);
     needs_redraw |= about_to_wait_overlay_animations(app, dt, now);
-    needs_redraw |= about_to_wait_selection_drag_autoscroll(app, dt);
+    needs_redraw |= about_to_wait_selection_drag_autoscroll(app, dt, now);
     about_to_wait_clamp_editor_scroll(app);
     needs_redraw |= about_to_wait_picker_receivers(app, dt, now);
 

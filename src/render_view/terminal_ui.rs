@@ -628,7 +628,8 @@ impl Renderer {
 
             // Lines output since the last tick are drawn now, under the same grid lock, so the
             // frame does not show the old offset while the next tick moves the view.
-            let render_scroll = term.scroll_y.current + term.anchor_pending_pixels(&grid, char_h);
+            let now = std::time::Instant::now();
+            let render_scroll = term.scroll_y.current + term.anchor_pending_pixels(&grid, char_h, now);
             let scroll_offset = terminal_render_scroll_offset(render_scroll, max_scroll, is_alt);
             let draw_x = terminal_text_x(panel_x, s);
             let (_, term_pad_bottom) = terminal_text_padding(s);
