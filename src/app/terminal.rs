@@ -444,17 +444,17 @@ impl Terminal {
     /// Pixels the anchor will add to `scroll_y.current` on the next tick: the lines output since
     /// the last `hold`, read without consuming them. The renderer adds this to draw the offset the
     /// tick is about to produce, so output that landed after the tick does not shift the view for
-    /// a frame. `grid` is the grid the renderer already locked; `now` is the frame instant passed
-    /// to the tick. Returns 0 when the next tick would release the anchor (`target <= 0`), on the
-    /// alternate screen, or when `char_h` is unusable.
-    pub(crate) fn anchor_pending_pixels(&self, grid: &Term, char_h: f32, now: Instant) -> f32 {
+    /// a frame. `grid` is the grid the renderer already locked. Returns 0 when the next tick would
+    /// release the anchor (`target <= 0`), on the alternate screen, during the redraw after a
+    /// scrollback clear, or when `char_h` is unusable.
+    pub(crate) fn anchor_pending_pixels(&self, grid: &Term, char_h: f32) -> f32 {
         if !self.scrolled_up() || !char_h.is_finite() || char_h <= 0.0 {
             return 0.0;
         }
         if grid.is_alt_screen() {
             return 0.0;
         }
-        self.scroll_anchor.pending(grid, now) as f32 * char_h
+        self.scroll_anchor.pending(grid, Instant::now()) as f32 * char_h
     }
 
     /// Whether a scrolled-up view is waiting for the redraw after a scrollback clear at `now`,
@@ -796,11 +796,10 @@ mod tests {
     const ANCHOR_CHAR_H: f32 = 10.0;
     const ANCHOR_BODY_H: f32 = 60.0;
 
-    /// One fixed frame instant: frames at it never reach the redraw deadline of
-    /// `ScrollbackAnchor`, so the tests do not depend on how fast they run.
+    /// Frame instant for steps that open no redraw window; tests that hold one
+    /// open across frames pass one fixed instant to `anchor_frame_at`.
     fn anchor_now() -> Instant {
-        static NOW: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-        *NOW.get_or_init(Instant::now)
+        Instant::now()
     }
 
     /// One frame of the tick's scroll step: anchor, then clamp to the limit.
@@ -899,15 +898,16 @@ mod tests {
 
         advance_test_output(&mut lock_terminal_grid(&terminal.grid), b"\x1b[2J\x1b[3J\x1b[H");
         // A render before the next step must not clamp the offset either.
-        assert!(terminal.anchor_redrawing(&lock_terminal_grid(&terminal.grid), anchor_now()));
-        anchor_frame(&mut terminal);
+        let now = anchor_now();
+        assert!(terminal.anchor_redrawing(&lock_terminal_grid(&terminal.grid), now));
+        anchor_frame_at(&mut terminal, now);
         // The first part of the reprint scrolls fewer lines than the offset.
         feed_numbered(&terminal, 0, 7);
-        anchor_frame(&mut terminal);
+        anchor_frame_at(&mut terminal, now);
         feed_numbered(&terminal, 7, 33);
-        anchor_frame(&mut terminal);
+        anchor_frame_at(&mut terminal, now);
         // Output went quiet: the redraw is over.
-        let quiet = anchor_now() + Duration::from_secs(1);
+        let quiet = now + Duration::from_secs(1);
         assert!(!terminal.anchor_redrawing(&lock_terminal_grid(&terminal.grid), quiet));
         anchor_frame_at(&mut terminal, quiet);
 
@@ -1027,9 +1027,9 @@ mod tests {
 
         feed_numbered(&terminal, 40, 3);
         let grid = lock_terminal_grid(&terminal.grid);
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 3.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
         // Reading the pending lines does not consume them.
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 3.0 * ANCHOR_CHAR_H);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 3.0 * ANCHOR_CHAR_H);
         drop(grid);
         // Only the tick moves the stored offset.
         assert_eq!(terminal.scroll_y.current, 5.0 * ANCHOR_CHAR_H);
@@ -1037,6 +1037,6 @@ mod tests {
         anchor_frame(&mut terminal);
         assert_eq!(terminal.scroll_y.current, 8.0 * ANCHOR_CHAR_H);
         let grid = lock_terminal_grid(&terminal.grid);
-        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H, anchor_now()), 0.0);
+        assert_eq!(terminal.anchor_pending_pixels(&grid, ANCHOR_CHAR_H), 0.0);
     }
 }
