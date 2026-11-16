@@ -133,29 +133,9 @@ pub(crate) fn feed_test_terminal_output(term: &Terminal, bytes: &[u8]) {
 }
 
 pub(crate) fn terminal_selection_text(term: &Term) -> Option<String> {
-    let (sx, sy, ex, ey) = term.selection()?;
-    let (start_x, start_y, end_x, end_y) = ronsole_term::normalized_selection_bounds(sx, sy, ex, ey);
-    let last_col = term.cols().saturating_sub(1);
-    let mut result = String::new();
-
-    // Rows come from `Term::row`, which already accounts for the alternate screen.
-    for y in start_y..=end_y {
-        let Some(row) = term.row(y) else {
-            continue;
-        };
-        let line_start = if y == start_y { start_x } else { 0 };
-        let line_end = if y == end_y { end_x } else { last_col };
-        for x in line_start..=line_end {
-            if let Some(cell) = row.get(x) {
-                cell.append_text_to(&mut result);
-            }
-        }
-        if y != end_y {
-            result.push('\n');
-        }
-    }
-
-    Some(result.trim_end().to_string())
+    term.selection()?;
+    // Shared with Ronsole: alt-screen aware, joins soft-wrapped rows without a line break.
+    Some(term.selection_text().trim_end().to_string())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -614,6 +594,16 @@ mod tests {
         term.advance("日本e\u{301}".as_bytes(), Instant::now(), &mut sink);
         term.set_selection(Some((0, 0, 4, 0)));
         assert_eq!(terminal_selection_text(&term).as_deref(), Some("日本e\u{301}"));
+    }
+
+    #[test]
+    fn selection_text_joins_soft_wrapped_rows() {
+        let mut term = test_term(10, 3);
+        let mut sink = RriterTermSink::new(None, None);
+        // 15 characters in 10 columns: row 0 soft-wraps into row 1, then a real line break.
+        term.advance(b"abcdefghijklmno\r\nxyz", Instant::now(), &mut sink);
+        term.set_selection(Some((0, 0, 2, 2)));
+        assert_eq!(terminal_selection_text(&term).as_deref(), Some("abcdefghijklmno\nxyz"));
     }
 
     #[test]
